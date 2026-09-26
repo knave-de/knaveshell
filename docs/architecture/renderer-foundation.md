@@ -23,17 +23,22 @@ to add without growing the same module further.
 - Text uses Cosmic Text for system font discovery, shaping, fallback, wrapping,
   and layout; Glyphon supplies the WGPU glyph atlas and draw path. Font and atlas
   state live with the painter. Shaped layout and text-run caches are bounded.
+- `Color` stores sRGB-encoded 8-bit channels. Shape and clear colors are
+  converted to linear light, images use sRGB textures, and Glyphon performs
+  text-color decoding. Wayland chooses a supported sRGB surface format, and the
+  painter rejects non-sRGB targets so output values remain consistent.
 - Rectangular clips are intersected in UI space and enforced with GPU scissor
   rectangles. Rotated clips currently use conservative axis-aligned bounds.
 
 ## Compatibility and limits
 
-`DisplayCommand` variants/fields and `WgpuPainter::new` changed at the Rust
-crate boundary; the renderer, Wayland, and shell workspace consumers were
-updated together. There is no change to the Knave desktop API, shell/Wayland
-protocol, configuration, or compositor behavior. These renderer crates are
-workspace-internal implementation APIs; external Rust consumers would need a
-source update before adopting this revision.
+`DisplayCommand` variants/fields and the fallible, sRGB-only
+`WgpuPainter::new` changed at the Rust crate boundary; the renderer, Wayland,
+and shell workspace consumers were updated together. There is no change to the
+Knave desktop API, shell/Wayland protocol, configuration, or compositor
+behavior. These renderer crates are workspace-internal implementation APIs;
+external Rust consumers would need a source update before adopting this
+revision.
 
 Text currently supports translation and positive uniform scaling. Rotation,
 shear, and non-uniform text scaling return an explicit frame-preparation error;
@@ -49,7 +54,9 @@ projection, ordering, transforms, clips, text transform constraints, image fit,
 shadow geometry, and scissor conversion. A headless WGPU readback test covers
 mixed primitive order, clipping, rounded shape output, affine transforms,
 shadows, and real system-font pixels. The test can dump its small PNG frame by
-setting `KNAVE_RENDERER_TEST_FRAME`.
+setting `KNAVE_RENDERER_TEST_FRAME`. The 1200x820 visual gallery test exercises
+multiple font sizes, shape effects, image fit modes, clipping, and transforms;
+set `KNAVE_RENDERER_GALLERY_FRAME` to save its PNG for review.
 
 The readback test ran through Vulkan on the available Intel integrated GPU. It
 does not prove live Wayland, installed-binary, or direct-session behavior.
