@@ -32,6 +32,7 @@ impl Color {
     }
 }
 
+// Decode sRGB so GPU blending and shader math use linear-light values.
 fn srgb_to_linear(channel: u8) -> f32 {
     let encoded = f32::from(channel) / 255.0;
     if encoded <= 0.04045 {
