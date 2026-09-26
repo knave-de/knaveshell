@@ -7,5 +7,10 @@ description = "wgpu renderer boundary for the Knave shell"
 
 [dependencies]
 bytemuck.workspace = true
+glyphon.workspace = true
 knave-ui.workspace = true
 wgpu.workspace = true
+
+[dev-dependencies]
+png.workspace = true
+pollster.workspace = true

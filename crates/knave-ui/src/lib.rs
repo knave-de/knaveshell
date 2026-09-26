@@ -1,54 +1,22 @@
 //! Renderer-independent primitives for the Knave shell UI.
 
 mod display_list;
+mod geometry;
+mod paint;
 
 use std::sync::Arc;
 
 use knave_desktop_api::{DesktopSnapshot, WindowId, WindowSummary, WorkspaceId};
 
-pub use display_list::{DisplayCommand, DisplayList, RenderCommand, RenderList};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct Color {
-    pub red: u8,
-    pub green: u8,
-    pub blue: u8,
-    pub alpha: u8,
-}
-
-impl Color {
-    pub const BACKGROUND: Self = Self::rgba(21, 29, 40, 255);
-    pub const ACCENT: Self = Self::rgba(93, 173, 226, 255);
-    pub const TEXT: Self = Self::rgba(240, 244, 248, 255);
-
-    pub const fn rgba(red: u8, green: u8, blue: u8, alpha: u8) -> Self {
-        Self {
-            red,
-            green,
-            blue,
-            alpha,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Rect {
-    pub x: f32,
-    pub y: f32,
-    pub width: f32,
-    pub height: f32,
-}
-
-impl Rect {
-    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
-        Self {
-            x,
-            y,
-            width,
-            height,
-        }
-    }
-}
+pub use display_list::{
+    DisplayCommand, DisplayList, DisplayListBuildError, DisplayListBuilder, RenderCommand,
+    RenderList,
+};
+pub use geometry::{Rect, Transform2D};
+pub use paint::{
+    Border, BoxShadow, Color, CornerRadii, ImageFit, ImageStyle, ShapePaint, TextAlign, TextStyle,
+    TextWrap,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiImage {

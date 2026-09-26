@@ -591,6 +591,7 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
         render_list: RenderList::default(),
         scene_dirty: true,
         painter: None,
+        painter_format: None,
         configured: false,
         exit: false,
     };
@@ -631,6 +632,7 @@ struct Runtime {
     scene_dirty: bool,
     width: u32,
     height: u32,
+    painter_format: Option<wgpu::TextureFormat>,
     revision: u64,
     frame_pending: bool,
     configured: bool,
@@ -746,15 +748,17 @@ impl Runtime {
                 multiview_mask: None,
             });
         }
-        if let Some(painter) = &mut self.painter {
-            painter.encode(
+        if let Some(painter) = &mut self.painter
+            && let Err(error) = painter.encode(
                 &self.device,
                 &self.queue,
                 &mut encoder,
                 &view,
                 (self.width, self.height),
                 render_list,
-            );
+            )
+        {
+            eprintln!("knave-shell: renderer failed to prepare frame: {error}");
         }
         self.frame_pending = true;
         self.layer
@@ -1114,7 +1118,10 @@ impl LayerShellHandler for Runtime {
             return;
         };
         self.surface.configure(&self.device, &config);
-        self.painter = Some(WgpuPainter::new(&self.device, config.format));
+        if self.painter_format != Some(config.format) {
+            self.painter = Some(WgpuPainter::new(&self.device, &self.queue, config.format));
+            self.painter_format = Some(config.format);
+        }
         self.scene_dirty = true;
         self.configured = true;
         self.snapshot_worker.request_refresh();

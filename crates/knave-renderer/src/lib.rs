@@ -1,7 +1,10 @@
 //! wgpu-backed rendering boundary for Knave UI scenes.
 
+mod images;
 mod painter;
-pub use painter::WgpuPainter;
+mod shapes;
+mod text;
+pub use painter::{PainterError, WgpuPainter};
 
 use knave_ui::UiScene;
 pub use knave_ui::{DisplayCommand, DisplayList, RenderCommand, RenderList};
@@ -44,7 +47,7 @@ mod tests {
 
         assert_eq!(list.revision, 4);
         assert_eq!(list.commands.len(), 2);
-        assert!(matches!(list.commands[0], DisplayCommand::FillRect { .. }));
+        assert!(matches!(list.commands[0], DisplayCommand::Shape { .. }));
         assert!(matches!(list.commands[1], DisplayCommand::Text { .. }));
     }
 }
