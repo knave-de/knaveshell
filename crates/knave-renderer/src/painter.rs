@@ -706,6 +706,7 @@ mod tests {
     fn text_becomes_bounded_gpu_quads() {
         let list = RenderList {
             revision: 1,
+            clear_color: knave_ui::Color::BACKGROUND,
             commands: vec![RenderCommand::Text {
                 bounds: Rect::new(0.0, 0.0, 100.0, 16.0),
                 color: Color::TEXT,

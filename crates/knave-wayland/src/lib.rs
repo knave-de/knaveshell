@@ -17,8 +17,8 @@ use knave_desktop_api::{
     DesktopClient, DesktopCommand, DesktopQuery, DesktopRequest, DesktopResponse, DesktopSnapshot,
     WorkspaceId, WorkspacePreview,
 };
-use knave_renderer::{RenderCommand, RenderList, WgpuPainter, WgpuRenderer};
-use knave_ui::{Color, MAX_SEARCH_QUERY, UiAction, UiImage, UiScene, WorkspacePreviewImage};
+use knave_renderer::{RenderList, WgpuPainter, WgpuRenderer};
+use knave_ui::{MAX_SEARCH_QUERY, UiAction, UiImage, UiScene, WorkspacePreviewImage};
 use smithay_client_toolkit::reexports::{
     calloop::{EventLoop, channel},
     calloop_wayland_source::WaylandSource,
@@ -118,19 +118,6 @@ impl ShellRole {
                 input.selected,
                 input.previews,
             ),
-        }
-    }
-
-    fn clear_color(self) -> wgpu::Color {
-        let color = match self {
-            Self::Bar => Color::BACKGROUND,
-            Self::Overview => Color::rgba(8, 12, 18, 245),
-        };
-        wgpu::Color {
-            r: f64::from(color.red) / 255.0,
-            g: f64::from(color.green) / 255.0,
-            b: f64::from(color.blue) / 255.0,
-            a: f64::from(color.alpha) / 255.0,
         }
     }
 }
@@ -713,20 +700,12 @@ impl Runtime {
             return;
         }
         let render_list = &self.render_list;
-        let clear_color = render_list
-            .commands
-            .iter()
-            .find_map(|command| match command {
-                RenderCommand::FillRect { color, .. } => Some(*color),
-                RenderCommand::Text { .. } | RenderCommand::Image { .. } => None,
-            })
-            .map(|color| wgpu::Color {
-                r: f64::from(color.red) / 255.0,
-                g: f64::from(color.green) / 255.0,
-                b: f64::from(color.blue) / 255.0,
-                a: f64::from(color.alpha) / 255.0,
-            })
-            .unwrap_or_else(|| self.role.clear_color());
+        let clear_color = wgpu::Color {
+            r: f64::from(render_list.clear_color.red) / 255.0,
+            g: f64::from(render_list.clear_color.green) / 255.0,
+            b: f64::from(render_list.clear_color.blue) / 255.0,
+            a: f64::from(render_list.clear_color.alpha) / 255.0,
+        };
 
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)

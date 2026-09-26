@@ -1,8 +1,12 @@
 //! Renderer-independent primitives for the Knave shell UI.
 
+mod display_list;
+
 use std::sync::Arc;
 
 use knave_desktop_api::{DesktopSnapshot, WindowId, WindowSummary, WorkspaceId};
+
+pub use display_list::{DisplayCommand, DisplayList, RenderCommand, RenderList};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Color {
@@ -128,9 +132,10 @@ pub enum UiNode {
     },
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiScene {
     revision: u64,
+    clear_color: Color,
     nodes: Vec<UiNode>,
     targets: Vec<HitTarget>,
     search_actions: Vec<UiAction>,
@@ -228,6 +233,7 @@ impl UiScene {
     pub fn new(revision: u64) -> Self {
         Self {
             revision,
+            clear_color: Color::BACKGROUND,
             nodes: Vec::new(),
             targets: Vec::new(),
             search_actions: Vec::new(),
@@ -236,6 +242,14 @@ impl UiScene {
 
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub fn clear_color(&self) -> Color {
+        self.clear_color
+    }
+
+    pub fn set_clear_color(&mut self, color: Color) {
+        self.clear_color = color;
     }
 
     pub fn nodes(&self) -> &[UiNode] {
@@ -397,6 +411,7 @@ impl UiScene {
 
     fn overview_background(revision: u64, width: f32, height: f32) -> Self {
         let mut scene = Self::new(revision);
+        scene.set_clear_color(Color::rgba(8, 12, 18, 245));
         scene.push(UiNode::Panel {
             id: NodeId(1),
             bounds: Rect::new(0.0, 0.0, width, height),
@@ -568,6 +583,12 @@ impl UiScene {
     }
 }
 
+impl Default for UiScene {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +603,7 @@ mod tests {
     #[test]
     fn overview_scene_does_not_require_a_gpu() {
         let scene = UiScene::overview(1, 1920.0, 1080.0);
+        assert_eq!(scene.clear_color(), Color::rgba(8, 12, 18, 245));
         assert_eq!(scene.nodes().len(), 3);
         assert_eq!(
             scene.nodes()[0],
