@@ -68,7 +68,7 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
                 clip: None,
             },
             DisplayCommand::Shape {
-                bounds: Rect::new(6.0, 6.0, 4.0, 4.0),
+                bounds: Rect::new(2.0, 2.0, 12.0, 12.0),
                 paint: ShapePaint::fill(Color::rgba(0, 255, 0, 255)),
                 transform: Transform2D::IDENTITY,
                 clip: Some(Rect::new(6.0, 6.0, 2.0, 4.0)),
@@ -223,7 +223,7 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
         "image should draw over the first shape"
     );
     assert_eq!(
-        pixel(7, 7),
+        pixel(6, 8),
         [0, 255, 0, 255],
         "later shape should draw over the image"
     );
