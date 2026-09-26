@@ -344,12 +344,7 @@ fn instance(bounds: Rect, paint: &ShapePaint, transform: Transform2D) -> ShapeIn
 }
 
 fn color_array(color: Color) -> [f32; 4] {
-    [
-        f32::from(color.red) / 255.0,
-        f32::from(color.green) / 255.0,
-        f32::from(color.blue) / 255.0,
-        f32::from(color.alpha) / 255.0,
-    ]
+    color.to_linear_rgba()
 }
 
 fn transform_is_finite(transform: Transform2D) -> bool {

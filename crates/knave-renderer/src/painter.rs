@@ -14,6 +14,7 @@ const MAX_DISPLAY_COMMANDS_PER_FRAME: usize = 8192;
 pub enum PainterError {
     PrepareText(glyphon::PrepareError),
     RenderText(glyphon::RenderError),
+    UnsupportedOutputFormat(wgpu::TextureFormat),
     TooManyCommands(usize),
     TooManyTextRuns,
     UnsupportedTextTransform,
@@ -26,6 +27,10 @@ impl fmt::Display for PainterError {
         match self {
             Self::PrepareText(error) => write!(formatter, "text preparation failed: {error}"),
             Self::RenderText(error) => write!(formatter, "text rendering failed: {error}"),
+            Self::UnsupportedOutputFormat(format) => write!(
+                formatter,
+                "renderer requires an sRGB output format, got {format:?}"
+            ),
             Self::TooManyCommands(count) => write!(
                 formatter,
                 "display list has {count} commands; limit is {MAX_DISPLAY_COMMANDS_PER_FRAME}"
@@ -58,12 +63,20 @@ pub struct WgpuPainter {
 }
 
 impl WgpuPainter {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
-        Self {
+    /// Build GPU passes for an sRGB color attachment.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self, PainterError> {
+        if !format.is_srgb() {
+            return Err(PainterError::UnsupportedOutputFormat(format));
+        }
+        Ok(Self {
             shapes: ShapePass::new(device, format),
             images: ImagePass::new(device, format),
             text: TextPass::new(device, queue, format),
-        }
+        })
     }
 
     pub fn encode(
