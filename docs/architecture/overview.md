@@ -49,7 +49,8 @@ collected after input and frame composition. Applications not opting in keep
 no desktop workers. `Scene::set_focus` and `Key::K` are additive workspace APIs.
 All consuming crates rebuild together at the existing unreleased 0.1.0 version.
 
-The existing 500ms snapshot poll and error backoff remain. Previews refresh on
+Desktop snapshots arrive through an API 1.2 subscription; only disconnected
+clients use retry backoff (250 ms to 5 seconds). Previews refresh on
 snapshot or browsed-workspace changes, not continuously; this intentionally
 retains snapshot semantics. Requests/results are bounded, obsolete preview
 results are ignored, and a full request queue retries after existing work wakes
@@ -97,8 +98,8 @@ Deploy the expanded Villain limits before the shell update. Existing thumbnail
 clients remain compatible. Older Villain builds reject native-size requests
 above their 1280x720 limit, so the overview reports unavailable previews rather
 than silently falling back to blurred thumbnails. Roll back the shell first.
-No desktop schema, socket, subscription, configuration, or polling change is
-part of this update. Both consumers remain at unreleased version 0.1.0.
+The native-resolution change did not alter desktop transport; the later
+subscription change is described in the desktop-state-subscriptions document. Both consumers remain at unreleased version 0.1.0.
 
 Native-resolution verification: live isolated GPU captures returned exact
 1920x1080 and 3840x2160 PNGs. A simple 64-pixel client fixture took approximately

@@ -612,6 +612,7 @@ mod tests {
                     minimized: false,
                     floating: false,
                     fullscreen: false,
+                    maximized: false,
                 },
                 WindowSummary {
                     id: WindowId(42),
@@ -622,6 +623,7 @@ mod tests {
                     minimized: true,
                     floating: false,
                     fullscreen: false,
+                    maximized: false,
                 },
             ],
         };
@@ -704,6 +706,7 @@ mod tests {
                 minimized: true,
                 floating: false,
                 fullscreen: false,
+                maximized: false,
             }],
         };
         let scene = UiScene::overview_with_snapshot_and_search(

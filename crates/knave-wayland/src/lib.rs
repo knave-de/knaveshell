@@ -4,10 +4,12 @@ mod application;
 mod clipboard;
 mod cursor;
 mod ime;
+mod snapshot;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, run_application,
 };
 use knave_ui::toolkit::{Input, KeyModifiers};
+use snapshot::SnapshotWorker;
 
 use std::{
     io::Cursor,
@@ -18,7 +20,6 @@ use std::{
         mpsc::{self, Receiver, SyncSender},
     },
     thread::{self, JoinHandle},
-    time::Duration,
 };
 
 use base64::Engine;
@@ -166,8 +167,6 @@ pub enum WaylandError {
     Dispatch(String),
 }
 
-const SNAPSHOT_REFRESH: Duration = Duration::from_millis(500);
-const SNAPSHOT_MAX_BACKOFF: Duration = Duration::from_secs(5);
 const MAX_PREVIEWS: usize = 3;
 const MAX_PREVIEW_PIXELS: u64 = 36 * 1024 * 1024;
 const MAX_PREVIEW_BASE64_LENGTH: usize = 192 * 1024 * 1024;
@@ -177,87 +176,6 @@ enum RuntimeWake {
 }
 
 type WakeSender = channel::SyncSender<RuntimeWake>;
-
-enum SnapshotCommand {
-    Refresh,
-}
-
-struct SnapshotWorker {
-    commands: Option<SyncSender<SnapshotCommand>>,
-    updates: Arc<Mutex<Option<Result<DesktopSnapshot, ()>>>>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl SnapshotWorker {
-    fn start(wake: WakeSender) -> Self {
-        let (commands, command_rx) = mpsc::sync_channel(1);
-        let updates = Arc::new(Mutex::new(None));
-        let update_slot = Arc::clone(&updates);
-        let thread = thread::spawn(move || {
-            let mut client = None;
-            let mut backoff = SNAPSHOT_REFRESH;
-            let mut last_snapshot = None;
-            let mut unavailable = false;
-            loop {
-                match query_snapshot(&mut client) {
-                    Ok(snapshot) => {
-                        backoff = SNAPSHOT_REFRESH;
-                        // Older providers use an allocation counter as generation; compare content too.
-                        if unavailable || last_snapshot.as_ref() != Some(&snapshot) {
-                            last_snapshot = Some(snapshot.clone());
-                            if let Ok(mut slot) = update_slot.lock() {
-                                *slot = Some(Ok(snapshot));
-                            }
-                            let _ = wake.try_send(RuntimeWake::Redraw);
-                        }
-                        unavailable = false;
-                    }
-                    Err(()) => {
-                        if !unavailable {
-                            if let Ok(mut slot) = update_slot.lock() {
-                                *slot = Some(Err(()));
-                            }
-                            let _ = wake.try_send(RuntimeWake::Redraw);
-                        }
-                        unavailable = true;
-                        client = None;
-                        backoff = backoff.saturating_mul(2).min(SNAPSHOT_MAX_BACKOFF);
-                    }
-                }
-                match command_rx.recv_timeout(backoff) {
-                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                    Ok(SnapshotCommand::Refresh) | Err(mpsc::RecvTimeoutError::Timeout) => {}
-                }
-            }
-        });
-        Self {
-            commands: Some(commands),
-            updates,
-            thread: Some(thread),
-        }
-    }
-
-    fn request_refresh(&self) {
-        let _ = self
-            .commands
-            .as_ref()
-            .unwrap()
-            .try_send(SnapshotCommand::Refresh);
-    }
-
-    fn latest(&self) -> Option<Result<DesktopSnapshot, ()>> {
-        self.updates.lock().ok()?.take()
-    }
-}
-
-impl Drop for SnapshotWorker {
-    fn drop(&mut self) {
-        self.commands.take();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
-}
 
 #[derive(Debug)]
 struct PreviewUpdate {
@@ -528,28 +446,6 @@ fn dispatch_action(
     {
         DesktopResponse::Ok => Ok(()),
         _ => Err("Unexpected desktop action response".into()),
-    }
-}
-
-fn query_snapshot(client: &mut Option<DesktopClient>) -> Result<DesktopSnapshot, ()> {
-    if client.is_none() {
-        *client = Some(DesktopClient::connect().map_err(|_| ())?);
-    }
-    let response = client
-        .as_mut()
-        .ok_or(())?
-        .request(&DesktopRequest::Query(DesktopQuery::Snapshot))
-        .map_err(|_| ())?;
-    match response {
-        DesktopResponse::Snapshot(snapshot) => Ok(snapshot),
-        DesktopResponse::Ok
-        | DesktopResponse::Windows(_)
-        | DesktopResponse::Workspaces(_)
-        | DesktopResponse::ActiveWindow(_)
-        | DesktopResponse::ActiveWorkspace(_)
-        | DesktopResponse::WorkspacePreview(_)
-        | DesktopResponse::Version { .. }
-        | DesktopResponse::Error(_) => Err(()),
     }
 }
 
@@ -836,14 +732,17 @@ impl Runtime {
                     if let Some(app) = &mut self.app {
                         app.desktop_snapshot(&snapshot);
                     }
-                    if self.snapshot.as_ref() != Some(&snapshot) {
-                        self.preview_refresh = true;
-                    }
+                    // Every frame is a change or reconnect initialization. A restarted
+                    // compositor may reuse identical metadata with different pixels.
+                    self.preview_refresh = true;
                     self.snapshot = Some(snapshot);
                 }
-                Err(()) => {
+                Err(error) => {
+                    self.snapshot = None;
+                    self.preview_refresh = true;
                     if let Some(app) = &mut self.app {
                         app.desktop_unavailable();
+                        app.host_error(&error);
                     }
                 }
             }
@@ -1506,9 +1405,6 @@ impl LayerShellHandler for Runtime {
         }
         self.scene_dirty = true;
         self.configured = true;
-        if let Some(worker) = &self.snapshot_worker {
-            worker.request_refresh();
-        }
         self.draw(qh);
     }
 }
