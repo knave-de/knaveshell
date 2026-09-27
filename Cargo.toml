@@ -14,6 +14,7 @@ license = "MIT"
 
 [workspace.dependencies]
 bytemuck = { version = "1", features = ["derive"] }
+glyphon = "0.12.0"
 knave-renderer = { path = "crates/knave-renderer" }
 knave-wayland = { path = "crates/knave-wayland" }
 knave-ui = { path = "crates/knave-ui" }

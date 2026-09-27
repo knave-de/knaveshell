@@ -1,66 +1,13 @@
 //! wgpu-backed rendering boundary for Knave UI scenes.
 
+mod images;
 mod painter;
-pub use painter::WgpuPainter;
+mod shapes;
+mod text;
+pub use painter::{PainterError, WgpuPainter};
 
-use knave_ui::{Color, Rect, UiImage, UiNode, UiScene};
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum RenderCommand {
-    FillRect {
-        bounds: Rect,
-        color: Color,
-    },
-    Text {
-        bounds: Rect,
-        color: Color,
-        text: String,
-    },
-    Image {
-        bounds: Rect,
-        image: UiImage,
-    },
-}
-
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct RenderList {
-    pub revision: u64,
-    pub commands: Vec<RenderCommand>,
-}
-
-impl RenderList {
-    pub fn from_scene(scene: &UiScene) -> Self {
-        let commands = scene
-            .nodes()
-            .iter()
-            .map(|node| match node {
-                UiNode::Panel { bounds, color, .. } => RenderCommand::FillRect {
-                    bounds: *bounds,
-                    color: *color,
-                },
-                UiNode::Label {
-                    bounds,
-                    color,
-                    text,
-                    ..
-                } => RenderCommand::Text {
-                    bounds: *bounds,
-                    color: *color,
-                    text: text.clone(),
-                },
-                UiNode::Image { bounds, image, .. } => RenderCommand::Image {
-                    bounds: *bounds,
-                    image: image.clone(),
-                },
-            })
-            .collect();
-
-        Self {
-            revision: scene.revision(),
-            commands,
-        }
-    }
-}
+use knave_ui::UiScene;
+pub use knave_ui::{DisplayCommand, DisplayList, RenderCommand, RenderList};
 
 pub struct WgpuRenderer {
     instance: wgpu::Instance,
@@ -100,7 +47,7 @@ mod tests {
 
         assert_eq!(list.revision, 4);
         assert_eq!(list.commands.len(), 2);
-        assert!(matches!(list.commands[0], RenderCommand::FillRect { .. }));
-        assert!(matches!(list.commands[1], RenderCommand::Text { .. }));
+        assert!(matches!(list.commands[0], DisplayCommand::Shape { .. }));
+        assert!(matches!(list.commands[1], DisplayCommand::Text { .. }));
     }
 }
