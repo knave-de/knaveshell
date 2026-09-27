@@ -85,6 +85,24 @@ padding/radius values and `Slider::new` calls remain supported. No protocol or
 configuration migration is involved. Revert the spacing/control change as one
 slice to roll back; it has no persisted state.
 
+### Text wrapping
+
+`Element::text_wrap(TextWrap)` configures plain text, rich paragraphs and control
+labels; `Scene::set_style` can change `style.text.wrap` at runtime. `Word` wraps
+at word boundaries, `WordOrGlyph` also breaks long unbroken words, and `None`
+disables soft wrapping. Explicit newlines remain line breaks. Use a constrained
+width with `Length::Auto` height to grow to the measured text; fixed heights
+clip overflow. Padding and checkbox/toggle indicators reduce the wrap width.
+Rich spans share the paragraph's wrapping policy.
+
+Buttons, selectable labels, drag labels, dropdown headings and menu headings
+remain single-line by default and opt into wrapping. Text/paragraph defaults
+remain `Word`. Text inputs and popup menu rows remain single-line. Dropdown
+selection remeasures wrapped headings. Wrapping uses the existing text engine
+and invalidation paths, with no new background activity. This is an additive
+workspace API; no protocol, configuration or persisted-data migration is needed.
+Reverting this slice restores the previous label behavior.
+
 ## Rendering and resource behavior
 
 Measurement, placement and paint invalidation are separate. Hover and slider

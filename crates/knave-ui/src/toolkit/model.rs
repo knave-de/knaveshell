@@ -355,6 +355,31 @@ impl Widget {
             _ => "",
         }
     }
+    pub(crate) fn display_label(&self) -> &str {
+        if let Self::Dropdown {
+            items, selected, ..
+        } = self
+        {
+            items
+                .iter()
+                .find_map(|item| match item {
+                    MenuItem::Option { id, label, .. } if Some(*id) == *selected => {
+                        Some(label.as_str())
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| self.label())
+        } else {
+            self.label()
+        }
+    }
+    pub(crate) fn label_reserve(&self) -> f32 {
+        match self {
+            Self::Checkbox { .. } => 26.0,
+            Self::Toggle { .. } => 40.0,
+            _ => 0.0,
+        }
+    }
     pub(crate) fn menu(&self) -> Option<&[MenuItem]> {
         match self {
             Self::Dropdown { items, .. } | Self::Menu { items, .. } => Some(items),
@@ -399,17 +424,34 @@ pub struct Element {
 }
 impl Element {
     pub fn new(id: u64, widget: Widget) -> Self {
+        let mut style = Style::default();
+        if matches!(
+            widget,
+            Widget::Button(_)
+                | Widget::Draggable(_)
+                | Widget::Selectable { .. }
+                | Widget::Dropdown { .. }
+                | Widget::Menu { .. }
+        ) {
+            style.text.wrap = crate::TextWrap::None;
+        }
         Self {
             id: ElementId(id),
             widget,
             layout: Layout::default(),
-            style: Style::default(),
+            style,
             enabled: true,
             visible: true,
             children: Vec::new(),
             tooltip: None,
             cursor: None,
         }
+    }
+    /// Wrapping for text, paragraphs and control labels. Use Auto height to grow with the text.
+    /// Text inputs and popup menu rows remain single-line.
+    pub fn text_wrap(mut self, wrap: crate::TextWrap) -> Self {
+        self.style.text.wrap = wrap;
+        self
     }
     pub fn cursor(mut self, cursor: CursorShape) -> Self {
         self.cursor = Some(cursor);

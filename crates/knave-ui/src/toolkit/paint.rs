@@ -198,23 +198,7 @@ impl Scene {
                     style.text.clone(),
                 );
             }
-            Widget::Dropdown {
-                label: placeholder,
-                items,
-                selected,
-            } => {
-                label = Some(
-                    items
-                        .iter()
-                        .find_map(|item| match item {
-                            MenuItem::Option { id, label, .. } if Some(*id) == *selected => {
-                                Some(label.clone())
-                            }
-                            _ => None,
-                        })
-                        .unwrap_or_else(|| placeholder.clone()),
-                );
-            }
+            Widget::Dropdown { .. } => label = Some(e.widget.display_label().to_owned()),
             Widget::Menu { label: value, .. } => label = Some(value.clone()),
             Widget::Slider(slider) => {
                 let vertical = slider.orientation == Orientation::Vertical;
@@ -355,9 +339,7 @@ impl Scene {
             _ => {}
         }
         if let Some(label) = label {
-            let mut ts = style.text;
-            ts.wrap = TextWrap::None;
-            text_cmd(&mut self.list, text_area, clip, label, ts);
+            text_cmd(&mut self.list, text_area, clip, label, style.text);
         }
         if self.inspect {
             let mut paint = ShapePaint::fill(Color::rgba(0, 0, 0, 0));

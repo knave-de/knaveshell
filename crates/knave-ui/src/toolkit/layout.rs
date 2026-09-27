@@ -84,6 +84,29 @@ impl Scene {
                 self.stats.measured_texts += 1;
                 [160.0, 36.0]
             }
+            widget
+                if widget.focusable()
+                    && self.nodes[i].element.style.text.wrap != crate::TextWrap::None
+                    && !matches!(widget, Widget::Slider(_)) =>
+            {
+                let value = widget.display_label().to_owned();
+                let reserve = widget.label_reserve();
+                let area = label_content(Rect::new(0.0, 0.0, available, 0.0), layout);
+                let style = self.nodes[i].element.style.text.clone();
+                self.nodes[i].text = text.measure(&value, &style, (area.width - reserve).max(1.0));
+                self.stats.measured_texts += 1;
+                let size = self.nodes[i].text.size;
+                // Uniform/explicit padding is added below; default label insets are horizontal only.
+                let implicit_padding = if layout.padding_edges.is_none() && layout.padding == 0.0 {
+                    20.0
+                } else {
+                    0.0
+                };
+                [
+                    (size[0] + reserve + implicit_padding).max(120.0),
+                    size[1].max(36.0),
+                ]
+            }
             Widget::Separator => [1.0, 1.0],
             Widget::Image(..) => [64.0, 64.0],
             Widget::Panel | Widget::Scroll | Widget::Popup { .. } => [0.0, 0.0],

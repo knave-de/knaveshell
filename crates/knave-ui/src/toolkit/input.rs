@@ -813,6 +813,9 @@ impl Scene {
         self.menu = None;
         self.key_pressed = None;
         self.paint_dirty = true;
+        if self.nodes[i].element.style.text.wrap != crate::TextWrap::None {
+            self.invalidate_layout();
+        }
         Some(Action::Selected(owner, selected))
     }
     fn navigate_menu(&mut self, key: Key) {
