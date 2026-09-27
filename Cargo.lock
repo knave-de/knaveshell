@@ -630,9 +630,11 @@ dependencies = [
  "knave-ui",
  "png",
  "pollster",
+ "rustix",
  "smithay-client-toolkit",
  "thiserror",
  "wayland-client",
+ "wayland-protocols",
  "wgpu",
 ]
 

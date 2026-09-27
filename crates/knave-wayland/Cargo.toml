@@ -16,3 +16,5 @@ smithay-client-toolkit.workspace = true
 thiserror.workspace = true
 wayland-client.workspace = true
 wgpu.workspace = true
+rustix = { version = "1", features = ["fs"] }
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
