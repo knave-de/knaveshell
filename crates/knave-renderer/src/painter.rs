@@ -29,7 +29,7 @@ impl fmt::Display for PainterError {
             Self::RenderText(error) => write!(formatter, "text rendering failed: {error}"),
             Self::UnsupportedOutputFormat(format) => write!(
                 formatter,
-                "renderer requires an sRGB output format, got {format:?}"
+                "renderer requires a renderable sRGB output format, got {format:?}"
             ),
             Self::TooManyCommands(count) => write!(
                 formatter,
@@ -69,7 +69,7 @@ impl WgpuPainter {
         queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
     ) -> Result<Self, PainterError> {
-        if !format.is_srgb() {
+        if !supports_output_format(format) {
             return Err(PainterError::UnsupportedOutputFormat(format));
         }
         Ok(Self {
@@ -213,6 +213,13 @@ impl WgpuPainter {
     }
 }
 
+fn supports_output_format(format: wgpu::TextureFormat) -> bool {
+    matches!(
+        format,
+        wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
+    )
+}
+
 enum PreparedDraw {
     Shape {
         instance_index: usize,
@@ -255,6 +262,19 @@ mod tests {
             scissor_rect(Some(Rect::new(12.0, 0.0, 2.0, 2.0)), (10, 10)),
             None
         );
+    }
+
+    #[test]
+    fn output_format_must_be_a_renderable_srgb_attachment() {
+        assert!(supports_output_format(wgpu::TextureFormat::Rgba8UnormSrgb));
+        assert!(supports_output_format(wgpu::TextureFormat::Bgra8UnormSrgb));
+        assert!(!supports_output_format(
+            wgpu::TextureFormat::Bc1RgbaUnormSrgb
+        ));
+        assert!(!supports_output_format(
+            wgpu::TextureFormat::Etc2Rgb8UnormSrgb
+        ));
+        assert!(!supports_output_format(wgpu::TextureFormat::Bgra8Unorm));
     }
 
     #[test]
