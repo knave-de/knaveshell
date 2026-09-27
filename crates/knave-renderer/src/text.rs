@@ -158,10 +158,13 @@ impl TextPass {
             } else {
                 // Oversized layouts are shaped for this frame without entering the bounded cache.
                 let buffer = Arc::new(create_buffer(&mut self.font_system, item));
+                let top = area.top
+                    + single_line_vertical_offset(&buffer, sane_dimension(item.bounds.height))
+                        * area.scale;
                 prepared.push(PreparedArea {
                     buffer,
                     left: area.left,
-                    top: area.top,
+                    top,
                     scale: area.scale,
                     bounds: area.clip,
                     color: glyphon::Color::rgba(
@@ -173,10 +176,13 @@ impl TextPass {
                 });
                 continue;
             };
+            let top = area.top
+                + single_line_vertical_offset(&buffer_key, sane_dimension(item.bounds.height))
+                    * area.scale;
             prepared.push(PreparedArea {
                 buffer: buffer_key,
                 left: area.left,
-                top: area.top,
+                top,
                 scale: area.scale,
                 bounds: area.clip,
                 color: glyphon::Color::rgba(
@@ -291,6 +297,23 @@ struct PreparedGeometry {
     top: f32,
     scale: f32,
     clip: TextBounds,
+}
+
+fn single_line_vertical_offset(buffer: &Buffer, bounds_height: f32) -> f32 {
+    vertical_center_offset(
+        buffer.layout_runs().map(|run| run.line_height),
+        bounds_height,
+    )
+}
+
+fn vertical_center_offset(mut line_heights: impl Iterator<Item = f32>, bounds_height: f32) -> f32 {
+    let Some(line_height) = line_heights.next() else {
+        return 0.0;
+    };
+    if line_heights.next().is_some() {
+        return 0.0;
+    }
+    (bounds_height - line_height).max(0.0) * 0.5
 }
 
 fn prepared_area(
@@ -440,5 +463,12 @@ mod tests {
             prepared_area(&rotated, 100, 100),
             Err(TextPassError::UnsupportedTransform)
         ));
+    }
+
+    #[test]
+    fn single_line_text_is_centered_in_taller_bounds() {
+        assert_eq!(vertical_center_offset([18.0].into_iter(), 36.0), 9.0);
+        assert_eq!(vertical_center_offset([42.0].into_iter(), 36.0), 0.0);
+        assert_eq!(vertical_center_offset([18.0, 18.0].into_iter(), 36.0), 0.0);
     }
 }

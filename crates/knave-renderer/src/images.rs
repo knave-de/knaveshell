@@ -96,6 +96,36 @@ struct ImageKey {
     height: u32,
 }
 
+impl ImageKey {
+    fn new(image: &UiImage) -> Self {
+        Self {
+            identity: image.cache_key(),
+            width: image.width(),
+            height: image.height(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct FrameImageBudget {
+    charged: std::collections::HashSet<ImageKey>,
+    bytes: usize,
+}
+
+impl FrameImageBudget {
+    fn can_charge(&self, key: ImageKey, bytes: usize) -> bool {
+        bytes <= MAX_IMAGE_FRAME_BYTES
+            && (self.charged.contains(&key)
+                || self.bytes.saturating_add(bytes) <= MAX_IMAGE_FRAME_BYTES)
+    }
+
+    fn charge(&mut self, key: ImageKey, bytes: usize) {
+        if self.charged.insert(key) {
+            self.bytes += bytes;
+        }
+    }
+}
+
 struct CachedImage {
     _source: UiImage,
     _texture: wgpu::Texture,
@@ -256,7 +286,8 @@ impl ImagePass {
         self.bind_groups.clear();
         self.resources.clear();
         let mut instances = Vec::new();
-        let mut active_image_bytes = 0usize;
+        let mut frame_budget = FrameImageBudget::default();
+        let mut frame_resources = HashMap::<ImageKey, Arc<CachedImage>>::new();
         for (command_index, command) in commands.iter().enumerate() {
             let DisplayCommand::Image {
                 bounds,
@@ -268,6 +299,7 @@ impl ImagePass {
             else {
                 continue;
             };
+            let key = ImageKey::new(image);
             if !bounds.is_finite_positive()
                 || !transform_is_finite(*transform)
                 || !transform
@@ -282,15 +314,19 @@ impl ImagePass {
             else {
                 continue;
             };
-            if image_bytes > MAX_IMAGE_FRAME_BYTES
-                || active_image_bytes.saturating_add(image_bytes) > MAX_IMAGE_FRAME_BYTES
-            {
+            if !frame_budget.can_charge(key, image_bytes) {
                 continue;
             }
-            let Some(resource) = self.cache.get_or_upload(device, queue, image) else {
-                continue;
+            let resource = if let Some(resource) = frame_resources.get(&key) {
+                Arc::clone(resource)
+            } else {
+                let Some(resource) = self.cache.get_or_upload(device, queue, image) else {
+                    continue;
+                };
+                frame_budget.charge(key, image_bytes);
+                frame_resources.insert(key, Arc::clone(&resource));
+                resource
             };
-            active_image_bytes += image_bytes;
             let (bounds, uv) = fitted_geometry(*bounds, image, *style);
             if !bounds.is_finite_positive()
                 || !transform.transform_rect_bounds(bounds).is_finite_positive()
@@ -377,11 +413,7 @@ impl ImageCache {
         image: &UiImage,
     ) -> Option<Arc<CachedImage>> {
         self.clock = self.clock.wrapping_add(1);
-        let key = ImageKey {
-            identity: image.cache_key(),
-            width: image.width(),
-            height: image.height(),
-        };
+        let key = ImageKey::new(image);
         if let Some(entry) = self.entries.get_mut(&key) {
             entry.last_used = self.clock;
             return Some(Arc::clone(&entry.image));
@@ -568,5 +600,29 @@ mod tests {
         );
         assert_eq!(bounds, Rect::new(0.0, 0.0, 100.0, 100.0));
         assert_eq!(uv, [0.25, 0.0, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn repeated_image_resources_are_charged_once_per_frame() {
+        let image = ImageKey {
+            identity: 1,
+            width: 2048,
+            height: 2048,
+        };
+        let other = ImageKey {
+            identity: 2,
+            ..image
+        };
+        let image_bytes = 16 * 1024 * 1024;
+        let mut budget = FrameImageBudget::default();
+
+        assert!(budget.can_charge(image, image_bytes));
+        budget.charge(image, image_bytes);
+        for _ in 0..5 {
+            assert!(budget.can_charge(image, image_bytes));
+            budget.charge(image, image_bytes);
+        }
+        assert_eq!(budget.bytes, image_bytes);
+        assert!(!budget.can_charge(other, MAX_IMAGE_FRAME_BYTES));
     }
 }
