@@ -423,3 +423,95 @@ fn nonmodal_outside_press_dismisses_without_activating_background() {
     );
     assert!(s.event(Input::PointerUp([20.0, 20.0])).action.is_none());
 }
+
+#[test]
+fn cursors_follow_controls_capture_and_disabled_state() {
+    let mut vertical = Slider::new(0.0, 1.0, 0.5, None).unwrap();
+    vertical.orientation = Orientation::Vertical;
+    let mut s = scene(vec![
+        leaf(1, Widget::Button("Button".into())),
+        leaf(2, Widget::TextInput(TextEdit::new("Text").unwrap())),
+        leaf(3, Widget::Draggable("Drag".into())),
+        leaf(4, Widget::Slider(Slider::new(0.0, 1.0, 0.5, None).unwrap())),
+        leaf(5, Widget::Slider(vertical)),
+    ]);
+    assert_eq!(s.cursor(), CursorShape::Default);
+    for (id, expected) in [
+        (1, CursorShape::Pointer),
+        (2, CursorShape::Text),
+        (3, CursorShape::Grab),
+        (4, CursorShape::EwResize),
+        (5, CursorShape::NsResize),
+    ] {
+        let b = s.bounds(ElementId(id)).unwrap();
+        s.event(Input::PointerMove([b.x + 20.0, b.y + 20.0]));
+        assert_eq!(s.cursor(), expected);
+    }
+    s.event(Input::PointerDown([20.0, 116.0]));
+    assert_eq!(s.cursor(), CursorShape::Grabbing);
+    s.event(Input::PointerMove([900.0, 900.0]));
+    assert_eq!(s.cursor(), CursorShape::Grabbing);
+    s.event(Input::Cancel);
+    assert_eq!(s.cursor(), CursorShape::Default);
+    s.event(Input::PointerMove([20.0, 20.0]));
+    s.set_enabled(ElementId(1), false).unwrap();
+    assert_eq!(s.cursor(), CursorShape::NotAllowed);
+    s.event(Input::PointerLeave);
+    assert_eq!(s.cursor(), CursorShape::Default);
+}
+
+#[test]
+fn cursor_overrides_and_stationary_geometry_changes_respect_hit_targets() {
+    let mut s = scene(vec![
+        leaf(1, Widget::Button("Card".into()))
+            .children(vec![leaf(2, Widget::Text("Child".into()))]),
+        leaf(3, Widget::Panel).cursor(CursorShape::Crosshair),
+    ]);
+    s.event(Input::PointerMove([20.0, 20.0]));
+    assert_eq!(s.cursor(), CursorShape::Pointer);
+    s.set_cursor(ElementId(1), Some(CursorShape::Progress))
+        .unwrap();
+    assert_eq!(s.cursor(), CursorShape::Progress);
+    s.set_visible(ElementId(1), false).unwrap();
+    s.layout([400.0, 400.0], &mut Metrics);
+    assert_eq!(s.cursor(), CursorShape::Crosshair);
+    s.set_cursor(ElementId(3), Some(CursorShape::Hidden))
+        .unwrap();
+    assert_eq!(s.cursor(), CursorShape::Hidden);
+    s.set_cursor(ElementId(3), None).unwrap();
+    assert_eq!(s.cursor(), CursorShape::Default);
+}
+
+#[test]
+fn menu_cursor_skips_separators_and_does_not_expose_background_actions() {
+    let mut s = scene(vec![
+        leaf(
+            1,
+            Widget::Dropdown {
+                label: "Menu".into(),
+                selected: None,
+                items: vec![
+                    MenuItem::option(10, "First"),
+                    MenuItem::Separator,
+                    MenuItem::Option {
+                        id: 20,
+                        label: "Disabled".into(),
+                        enabled: false,
+                    },
+                ],
+            },
+        ),
+        leaf(2, Widget::Button("Behind".into())),
+    ]);
+    click(&mut s, [20.0, 20.0]);
+    // The menu starts immediately below the 40px trigger and has 32/10/32px rows.
+    for (y, expected) in [
+        (50.0, CursorShape::Pointer),
+        (77.0, CursorShape::Default),
+        (95.0, CursorShape::NotAllowed),
+        (140.0, CursorShape::Default),
+    ] {
+        s.event(Input::PointerMove([20.0, y]));
+        assert_eq!(s.cursor(), expected);
+    }
+}

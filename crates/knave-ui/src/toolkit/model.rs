@@ -244,6 +244,27 @@ impl Widget {
     }
 }
 
+/// Semantic pointer appearance; the platform host supplies the cursor image.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CursorShape {
+    #[default]
+    Default,
+    Pointer,
+    Text,
+    Grab,
+    Grabbing,
+    Move,
+    EwResize,
+    NsResize,
+    NwseResize,
+    NeswResize,
+    Crosshair,
+    Wait,
+    Progress,
+    NotAllowed,
+    Hidden,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Element {
     pub id: ElementId,
@@ -254,6 +275,8 @@ pub struct Element {
     pub visible: bool,
     pub children: Vec<Element>,
     pub tooltip: Option<String>,
+    /// None selects the widget default; explicit shapes also apply to its passive children.
+    pub cursor: Option<CursorShape>,
 }
 impl Element {
     pub fn new(id: u64, widget: Widget) -> Self {
@@ -266,7 +289,12 @@ impl Element {
             visible: true,
             children: Vec::new(),
             tooltip: None,
+            cursor: None,
         }
+    }
+    pub fn cursor(mut self, cursor: CursorShape) -> Self {
+        self.cursor = Some(cursor);
+        self
     }
     pub fn children(mut self, children: Vec<Self>) -> Self {
         self.children = children;

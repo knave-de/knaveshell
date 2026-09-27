@@ -90,6 +90,7 @@ impl Scene {
             Input::PointerDown(p) => self.press(p),
             Input::PointerUp(p) => self.release(p),
             Input::PointerLeave => {
+                self.pointer_inside = false;
                 if self.hover.take().is_some() {
                     self.paint_dirty = true;
                 }
@@ -190,7 +191,7 @@ impl Scene {
             action,
         }
     }
-    fn top_node(&self, p: [f32; 2]) -> Option<usize> {
+    pub(super) fn top_node(&self, p: [f32; 2]) -> Option<usize> {
         let scope = self.modal_root();
         self.order.iter().rev().copied().find(|i| {
             let n = &self.nodes[*i];
@@ -225,6 +226,7 @@ impl Scene {
             return None;
         }
         self.pointer = p;
+        self.pointer_inside = true;
         if let Some(menu) = &self.menu
             && contains(menu.bounds, p)
         {
@@ -274,6 +276,7 @@ impl Scene {
             return None;
         }
         self.pointer = p;
+        self.pointer_inside = true;
         if let Some(menu) = &self.menu {
             if contains(menu.bounds, p) {
                 // Menu activation is deferred to release on the same selectable row.

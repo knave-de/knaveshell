@@ -60,6 +60,11 @@ pub enum HostRequest {
 }
 
 pub trait Application {
+    /// Queried after input and layout. Existing applications receive a visible arrow.
+    fn cursor(&self) -> knave_ui::toolkit::CursorShape {
+        knave_ui::toolkit::CursorShape::Default
+    }
+
     fn text_input(&self) -> Option<knave_ui::toolkit::TextInputState> {
         None
     }

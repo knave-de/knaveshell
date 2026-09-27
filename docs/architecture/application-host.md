@@ -22,6 +22,22 @@ surface on the compositor-selected output. Per-output hosts, fractional-scale
 protocol support, native popup surfaces and concurrent seats need a later
 host extension; they are not simulated by the scene toolkit.
 
+## Pointer cursors
+
+The host owns a themed pointer and establishes its cursor on every pointer
+entry. `Application::cursor` defaults to a visible arrow; scene applications
+return `Scene::cursor()`. Standard shape requests use the compositor's cursor
+shape protocol when present. Otherwise SCTK loads cursor images from the
+system Xcursor theme, including its scale and hotspot. Missing shapes report an
+error and fall back to the theme's arrow. The fallback uses the first theme
+frame; animation of client-supplied cursor images is not implemented.
+
+Cursor updates are coalesced until the shape, entry serial or cursor-surface
+scale changes. They add no timer, thread or continuous redraw. Pointer loss
+drops the pointer, shape device, cursor surface and associated theme resources.
+Cursor-surface scale events are kept separate from application buffer scaling.
+The existing bar/overview host also establishes arrow/hand cursors.
+
 ## Clipboard and text input
 
 Applications return `HostRequest::Copy`/`Paste` and expose the active
@@ -40,7 +56,8 @@ input-method session still need dedicated verification.
 ## Compatibility and rollout
 
 This is an additive workspace-internal host API at unreleased version 0.1.0;
-`WaylandError::InvalidOptions` is an additional exhaustive enum variant.
+`WaylandError::InvalidOptions` and `WaylandError::Shm` are additional exhaustive
+enum variants. The cursor fallback binds the core `wl_shm` global.
 Consumers of the new host rebuild with the same source revision. Existing
 `run(ShellRole)` entry points, role namespaces, layer contracts and desktop IPC
 payloads remain compatible. No settings or persistent state are migrated.
@@ -57,3 +74,10 @@ five-second idle sample it held 3 threads, 67 FDs and about 212 MiB RSS with no
 CPU-tick or context-switch increase. This is a short baseline, not a long-run
 leak test. Clipboard interoperability, real IME composition, output hotplug,
 installed binaries and direct-TTY behavior are not established by that sample.
+
+Cursor regressions cover entry/leave, shape changes, capture, overrides, disabled
+controls and 10,000 repeated motions without duplicate requests. A live
+Hyprland trace confirmed pointer entry followed by native arrow/hand requests.
+The cursor-image fallback and scaled-output appearance have not been live
+verified. The brief run settled at three threads and 67 FDs, matching the prior
+host baseline; this does not establish long-run resource behavior.

@@ -2,6 +2,7 @@
 
 mod application;
 mod clipboard;
+mod cursor;
 mod ime;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, run_application,
@@ -40,7 +41,9 @@ use smithay_client_toolkit::{
     seat::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Modifiers, RawModifiers},
-        pointer::{BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{
+            BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+        },
     },
     shell::{
         WaylandSurface,
@@ -49,6 +52,7 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
+    shm::{Shm, ShmHandler},
 };
 use wayland_client::{
     Connection, Proxy, QueueHandle,
@@ -148,6 +152,8 @@ pub enum WaylandError {
     Globals(String),
     #[error("wl_compositor is unavailable: {0}")]
     Compositor(String),
+    #[error("wl_shm is unavailable: {0}")]
+    Shm(String),
     #[error("wlr-layer-shell is unavailable: {0}")]
     LayerShell(String),
     #[error("no compatible GPU adapter was found: {0}")]
@@ -522,6 +528,8 @@ fn run_internal(
 
     let compositor = CompositorState::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::Compositor(error.to_string()))?;
+    let shm =
+        Shm::bind(&globals, &queue_handle).map_err(|error| WaylandError::Shm(error.to_string()))?;
     let layer_shell = LayerShell::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::LayerShell(error.to_string()))?;
 
@@ -616,6 +624,10 @@ fn run_internal(
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
     let mut state = Runtime {
         _wake_sender: wake_sender.clone(),
+        connection: connection.clone(),
+        compositor,
+        shm,
+        cursor: cursor::CursorState::default(),
         clipboard: clipboard::Clipboard::new(clipboard_manager),
         ime: ime::Ime::new(ime_manager),
         loop_handle: event_loop.handle(),
@@ -671,6 +683,10 @@ fn run_internal(
 struct Runtime {
     // Keep the wake source alive even when no desktop workers are needed.
     _wake_sender: WakeSender,
+    connection: Connection,
+    compositor: CompositorState,
+    shm: Shm,
+    cursor: cursor::CursorState,
     ime: ime::Ime,
     clipboard: clipboard::Clipboard,
     loop_handle: smithay_client_toolkit::reexports::calloop::LoopHandle<'static, Self>,
@@ -679,7 +695,7 @@ struct Runtime {
     seat_state: SeatState,
     active_seat: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
-    pointer: Option<wl_pointer::WlPointer>,
+    pointer: Option<ThemedPointer>,
     role: ShellRole,
     app: Option<Box<dyn Application>>,
     options: Option<SurfaceOptions>,
@@ -806,6 +822,7 @@ impl Runtime {
             self.scene_dirty = false;
         }
         self.sync_ime();
+        self.sync_cursor();
         let scaled;
         let render_list = if self.scale > 1 {
             scaled = scale_list(&self.render_list, self.scale as f32);
@@ -1051,9 +1068,19 @@ impl SeatHandler for Runtime {
             }
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
-            match self.seat_state.get_pointer(qh, &seat) {
+            let surface = self.compositor.create_surface(qh);
+            match self.seat_state.get_pointer_with_theme::<_, ()>(
+                qh,
+                &seat,
+                self.shm.wl_shm(),
+                surface.clone(),
+                ThemeSpec::System,
+            ) {
                 Ok(pointer) => self.pointer = Some(pointer),
-                Err(error) => eprintln!("knave-shell: could not acquire shell pointer: {error}"),
+                Err(error) => {
+                    surface.destroy();
+                    eprintln!("knave-shell: could not acquire shell pointer: {error}");
+                }
             }
         }
     }
@@ -1079,10 +1106,9 @@ impl SeatHandler for Runtime {
                 keyboard.release();
             }
         }
-        if capability == Capability::Pointer
-            && let Some(pointer) = self.pointer.take()
-        {
-            pointer.release();
+        if capability == Capability::Pointer {
+            self.pointer = None; // ThemedPointer owns pointer, shape-device and cursor-surface cleanup.
+            self.cursor = cursor::CursorState::default();
         }
         self.request_draw(qh);
     }
@@ -1195,6 +1221,10 @@ impl PointerHandler for Runtime {
             if event.surface != surface {
                 continue;
             }
+            self.cursor.pointer_event(
+                &event.kind,
+                [event.position.0 as f32, event.position.1 as f32],
+            );
             if let PointerEventKind::Press { serial, .. } = &event.kind {
                 self.clipboard.serial = Some(*serial);
             }
@@ -1230,6 +1260,7 @@ impl PointerHandler for Runtime {
                 self.handle_pointer(p[0], p[1]);
             }
         }
+        self.sync_cursor();
         if self.app.is_some() {
             self.sync_ime();
             self.clipboard_requests(qh);
@@ -1243,9 +1274,21 @@ impl CompositorHandler for Runtime {
         &mut self,
         _conn: &Connection,
         qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
+        if self
+            .pointer
+            .as_ref()
+            .is_some_and(|pointer| pointer.surface() == surface)
+        {
+            self.cursor.invalidate();
+            self.sync_cursor();
+            return;
+        }
+        if surface != self.layer.wl_surface() {
+            return;
+        }
         self.scale = new_factor.clamp(1, 8) as u32;
         self.layer.wl_surface().set_buffer_scale(self.scale as i32);
         if self.configured {
@@ -1413,6 +1456,7 @@ impl Runtime {
             self.app_input(Input::Text(text));
         }
         self.sync_ime();
+        self.sync_cursor();
         self.clipboard_requests(qh);
         self.request_draw(qh);
     }
@@ -1439,6 +1483,12 @@ fn scale_list(list: &RenderList, scale: f32) -> RenderList {
         *clip = clip.map(|r| Transform2D::scale(scale, scale).transform_rect_bounds(r));
     }
     result
+}
+
+impl ShmHandler for Runtime {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
 }
 
 #[cfg(test)]

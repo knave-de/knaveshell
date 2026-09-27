@@ -1,4 +1,5 @@
 //! Retained shell UI scenes. Coordinates are logical pixels; no desktop IPC is performed here.
+mod cursor;
 mod input;
 mod layout;
 mod model;
@@ -60,6 +61,7 @@ pub struct Scene {
     capture: Option<Capture>,
     key_pressed: Option<ElementId>,
     pointer: [f32; 2],
+    pointer_inside: bool,
     menu: Option<MenuState>,
     scopes: Vec<(ElementId, Option<ElementId>)>,
     measure_dirty: bool,
@@ -82,6 +84,7 @@ impl Scene {
             capture: None,
             key_pressed: None,
             pointer: [0.0; 2],
+            pointer_inside: false,
             menu: None,
             scopes: Vec::new(),
             measure_dirty: true,
@@ -280,6 +283,7 @@ impl Scene {
         next.capture = self.capture;
         next.key_pressed = self.key_pressed;
         next.pointer = self.pointer;
+        next.pointer_inside = self.pointer_inside;
         next.menu = self.menu.take();
         next.scopes = std::mem::take(&mut self.scopes);
         next.stats = self.stats;

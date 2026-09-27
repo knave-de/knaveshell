@@ -47,6 +47,15 @@ scroll, capture and popup state by ID.
   Full bidirectional selection fidelity and IME preedit cursor attributes are
   not complete. Tooltips are immediate and bounded; there is no idle timer.
 
+Cursor appearance is renderer-independent. `Scene::cursor()` resolves the
+current hit target, popup/menu state and pointer capture. Defaults are arrow,
+hand, I-beam, horizontal/vertical adjustment, grab/grabbing and not-allowed.
+`Element::cursor` and `Scene::set_cursor` provide explicit overrides including
+move, diagonal resize, crosshair, wait/progress and intentional hiding. Passive
+children inherit the nearest control/override; disabled targets and popup
+backdrops do not expose background actions. Layout changes re-evaluate a
+stationary pointer without requiring motion.
+
 ## Rendering and resource behavior
 
 Measurement, placement and paint invalidation are separate. Hover and slider
@@ -70,7 +79,9 @@ The renderer reports unsupported transforms or exceeded frame budgets.
 
 The new toolkit is additive to the workspace-internal Rust API.
 `DisplayCommand::RichText` adds an exhaustive enum variant: renderer and host
-consumers are updated together; external Rust matches require a source update.
+consumers are updated together; external Rust matches require a source update. `Element` also gains an optional
+cursor field; constructor users receive automatic defaults, while exhaustive
+struct literals must add `cursor: None`.
 Workspace crate versions remain 0.1.0, unreleased; the source revision identifies
 the compatible combination. No desktop API, configuration schema, compositor
 protocol or persisted data changes. Production bar/overview projections are
