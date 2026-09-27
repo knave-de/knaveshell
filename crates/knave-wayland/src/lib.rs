@@ -168,11 +168,9 @@ pub enum WaylandError {
 
 const SNAPSHOT_REFRESH: Duration = Duration::from_millis(500);
 const SNAPSHOT_MAX_BACKOFF: Duration = Duration::from_secs(5);
-const MAX_PREVIEWS: usize = 10;
-const PREVIEW_WIDTH: u32 = 320;
-const PREVIEW_HEIGHT: u32 = 180;
-const MAX_PREVIEW_PIXELS: u64 = (PREVIEW_WIDTH as u64) * (PREVIEW_HEIGHT as u64);
-const MAX_PREVIEW_BASE64_LENGTH: usize = 512 * 1024;
+const MAX_PREVIEWS: usize = 3;
+const MAX_PREVIEW_PIXELS: u64 = 36 * 1024 * 1024;
+const MAX_PREVIEW_BASE64_LENGTH: usize = 192 * 1024 * 1024;
 
 enum RuntimeWake {
     Redraw,
@@ -271,6 +269,7 @@ enum PreviewCommand {
     Refresh {
         generation: u64,
         workspaces: Vec<WorkspaceId>,
+        size: [u32; 2],
     },
 }
 
@@ -292,9 +291,10 @@ impl PreviewWorker {
                     PreviewCommand::Refresh {
                         generation,
                         mut workspaces,
+                        size,
                     } => {
                         workspaces.truncate(MAX_PREVIEWS);
-                        let previews = query_previews(&mut client, &workspaces);
+                        let previews = query_previews(&mut client, &workspaces, size);
                         if let Ok(mut slot) = update_slot.lock() {
                             *slot = Some(PreviewUpdate {
                                 generation,
@@ -313,13 +313,19 @@ impl PreviewWorker {
         }
     }
 
-    fn request_refresh(&self, generation: u64, workspaces: Vec<WorkspaceId>) -> bool {
+    fn request_refresh(
+        &self,
+        generation: u64,
+        workspaces: Vec<WorkspaceId>,
+        size: [u32; 2],
+    ) -> bool {
         self.commands
             .as_ref()
             .unwrap()
             .try_send(PreviewCommand::Refresh {
                 generation,
                 workspaces,
+                size,
             })
             .is_ok()
     }
@@ -341,6 +347,7 @@ impl Drop for PreviewWorker {
 fn query_previews(
     client: &mut Option<DesktopClient>,
     workspaces: &[WorkspaceId],
+    size: [u32; 2],
 ) -> Vec<WorkspacePreviewImage> {
     if workspaces.is_empty() {
         return Vec::new();
@@ -360,12 +367,12 @@ fn query_previews(
             .expect("preview client was initialized")
             .request(&DesktopRequest::Query(DesktopQuery::WorkspacePreview {
                 workspace,
-                width: PREVIEW_WIDTH,
-                height: PREVIEW_HEIGHT,
+                width: size[0],
+                height: size[1],
             }));
         match response {
             Ok(DesktopResponse::WorkspacePreview(preview)) => {
-                if let Some(preview) = decode_preview(preview) {
+                if let Some(preview) = decode_preview(preview, size) {
                     previews.push(preview);
                 }
             }
@@ -382,22 +389,32 @@ fn query_previews(
     previews
 }
 
-fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
-    if preview.width != PREVIEW_WIDTH || preview.height != PREVIEW_HEIGHT {
+fn decode_preview(preview: WorkspacePreview, size: [u32; 2]) -> Option<WorkspacePreviewImage> {
+    if [preview.width, preview.height] != size {
         return None;
     }
-    if preview.png_base64.len() > MAX_PREVIEW_BASE64_LENGTH {
+    if preview.width == 0
+        || preview.height == 0
+        || u64::from(preview.width) * u64::from(preview.height) > MAX_PREVIEW_PIXELS
+        || preview.png_base64.len() > MAX_PREVIEW_BASE64_LENGTH
+    {
         return None;
     }
     let encoded = base64::engine::general_purpose::STANDARD
         .decode(preview.png_base64)
         .ok()?;
     let mut decoder = png::Decoder::new(Cursor::new(encoded));
+    decoder.set_limits(png::Limits {
+        bytes: MAX_PREVIEW_BASE64_LENGTH,
+    });
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
     let pixel_count =
         u64::from(reader.info().width).checked_mul(u64::from(reader.info().height))?;
-    if pixel_count == 0 || pixel_count > MAX_PREVIEW_PIXELS {
+    if [reader.info().width, reader.info().height] != size
+        || pixel_count == 0
+        || pixel_count > MAX_PREVIEW_PIXELS
+    {
         return None;
     }
     let max_bytes = usize::try_from(pixel_count.checked_mul(4)?).ok()?;
@@ -412,7 +429,10 @@ fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
     }
     let data = &buffer[..info.buffer_size()];
     let rgba = match info.color_type {
-        png::ColorType::Rgba => data.to_vec(),
+        png::ColorType::Rgba => {
+            buffer.truncate(info.buffer_size());
+            buffer
+        }
         png::ColorType::Rgb => data
             .chunks(3)
             .filter(|pixel| pixel.len() == 3)
@@ -689,6 +709,7 @@ fn run_internal(
         previews: Vec::new(),
         preview_generation: 0,
         preview_requested: Vec::new(),
+        preview_size: [0, 0],
         preview_refresh: true,
         search_query: String::new(),
         search_index: 0,
@@ -746,6 +767,7 @@ struct Runtime {
     previews: Vec<WorkspacePreviewImage>,
     preview_generation: u64,
     preview_requested: Vec<WorkspaceId>,
+    preview_size: [u32; 2],
     preview_refresh: bool,
     search_query: String,
     search_index: usize,
@@ -842,14 +864,21 @@ impl Runtime {
                 })
             });
         desired.truncate(MAX_PREVIEWS);
-        if (self.preview_refresh || desired != self.preview_requested)
+        let preview_size = [
+            self.width.saturating_mul(self.scale),
+            self.height.saturating_mul(self.scale),
+        ];
+        if (self.preview_refresh
+            || desired != self.preview_requested
+            || preview_size != self.preview_size)
             && let Some(worker) = &self.preview_worker
         {
             let generation = self.preview_generation.wrapping_add(1);
             // On a full queue retry when the existing job wakes us; never lose the newest selection.
-            if worker.request_refresh(generation, desired.clone()) {
+            if worker.request_refresh(generation, desired.clone(), preview_size) {
                 self.preview_generation = generation;
                 self.preview_requested = desired;
+                self.preview_size = preview_size;
                 self.preview_refresh = false;
             }
         }
@@ -1583,6 +1612,8 @@ mod tests {
 
     #[test]
     fn preview_decoder_accepts_bounded_rgba_png() {
+        const PREVIEW_WIDTH: u32 = 1920;
+        const PREVIEW_HEIGHT: u32 = 1080;
         let mut encoded = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut encoded, PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1593,12 +1624,15 @@ mod tests {
                 .write_image_data(&vec![17; (PREVIEW_WIDTH * PREVIEW_HEIGHT * 4) as usize])
                 .unwrap();
         }
-        let preview = decode_preview(WorkspacePreview {
-            workspace: WorkspaceId(1),
-            width: PREVIEW_WIDTH,
-            height: PREVIEW_HEIGHT,
-            png_base64: base64::engine::general_purpose::STANDARD.encode(encoded),
-        })
+        let preview = decode_preview(
+            WorkspacePreview {
+                workspace: WorkspaceId(1),
+                width: PREVIEW_WIDTH,
+                height: PREVIEW_HEIGHT,
+                png_base64: base64::engine::general_purpose::STANDARD.encode(encoded),
+            },
+            [PREVIEW_WIDTH, PREVIEW_HEIGHT],
+        )
         .unwrap();
 
         assert_eq!(preview.workspace, WorkspaceId(1));
@@ -1613,12 +1647,15 @@ mod tests {
     #[test]
     fn preview_decoder_rejects_unrequested_dimensions() {
         assert!(
-            decode_preview(WorkspacePreview {
-                workspace: WorkspaceId(1),
-                width: 64,
-                height: 36,
-                png_base64: String::new(),
-            })
+            decode_preview(
+                WorkspacePreview {
+                    workspace: WorkspaceId(1),
+                    width: 64,
+                    height: 36,
+                    png_base64: String::new(),
+                },
+                [1920, 1080]
+            )
             .is_none()
         );
     }

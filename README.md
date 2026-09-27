@@ -46,8 +46,9 @@ Input actions use a separate one-entry bounded queue and one worker. A full
 queue drops an action with an explicit diagnostic instead of creating threads.
 
 Overview previews use one additional worker only for the overview role. It
-requests the centered workspace and up to two neighbors on state or browsing changes, keeps one latest
-update slot, rejects malformed or oversized PNGs, and uploads decoded images
+requests the centered workspace and up to two neighbors at the overview output's
+pixel resolution. State, browsing, resize, and scale changes refresh previews.
+It keeps one latest update slot, rejects malformed or oversized PNGs, and uploads decoded images
 through the renderer's bounded texture cache. No preview request or decode runs
 on the Wayland frame callback.
 

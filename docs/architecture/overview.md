@@ -80,3 +80,29 @@ Wayland sample against a test desktop service held six threads, 71 FDs and about
 claims. The live host test delivered same-generation minimized-state changes,
 dispatched one restore for the correct window ID and exited after acknowledgement.
 Real Villain restoration remains unverified without its desktop socket.
+
+## Native-resolution previews
+
+The full-output overview requests its configured logical dimensions multiplied
+by the output buffer scale. Resize and scale changes invalidate the request size
+and stale responses. The existing width/height wire fields are unchanged; Villain
+now accepts larger explicit requests, bounded to 16,384 per axis and 36 Mi pixels
+per image. The shell checks returned metadata and PNG dimensions against the
+request before allocating decoded pixels. At most three previews are requested;
+GPU image cache and per-frame image budgets are capped at 512 MiB, allocated on
+demand. Three 4K RGBA images require about 95 MiB each in CPU and GPU storage;
+transient decoding and replacement images add to this baseline.
+
+Deploy the expanded Villain limits before the shell update. Existing thumbnail
+clients remain compatible. Older Villain builds reject native-size requests
+above their 1280x720 limit, so the overview reports unavailable previews rather
+than silently falling back to blurred thumbnails. Roll back the shell first.
+No desktop schema, socket, subscription, configuration, or polling change is
+part of this update. Both consumers remain at unreleased version 0.1.0.
+
+Native-resolution verification: live isolated GPU captures returned exact
+1920x1080 and 3840x2160 PNGs. A simple 64-pixel client fixture took approximately
+23 ms and 87 ms per request respectively (capture, PNG encoding and transport;
+not representative of complex window contents). Capture still runs synchronously
+on the compositor thread; this change improves fidelity, not update latency.
+The existing refresh-on-change policy is preserved.
