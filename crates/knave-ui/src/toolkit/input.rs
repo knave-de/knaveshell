@@ -97,8 +97,7 @@ impl Scene {
                 None
             }
             Input::Scroll { position, delta } => {
-                self.scroll_at(position, delta[1]);
-                None
+                self.scroll_at(position, if delta[1] != 0.0 { delta[1] } else { delta[0] })
             }
             Input::Key {
                 key,
@@ -260,7 +259,9 @@ impl Scene {
                 })
             }
             Widget::TextInput(_) => {
-                let x = p[0] - self.nodes[i].bounds.x - 10.0 + self.nodes[i].text_offset;
+                let x = p[0]
+                    - control_content(self.nodes[i].bounds, self.nodes[i].element.layout).x
+                    + self.nodes[i].text_offset;
                 let byte = self.nodes[i].text.hit(x);
                 if let Widget::TextInput(edit) = &mut self.nodes[i].element.widget {
                     edit.place(byte, true);
@@ -327,7 +328,7 @@ impl Scene {
                 capture.value = slider.value();
                 let fraction = slider.fraction();
                 let vertical = slider.orientation == Orientation::Vertical;
-                let b = inset(self.nodes[i].bounds, 10.0);
+                let b = control_content(self.nodes[i].bounds, self.nodes[i].element.layout);
                 let center = if vertical {
                     b.y + (1.0 - fraction) * b.height
                 } else {
@@ -345,9 +346,10 @@ impl Scene {
                 self.move_slider(id, p, capture.offset[0])
             }
             Widget::TextInput(_) => {
-                let byte = self.nodes[i]
-                    .text
-                    .hit(p[0] - self.nodes[i].bounds.x - 10.0 + self.nodes[i].text_offset);
+                let byte = self.nodes[i].text.hit(
+                    p[0] - control_content(self.nodes[i].bounds, self.nodes[i].element.layout).x
+                        + self.nodes[i].text_offset,
+                );
                 if let Widget::TextInput(edit) = &mut self.nodes[i].element.widget {
                     edit.place(byte, false);
                 }
@@ -439,7 +441,7 @@ impl Scene {
     }
     fn move_slider(&mut self, id: ElementId, p: [f32; 2], offset: f32) -> Option<Action> {
         let i = self.indices[&id];
-        let b = inset(self.nodes[i].bounds, 10.0);
+        let b = control_content(self.nodes[i].bounds, self.nodes[i].element.layout);
         if let Widget::Slider(slider) = &mut self.nodes[i].element.widget {
             let fraction = if slider.orientation == Orientation::Vertical {
                 1.0 - (p[1] - offset - b.y) / b.height.max(1.0)
@@ -453,9 +455,9 @@ impl Scene {
         }
         None
     }
-    fn scroll_at(&mut self, p: [f32; 2], delta: f32) {
+    fn scroll_at(&mut self, p: [f32; 2], delta: f32) -> Option<Action> {
         if !delta.is_finite() {
-            return;
+            return None;
         }
         if let Some(menu) = &self.menu
             && contains(menu.bounds, p)
@@ -467,12 +469,28 @@ impl Scene {
                 m.scroll = next;
                 self.paint_dirty = true;
             }
-            return;
+            return None;
+        }
+        if self.menu.is_some() || self.capture.is_some() {
+            return None;
+        }
+        if let Some(id) = self.hit_test(p) {
+            let i = self.indices[&id];
+            if let Widget::Slider(slider) = &mut self.nodes[i].element.widget
+                && let Some(changed) = slider.scroll_by(delta)
+            {
+                if changed {
+                    self.paint_dirty = true;
+                    return Some(Action::ValueCommitted(id, slider.value()));
+                }
+                return None; // An opted-in slider owns scrolling even at an endpoint.
+            }
         }
         let mut current = self.top_node(p);
         while let Some(i) = current {
             if !self.eligible(i) {
-                return;
+                current = self.nodes[i].parent;
+                continue;
             }
             let n = &mut self.nodes[i];
             if matches!(n.element.widget, Widget::Scroll) {
@@ -480,11 +498,12 @@ impl Scene {
                 if next != n.scroll {
                     n.scroll = next;
                     self.invalidate_positions();
-                    return;
+                    return None;
                 }
             }
             current = self.nodes[i].parent;
         }
+        None
     }
 
     pub(super) fn cancel_capture(&mut self) -> Option<ElementId> {
@@ -644,7 +663,11 @@ impl Scene {
         let mut parent = self.nodes[i].parent;
         while let Some(p) = parent {
             if matches!(self.nodes[p].element.widget, Widget::Scroll) {
-                let area = inset(self.nodes[p].bounds, self.nodes[p].element.layout.padding);
+                let area = self.nodes[p]
+                    .element
+                    .layout
+                    .insets()
+                    .apply(self.nodes[p].bounds);
                 let delta = if b.y < area.y {
                     b.y - area.y
                 } else if b.y + b.height > area.y + area.height {

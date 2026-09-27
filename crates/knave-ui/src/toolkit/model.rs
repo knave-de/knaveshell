@@ -34,12 +34,69 @@ pub enum Align {
     Stretch,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Insets {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+impl Insets {
+    pub const fn all(value: f32) -> Self {
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
+    }
+    pub const fn symmetric(vertical: f32, horizontal: f32) -> Self {
+        Self {
+            top: vertical,
+            right: horizontal,
+            bottom: vertical,
+            left: horizontal,
+        }
+    }
+    pub(super) fn horizontal(self) -> f32 {
+        self.left + self.right
+    }
+    pub(super) fn vertical(self) -> f32 {
+        self.top + self.bottom
+    }
+    pub(super) fn apply(self, r: crate::Rect) -> crate::Rect {
+        crate::Rect::new(
+            r.x + self.left,
+            r.y + self.top,
+            (r.width - self.horizontal()).max(0.0),
+            (r.height - self.vertical()).max(0.0),
+        )
+    }
+    pub(super) fn valid(self) -> bool {
+        [self.top, self.right, self.bottom, self.left]
+            .iter()
+            .all(|v| v.is_finite() && *v >= 0.0)
+    }
+}
+/// Controls child overflow. Scroll containers always clip to their content area.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ClipMode {
+    #[default]
+    Content,
+    Bounds,
+    Visible,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Layout {
     pub width: Length,
     pub height: Length,
     pub flow: Flow,
     pub padding: f32,
+    /// Overrides uniform padding when present.
+    pub padding_edges: Option<Insets>,
+    pub margin: Insets,
+    pub clip: ClipMode,
     pub gap: f32,
     pub align: Align,
     pub offset: [f32; 2],
@@ -51,10 +108,27 @@ impl Default for Layout {
             height: Length::Auto,
             flow: Flow::Column,
             padding: 0.0,
+            padding_edges: None,
+            margin: Insets::default(),
+            clip: ClipMode::Content,
             gap: 8.0,
             align: Align::Stretch,
             offset: [0.0; 2],
         }
+    }
+}
+
+impl Layout {
+    pub fn with_padding(mut self, padding: Insets) -> Self {
+        self.padding_edges = Some(padding);
+        self
+    }
+    pub fn with_margin(mut self, margin: Insets) -> Self {
+        self.margin = margin;
+        self
+    }
+    pub fn insets(self) -> Insets {
+        self.padding_edges.unwrap_or(Insets::all(self.padding))
     }
 }
 
@@ -67,6 +141,7 @@ pub struct Style {
     pub selected: Color,
     pub focus: Color,
     pub radius: f32,
+    pub radii: Option<crate::CornerRadii>,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -78,6 +153,7 @@ impl Default for Style {
             selected: Color::rgba(42, 88, 112, 255),
             focus: Color::ACCENT,
             radius: 6.0,
+            radii: None,
         }
     }
 }
@@ -111,12 +187,29 @@ pub enum Orientation {
     Vertical,
 }
 
+/// Pixels of wheel/trackpad delta per keyboard-sized increment. Disabled by default.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SliderScroll {
+    pub pixels_per_step: f64,
+    pub inverted: bool,
+}
+impl Default for SliderScroll {
+    fn default() -> Self {
+        Self {
+            pixels_per_step: 40.0,
+            inverted: false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Slider {
     min: f64,
     max: f64,
     value: f64,
     step: Option<f64>,
+    scroll: Option<SliderScroll>,
+    scroll_remainder: f64,
     pub orientation: Orientation,
 }
 impl Slider {
@@ -135,10 +228,36 @@ impl Slider {
             max,
             value: min,
             step,
+            scroll: None,
+            scroll_remainder: 0.0,
             orientation: Orientation::Horizontal,
         };
         result.set(value);
         Ok(result)
+    }
+    pub fn with_scroll(mut self, options: Option<SliderScroll>) -> Result<Self, UiError> {
+        if options.is_some_and(|o| !o.pixels_per_step.is_finite() || o.pixels_per_step <= 0.0) {
+            return Err(UiError::InvalidRange);
+        }
+        self.scroll = options;
+        self.scroll_remainder = 0.0;
+        Ok(self)
+    }
+    pub(super) fn scroll_by(&mut self, delta: f32) -> Option<bool> {
+        let options = self.scroll?;
+        let direction = if options.inverted { 1.0 } else { -1.0 };
+        let units = (f64::from(delta) * direction / options.pixels_per_step).clamp(-1e6, 1e6);
+        if self.step.is_some() {
+            if self.scroll_remainder.signum() != units.signum() {
+                self.scroll_remainder = 0.0;
+            }
+            self.scroll_remainder += units;
+            let whole = self.scroll_remainder.trunc();
+            self.scroll_remainder -= whole;
+            Some(self.increment(whole))
+        } else {
+            Some(self.increment(units))
+        }
     }
     pub fn value(&self) -> f64 {
         self.value

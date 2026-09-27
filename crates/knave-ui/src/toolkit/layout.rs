@@ -16,7 +16,11 @@ impl Scene {
         if self.measure_dirty {
             self.measure_node(0, size[0], text);
         }
-        self.arrange(0, viewport, Some(viewport));
+        self.arrange(
+            0,
+            self.nodes[0].element.layout.margin.apply(viewport),
+            Some(viewport),
+        );
         let popups: Vec<_> = self.scopes.iter().map(|(id, _)| self.indices[id]).collect();
         for i in popups {
             if self.measure_dirty {
@@ -24,11 +28,17 @@ impl Scene {
             }
             let n = &self.nodes[i];
             let l = n.element.layout;
-            let w = resolve(l.width, n.natural[0], size[0]).min(size[0]);
-            let h = resolve(l.height, n.natural[1], size[1]).min(size[1]);
+            let area = l.margin.apply(viewport);
+            let w = resolve(l.width, n.natural[0], area.width).min(area.width);
+            let h = resolve(l.height, n.natural[1], area.height).min(area.height);
             self.arrange(
                 i,
-                Rect::new((size[0] - w) / 2.0, (size[1] - h) / 2.0, w, h),
+                Rect::new(
+                    area.x + (area.width - w) / 2.0,
+                    area.y + (area.height - h) / 2.0,
+                    w,
+                    h,
+                ),
                 Some(viewport),
             );
         }
@@ -47,9 +57,10 @@ impl Scene {
         let layout = self.nodes[i].element.layout;
         let available = match layout.width {
             Length::Px(w) => w,
-            _ => width,
+            _ => (width - layout.margin.horizontal()).max(0.0),
         };
-        let inner = (available - layout.padding * 2.0).max(1.0);
+        let padding = layout.insets();
+        let inner = (available - padding.horizontal()).max(1.0);
         let mut intrinsic = match &self.nodes[i].element.widget {
             Widget::Text(value) => {
                 let value = value.clone();
@@ -143,8 +154,8 @@ impl Scene {
                 ],
             };
         }
-        intrinsic[0] += layout.padding * 2.0;
-        intrinsic[1] += layout.padding * 2.0;
+        intrinsic[0] += padding.horizontal();
+        intrinsic[1] += padding.vertical();
         if let Length::Px(v) = layout.width {
             intrinsic[0] = v;
         }
@@ -152,7 +163,10 @@ impl Scene {
             intrinsic[1] = v;
         }
         self.nodes[i].natural = intrinsic;
-        intrinsic
+        [
+            intrinsic[0] + layout.margin.horizontal(),
+            intrinsic[1] + layout.margin.vertical(),
+        ]
     }
     fn arrange(&mut self, i: usize, mut bounds: Rect, parent_clip: Option<Rect>) {
         let l = self.nodes[i].element.layout;
@@ -160,7 +174,7 @@ impl Scene {
         bounds.y += l.offset[1];
         self.nodes[i].bounds = bounds;
         self.nodes[i].clip = parent_clip.and_then(|c| c.intersection(bounds));
-        let inner = inset(bounds, l.padding);
+        let inner = l.insets().apply(bounds);
         let children = self.nodes[i].children.clone();
         let active: Vec<_> = children
             .into_iter()
@@ -173,18 +187,43 @@ impl Scene {
             return;
         }
         let scroll = matches!(self.nodes[i].element.widget, Widget::Scroll);
-        let content_h = active
-            .iter()
-            .map(|c| self.nodes[*c].natural[1])
-            .sum::<f32>()
-            + l.gap * (active.len() - 1) as f32;
+        let content_h = match l.flow {
+            Flow::Column => {
+                active
+                    .iter()
+                    .map(|c| outer(&self.nodes[*c], 1))
+                    .sum::<f32>()
+                    + l.gap * (active.len() - 1) as f32
+            }
+            Flow::Grid { columns } => {
+                active
+                    .chunks(columns)
+                    .map(|row| {
+                        row.iter()
+                            .map(|c| outer(&self.nodes[*c], 1))
+                            .fold(0.0, f32::max)
+                    })
+                    .sum::<f32>()
+                    + l.gap * (active.len().div_ceil(columns) - 1) as f32
+            }
+            _ => active
+                .iter()
+                .map(|c| outer(&self.nodes[*c], 1))
+                .fold(0.0, f32::max),
+        };
         self.nodes[i].scroll_max = if scroll {
             (content_h - inner.height).max(0.0)
         } else {
             0.0
         };
         self.nodes[i].scroll = self.nodes[i].scroll.clamp(0.0, self.nodes[i].scroll_max);
-        let clip = self.nodes[i].clip.and_then(|c| c.intersection(inner));
+        let clip = if scroll || l.clip == ClipMode::Content {
+            parent_clip.and_then(|c| c.intersection(inner))
+        } else if l.clip == ClipMode::Bounds {
+            self.nodes[i].clip
+        } else {
+            parent_clip
+        };
         let horizontal = l.flow == Flow::Row;
         let axis = usize::from(!horizontal);
         let space = if horizontal {
@@ -195,7 +234,7 @@ impl Scene {
         let fixed: f32 = active
             .iter()
             .filter(|c| scroll || dimension(&self.nodes[**c], axis) != Length::Fill)
-            .map(|c| self.nodes[*c].natural[axis])
+            .map(|c| outer(&self.nodes[*c], axis))
             .sum();
         let fills = active
             .iter()
@@ -211,7 +250,7 @@ impl Scene {
         } else {
             inner.y - self.nodes[i].scroll
         };
-        let mut grid_y = inner.y;
+        let mut grid_y = inner.y - self.nodes[i].scroll;
         let grid_columns = if let Flow::Grid { columns } = l.flow {
             columns
         } else {
@@ -220,25 +259,36 @@ impl Scene {
         for (position, c) in active.iter().copied().enumerate() {
             let node = &self.nodes[c];
             let cl = node.element.layout;
-            let mut w = resolve(cl.width, node.natural[0], inner.width);
-            let mut h = resolve(cl.height, node.natural[1], inner.height);
+            let margin = cl.margin;
+            let available_w = (inner.width - margin.horizontal()).max(0.0);
+            let available_h = (inner.height - margin.vertical()).max(0.0);
+            let mut w = resolve(cl.width, node.natural[0], available_w);
+            let mut h = resolve(cl.height, node.natural[1], available_h);
+            if scroll && matches!(cl.height, Length::Auto | Length::Fill) {
+                h = node.natural[1];
+            }
             let r = match l.flow {
                 Flow::Overlay => Rect::new(
-                    inner.x + align(l.align, inner.width, w),
-                    inner.y + align(l.align, inner.height, h),
+                    inner.x + margin.left + align(l.align, available_w, w),
+                    inner.y + margin.top + align(l.align, available_h, h) - self.nodes[i].scroll,
                     w,
                     h,
                 ),
                 Flow::Grid { columns } => {
                     let cell =
                         ((inner.width - l.gap * (columns - 1) as f32) / columns as f32).max(0.0);
-                    w = resolve(cl.width, node.natural[0], cell).min(cell);
+                    w = resolve(
+                        cl.width,
+                        node.natural[0],
+                        (cell - margin.horizontal()).max(0.0),
+                    )
+                    .min((cell - margin.horizontal()).max(0.0));
                     if cl.height == Length::Fill {
                         h = node.natural[1];
                     }
                     let r = Rect::new(
-                        inner.x + (position % columns) as f32 * (cell + l.gap),
-                        grid_y,
+                        inner.x + (position % columns) as f32 * (cell + l.gap) + margin.left,
+                        grid_y + margin.top,
                         w,
                         h,
                     );
@@ -246,7 +296,7 @@ impl Scene {
                         let start = position + 1 - grid_columns;
                         grid_y += active[start..=position]
                             .iter()
-                            .map(|j| self.nodes[*j].natural[1])
+                            .map(|j| outer(&self.nodes[*j], 1))
                             .fold(0.0, f32::max)
                             + l.gap;
                     }
@@ -254,18 +304,33 @@ impl Scene {
                 }
                 Flow::Row => {
                     if cl.width == Length::Fill {
-                        w = share;
+                        w = (share - margin.horizontal()).max(0.0);
                     }
-                    let r = Rect::new(cursor, inner.y + align(l.align, inner.height, h), w, h);
-                    cursor += w + l.gap;
+                    let r = Rect::new(
+                        cursor + margin.left,
+                        inner.y + margin.top + align(l.align, available_h, h)
+                            - self.nodes[i].scroll,
+                        w,
+                        h,
+                    );
+                    cursor += w + margin.horizontal() + l.gap;
                     r
                 }
                 Flow::Column => {
                     if cl.height == Length::Fill {
-                        h = if scroll { node.natural[1] } else { share };
+                        h = if scroll {
+                            node.natural[1]
+                        } else {
+                            (share - margin.vertical()).max(0.0)
+                        };
                     }
-                    let r = Rect::new(inner.x + align(l.align, inner.width, w), cursor, w, h);
-                    cursor += h + l.gap;
+                    let r = Rect::new(
+                        inner.x + margin.left + align(l.align, available_w, w),
+                        cursor + margin.top,
+                        w,
+                        h,
+                    );
+                    cursor += h + margin.vertical() + l.gap;
                     r
                 }
             };
@@ -293,4 +358,13 @@ fn align(a: Align, available: f32, size: f32) -> f32 {
         Align::End => (available - size).max(0.0),
         _ => 0.0,
     }
+}
+
+fn outer(node: &Node, axis: usize) -> f32 {
+    node.natural[axis]
+        + if axis == 0 {
+            node.element.layout.margin.horizontal()
+        } else {
+            node.element.layout.margin.vertical()
+        }
 }

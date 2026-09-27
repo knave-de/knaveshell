@@ -515,3 +515,177 @@ fn menu_cursor_skips_separators_and_does_not_expose_background_actions() {
         assert_eq!(s.cursor(), expected);
     }
 }
+
+#[test]
+fn scroll_content_keeps_full_height_to_the_last_row() {
+    let mut s = scene(vec![
+        Element::new(1, Widget::Scroll)
+            .layout(Layout {
+                height: Length::Px(100.0),
+                gap: 0.0,
+                ..Default::default()
+            })
+            .children(vec![
+                Element::new(2, Widget::Panel)
+                    .layout(Layout {
+                        flow: Flow::Grid { columns: 1 },
+                        gap: 0.0,
+                        ..Default::default()
+                    })
+                    .children(
+                        (0..10)
+                            .map(|i| leaf(10 + i, Widget::Button(format!("{i}"))))
+                            .collect(),
+                    ),
+            ]),
+    ]);
+    assert_eq!(s.bounds(ElementId(2)).unwrap().height, 400.0);
+    s.event(Input::Scroll {
+        position: [20.0, 20.0],
+        delta: [0.0, 1000.0],
+    });
+    s.layout([400.0, 400.0], &mut Metrics);
+    assert_eq!(s.hit_test([20.0, 80.0]), Some(ElementId(19)));
+    let list = s.display_list([400.0, 400.0], &mut Metrics);
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Shape{bounds,..} if bounds.y==60.0 && bounds.height==40.0)));
+}
+#[test]
+fn per_edge_spacing_positions_children_and_excludes_margins_from_hit_testing() {
+    let child = leaf(1, Widget::Button("A".into())).layout(Layout {
+        height: Length::Px(40.0),
+        margin: Insets {
+            top: 3.0,
+            right: 5.0,
+            bottom: 7.0,
+            left: 11.0,
+        },
+        ..Default::default()
+    });
+    let mut s = Scene::new(
+        Element::new(0, Widget::Panel)
+            .layout(Layout::default().with_padding(Insets {
+                top: 10.0,
+                right: 20.0,
+                bottom: 30.0,
+                left: 40.0,
+            }))
+            .children(vec![child, leaf(2, Widget::Button("B".into()))]),
+    )
+    .unwrap();
+    s.layout([400.0, 400.0], &mut Metrics);
+    assert_eq!(
+        s.bounds(ElementId(1)),
+        Some(knave_ui::Rect::new(51.0, 13.0, 324.0, 40.0))
+    );
+    assert_eq!(s.bounds(ElementId(2)).unwrap().y, 68.0);
+    assert_eq!(s.hit_test([43.0, 20.0]), None);
+}
+#[test]
+fn explicit_child_clipping_controls_paint_and_hit_testing() {
+    for (clip, hit) in [
+        (ClipMode::Content, false),
+        (ClipMode::Bounds, false),
+        (ClipMode::Visible, true),
+    ] {
+        let mut s = scene(vec![
+            Element::new(1, Widget::Panel)
+                .layout(Layout {
+                    width: Length::Px(100.0),
+                    height: Length::Px(50.0),
+                    clip,
+                    ..Default::default()
+                })
+                .children(vec![leaf(2, Widget::Button("Overflow".into())).layout(
+                    Layout {
+                        width: Length::Px(100.0),
+                        height: Length::Px(40.0),
+                        offset: [80.0, 0.0],
+                        ..Default::default()
+                    },
+                )]),
+        ]);
+        assert_eq!(s.hit_test([150.0, 20.0]) == Some(ElementId(2)), hit);
+        s.display_list([400.0, 400.0], &mut Metrics);
+    }
+}
+#[test]
+fn wheel_slider_is_opt_in_and_accumulates_small_stepped_deltas() {
+    let make = |slider| {
+        scene(vec![
+            Element::new(1, Widget::Scroll)
+                .layout(Layout {
+                    height: Length::Px(60.0),
+                    ..Default::default()
+                })
+                .children(vec![
+                    leaf(2, Widget::Slider(slider)),
+                    leaf(3, Widget::Button("Below".into())),
+                ]),
+        ])
+    };
+    let slider = Slider::new(0.0, 100.0, 50.0, Some(5.0)).unwrap();
+    let mut s = make(slider);
+    s.event(Input::Scroll {
+        position: [20.0, 20.0],
+        delta: [0.0, 40.0],
+    });
+    s.layout([400.0, 400.0], &mut Metrics);
+    assert!(s.bounds(ElementId(2)).unwrap().y < 0.0);
+    let mut s = make(slider.with_scroll(Some(SliderScroll::default())).unwrap());
+    for _ in 0..3 {
+        assert!(
+            s.event(Input::Scroll {
+                position: [20.0, 20.0],
+                delta: [0.0, -10.0]
+            })
+            .action
+            .is_none()
+        );
+    }
+    assert_eq!(
+        s.event(Input::Scroll {
+            position: [20.0, 20.0],
+            delta: [0.0, -10.0]
+        })
+        .action,
+        Some(Action::ValueCommitted(ElementId(2), 55.0))
+    );
+    assert_eq!(s.bounds(ElementId(2)).unwrap().y, 0.0);
+    assert!(
+        slider
+            .with_scroll(Some(SliderScroll {
+                pixels_per_step: 0.0,
+                inverted: false
+            }))
+            .is_err()
+    );
+}
+#[test]
+fn checkbox_emits_checkmark_and_background_preserves_individual_radii() {
+    let radii = knave_ui::CornerRadii {
+        top_left: 2.0,
+        top_right: 8.0,
+        bottom_right: 16.0,
+        bottom_left: 0.0,
+    };
+    let mut element = leaf(
+        1,
+        Widget::Checkbox {
+            label: "A".into(),
+            checked: true,
+        },
+    );
+    element.style.radii = Some(radii);
+    let mut s = scene(vec![element]);
+    let list = s.display_list([400.0, 400.0], &mut Metrics);
+    assert!(
+        list.commands
+            .iter()
+            .any(|c| matches!(c,knave_ui::DisplayCommand::Text{text,..} if text=="✓"))
+    );
+    assert!(
+        list.commands
+            .iter()
+            .any(|c| matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.radii==radii))
+    );
+}

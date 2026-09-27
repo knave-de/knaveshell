@@ -78,7 +78,13 @@ impl Scene {
             .clone()
             .or_else(|| control.then(|| ShapePaint::fill(Color::rgba(33, 44, 60, 255))));
         if let Some(paint) = &mut background {
-            paint.radii = CornerRadii::uniform(style.radius);
+            paint.radii = style.radii.unwrap_or_else(|| {
+                if style.background.is_some() {
+                    paint.radii
+                } else {
+                    CornerRadii::uniform(style.radius)
+                }
+            });
             if state.selected {
                 paint.fill = Some(style.selected);
             }
@@ -99,21 +105,26 @@ impl Scene {
             }
             shape(&mut self.list, b, clip, paint.clone());
         }
-        let content = inset(b, 10.0);
+        let content = control_content(b, e.layout);
+        let text_area = label_content(b, e.layout);
         let mut label = None;
         match &e.widget {
-            Widget::Text(value) => {
-                text_cmd(&mut self.list, b, clip, value.clone(), style.text.clone())
-            }
+            Widget::Text(value) => text_cmd(
+                &mut self.list,
+                e.layout.insets().apply(b),
+                clip,
+                value.clone(),
+                style.text.clone(),
+            ),
             Widget::Paragraph(spans) => self.list.commands.push(DisplayCommand::RichText {
-                bounds: b,
+                bounds: e.layout.insets().apply(b),
                 spans: spans.clone(),
                 style: style.text.clone(),
                 transform: Transform2D::IDENTITY,
                 clip,
             }),
             Widget::Image(image, image_style) => self.list.commands.push(DisplayCommand::Image {
-                bounds: b,
+                bounds: e.layout.insets().apply(b),
                 image: image.clone(),
                 style: *image_style,
                 transform: Transform2D::IDENTITY,
@@ -131,7 +142,12 @@ impl Scene {
             } => {
                 let toggle = matches!(e.widget, Widget::Toggle { .. });
                 let w = if toggle { 32.0 } else { 18.0 };
-                let rect = Rect::new(content.x, b.y + (b.height - 18.0) / 2.0, w, 18.0);
+                let rect = Rect::new(
+                    content.x,
+                    text_area.y + (text_area.height - 18.0) / 2.0,
+                    w,
+                    18.0,
+                );
                 let mut paint = ShapePaint::fill(if *checked {
                     Color::ACCENT
                 } else {
@@ -139,7 +155,7 @@ impl Scene {
                 });
                 paint.radii = CornerRadii::uniform(if toggle { 9.0 } else { 3.0 });
                 shape(&mut self.list, rect, clip, paint);
-                if *checked || toggle {
+                if toggle {
                     shape(
                         &mut self.list,
                         Rect::new(
@@ -152,13 +168,30 @@ impl Scene {
                         ShapePaint::fill(Color::TEXT),
                     );
                 }
+                if *checked && !toggle {
+                    text_cmd(
+                        &mut self.list,
+                        rect,
+                        clip,
+                        "✓".into(),
+                        TextStyle {
+                            font_size: 16.0,
+                            line_height: 18.0,
+                            weight: 700,
+                            align: crate::TextAlign::Center,
+                            color: Color::TEXT,
+                            wrap: TextWrap::None,
+                            ..style.text.clone()
+                        },
+                    );
+                }
                 text_cmd(
                     &mut self.list,
                     Rect::new(
-                        content.x + w + 8.0,
-                        b.y,
-                        (content.width - w - 8.0).max(0.0),
-                        b.height,
+                        text_area.x + w + 8.0,
+                        text_area.y,
+                        (text_area.width - w - 8.0).max(0.0),
+                        text_area.height,
                     ),
                     clip,
                     value.clone(),
@@ -187,9 +220,19 @@ impl Scene {
                 let vertical = slider.orientation == Orientation::Vertical;
                 let f = slider.fraction();
                 let track = if vertical {
-                    Rect::new(b.x + b.width / 2.0 - 2.0, content.y, 4.0, content.height)
+                    Rect::new(
+                        content.x + content.width / 2.0 - 2.0,
+                        content.y,
+                        4.0,
+                        content.height,
+                    )
                 } else {
-                    Rect::new(content.x, b.y + b.height / 2.0 - 2.0, content.width, 4.0)
+                    Rect::new(
+                        content.x,
+                        content.y + content.height / 2.0 - 2.0,
+                        content.width,
+                        4.0,
+                    )
                 };
                 shape(
                     &mut self.list,
@@ -211,9 +254,15 @@ impl Scene {
                     shape(&mut self.list, fill, clip, ShapePaint::fill(Color::ACCENT));
                 }
                 let center = if vertical {
-                    [b.x + b.width / 2.0, content.y + content.height * (1.0 - f)]
+                    [
+                        content.x + content.width / 2.0,
+                        content.y + content.height * (1.0 - f),
+                    ]
                 } else {
-                    [content.x + content.width * f, b.y + b.height / 2.0]
+                    [
+                        content.x + content.width * f,
+                        content.y + content.height / 2.0,
+                    ]
                 };
                 let mut paint = ShapePaint::fill(Color::TEXT);
                 paint.radii = CornerRadii::uniform(9.0);
@@ -225,6 +274,9 @@ impl Scene {
                 );
             }
             Widget::TextInput(edit) => {
+                let caret_y =
+                    text_area.y + ((text_area.height - style.text.line_height) / 2.0).max(0.0);
+                let caret_height = style.text.line_height.min(text_area.height);
                 let cursor = edit.cursor();
                 let selection = edit.selection();
                 let value = edit.text().to_owned();
@@ -238,10 +290,9 @@ impl Scene {
                     offset = x;
                 }
                 self.nodes[i].text_offset = offset;
-                let text_bounds = Rect::new(content.x - offset, b.y, 16384.0, b.height);
-                let text_clip = clip.and_then(|c| {
-                    c.intersection(Rect::new(content.x, b.y, content.width, b.height))
-                });
+                let text_bounds =
+                    Rect::new(content.x - offset, text_area.y, 16384.0, text_area.height);
+                let text_clip = clip.and_then(|c| c.intersection(text_area));
                 if !selection.is_empty() {
                     for pair in metrics.carets.windows(2) {
                         if pair[0].byte >= selection.start && pair[0].byte < selection.end {
@@ -249,12 +300,7 @@ impl Scene {
                             let width = (pair[1].x - pair[0].x).abs();
                             shape(
                                 &mut self.list,
-                                Rect::new(
-                                    content.x + left - offset,
-                                    b.y + 6.0,
-                                    width,
-                                    b.height - 12.0,
-                                ),
+                                Rect::new(content.x + left - offset, caret_y, width, caret_height),
                                 text_clip,
                                 ShapePaint::fill(Color::rgba(58, 107, 151, 255)),
                             );
@@ -267,19 +313,19 @@ impl Scene {
                 if state.focused {
                     shape(
                         &mut self.list,
-                        Rect::new(
-                            content.x + x - offset,
-                            b.y + 6.0,
-                            1.5,
-                            (b.height - 12.0).max(1.0),
-                        ),
+                        Rect::new(content.x + x - offset, caret_y, 1.5, caret_height),
                         text_clip,
                         ShapePaint::fill(Color::TEXT),
                     );
                     if !preedit.is_empty() {
                         text_cmd(
                             &mut self.list,
-                            Rect::new(content.x + x - offset, b.y, content.width, b.height),
+                            Rect::new(
+                                content.x + x - offset,
+                                text_area.y,
+                                content.width,
+                                text_area.height,
+                            ),
                             text_clip,
                             preedit,
                             ts,
@@ -294,7 +340,7 @@ impl Scene {
                 ShapePaint::fill(Color::rgba(80, 92, 111, 255)),
             ),
             Widget::Scroll if node.scroll_max > 0.0 => {
-                let area = inset(b, e.layout.padding);
+                let area = e.layout.insets().apply(b);
                 let h = (area.height * area.height / (area.height + node.scroll_max))
                     .max(12.0)
                     .min(area.height);
@@ -311,13 +357,7 @@ impl Scene {
         if let Some(label) = label {
             let mut ts = style.text;
             ts.wrap = TextWrap::None;
-            text_cmd(
-                &mut self.list,
-                Rect::new(content.x, b.y, content.width, b.height),
-                clip,
-                label,
-                ts,
-            );
+            text_cmd(&mut self.list, text_area, clip, label, ts);
         }
         if self.inspect {
             let mut paint = ShapePaint::fill(Color::rgba(0, 0, 0, 0));

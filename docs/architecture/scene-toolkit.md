@@ -56,6 +56,35 @@ children inherit the nearest control/override; disabled targets and popup
 backdrops do not expose background actions. Layout changes re-evaluate a
 stationary pointer without requiring motion.
 
+### Spacing, clipping and wheel parameters
+
+`Layout::with_padding(Insets)` overrides the existing uniform `padding` value;
+`with_margin(Insets)` adds non-collapsing space outside the element. Insets have
+independent top/right/bottom/left values and `all`/`symmetric` constructors.
+Margins participate in row, column and grid allocation but are not hit targets.
+Scroll content retains its measured height, including automatic-size grids.
+
+`Layout::clip` selects rectangular child clipping to `Content` (the default),
+`Bounds`, or `Visible` overflow. Ancestor and output clips still apply; scroll
+containers always clip to their content area. These options do not provide
+rounded or arbitrary-path masks. `Style::radii` optionally overrides all four
+corners; otherwise a custom background retains its own `ShapePaint::radii`, and
+standard controls use the existing uniform `Style::radius`.
+
+Sliders opt in with `slider.with_scroll(Some(SliderScroll {
+pixels_per_step: 40.0, inverted: false }))?`; `None` disables wheel adjustment.
+Up increases the value by default. Each configured delta unit applies one
+slider step, or one percent of the range for continuous sliders. Stepped sliders
+accumulate small deltas. Enabled sliders consume scrolling even at endpoints;
+disabled wheel handling lets the parent scroll. Changes emit `ValueCommitted`
+and repaint without remeasurement. Checkboxes render the Unicode checkmark ✓.
+
+These are workspace-internal source API additions: exhaustive `Layout` and
+`Style` literals need the new fields or `..Default::default()`. Existing uniform
+padding/radius values and `Slider::new` calls remain supported. No protocol or
+configuration migration is involved. Revert the spacing/control change as one
+slice to roll back; it has no persisted state.
+
 ## Rendering and resource behavior
 
 Measurement, placement and paint invalidation are separate. Hover and slider

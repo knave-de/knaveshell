@@ -144,16 +144,22 @@ impl Scene {
             return None;
         };
         let x = node.text.caret(edit.cursor()).map_or(0.0, |c| c.x);
+        let area = label_content(node.bounds, node.element.layout);
         Some(TextInputState {
             id,
             text: edit.text().to_owned(),
             cursor: edit.cursor(),
             anchor: edit.anchor(),
             cursor_rectangle: Rect::new(
-                node.bounds.x + 10.0 + x - node.text_offset,
-                node.bounds.y + 5.0,
+                control_content(node.bounds, node.element.layout).x + x - node.text_offset,
+                area.y + ((area.height - node.element.style.text.line_height) / 2.0).max(0.0),
                 2.0,
-                (node.bounds.height - 10.0).max(1.0),
+                node.element
+                    .style
+                    .text
+                    .line_height
+                    .min(area.height)
+                    .max(1.0),
             ),
         })
     }
@@ -475,6 +481,16 @@ fn validate(e: &Element) -> Result<(), UiError> {
     {
         return Err(UiError::InvalidLayout);
     }
+    if !l.margin.valid()
+        || !l.insets().valid()
+        || e.style.radii.is_some_and(|r| {
+            [r.top_left, r.top_right, r.bottom_left, r.bottom_right]
+                .iter()
+                .any(|v| !v.is_finite() || *v < 0.0)
+        })
+    {
+        return Err(UiError::InvalidLayout);
+    }
     if [l.padding, l.gap]
         .into_iter()
         .any(|v| !v.is_finite() || v < 0.0)
@@ -528,4 +544,20 @@ fn inset(r: Rect, p: f32) -> Rect {
         (r.width - 2.0 * p).max(0.0),
         (r.height - 2.0 * p).max(0.0),
     )
+}
+
+fn control_content(bounds: Rect, layout: Layout) -> Rect {
+    if layout.padding_edges.is_some() || layout.padding != 0.0 {
+        layout.insets().apply(bounds)
+    } else {
+        inset(bounds, 10.0)
+    }
+}
+
+fn label_content(bounds: Rect, layout: Layout) -> Rect {
+    if layout.padding_edges.is_some() || layout.padding != 0.0 {
+        layout.insets().apply(bounds)
+    } else {
+        Insets::symmetric(0.0, 10.0).apply(bounds)
+    }
 }
