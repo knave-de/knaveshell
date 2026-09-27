@@ -641,8 +641,21 @@ struct Runtime {
 
 impl Runtime {
     fn configure_surface(&self, width: u32, height: u32) -> Option<wgpu::SurfaceConfiguration> {
-        self.surface
-            .get_default_config(&self.adapter, width.max(1), height.max(1))
+        let mut config =
+            self.surface
+                .get_default_config(&self.adapter, width.max(1), height.max(1))?;
+        let Some(format) = self
+            .surface
+            .get_capabilities(&self.adapter)
+            .formats
+            .into_iter()
+            .find(|format| format.is_srgb())
+        else {
+            eprintln!("knave-shell: GPU surface does not support an sRGB output format");
+            return None;
+        };
+        config.format = format;
+        Some(config)
     }
 
     fn request_draw(&mut self, qh: &QueueHandle<Self>) {
@@ -702,11 +715,12 @@ impl Runtime {
             return;
         }
         let render_list = &self.render_list;
+        let [red, green, blue, alpha] = render_list.clear_color.to_linear_rgba();
         let clear_color = wgpu::Color {
-            r: f64::from(render_list.clear_color.red) / 255.0,
-            g: f64::from(render_list.clear_color.green) / 255.0,
-            b: f64::from(render_list.clear_color.blue) / 255.0,
-            a: f64::from(render_list.clear_color.alpha) / 255.0,
+            r: f64::from(red),
+            g: f64::from(green),
+            b: f64::from(blue),
+            a: f64::from(alpha),
         };
 
         let frame = match self.surface.get_current_texture() {
@@ -1119,7 +1133,14 @@ impl LayerShellHandler for Runtime {
         };
         self.surface.configure(&self.device, &config);
         if self.painter_format != Some(config.format) {
-            self.painter = Some(WgpuPainter::new(&self.device, &self.queue, config.format));
+            match WgpuPainter::new(&self.device, &self.queue, config.format) {
+                Ok(painter) => self.painter = Some(painter),
+                Err(error) => {
+                    eprintln!("knave-shell: cannot create renderer: {error}");
+                    self.exit = true;
+                    return;
+                }
+            }
             self.painter_format = Some(config.format);
         }
         self.scene_dirty = true;

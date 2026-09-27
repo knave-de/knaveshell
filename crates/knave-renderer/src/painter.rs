@@ -14,6 +14,7 @@ const MAX_DISPLAY_COMMANDS_PER_FRAME: usize = 8192;
 pub enum PainterError {
     PrepareText(glyphon::PrepareError),
     RenderText(glyphon::RenderError),
+    UnsupportedOutputFormat(wgpu::TextureFormat),
     TooManyCommands(usize),
     TooManyTextRuns,
     UnsupportedTextTransform,
@@ -26,6 +27,10 @@ impl fmt::Display for PainterError {
         match self {
             Self::PrepareText(error) => write!(formatter, "text preparation failed: {error}"),
             Self::RenderText(error) => write!(formatter, "text rendering failed: {error}"),
+            Self::UnsupportedOutputFormat(format) => write!(
+                formatter,
+                "renderer requires a renderable sRGB output format, got {format:?}"
+            ),
             Self::TooManyCommands(count) => write!(
                 formatter,
                 "display list has {count} commands; limit is {MAX_DISPLAY_COMMANDS_PER_FRAME}"
@@ -58,12 +63,20 @@ pub struct WgpuPainter {
 }
 
 impl WgpuPainter {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
-        Self {
+    /// Build GPU passes for an sRGB color attachment.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+    ) -> Result<Self, PainterError> {
+        if !supports_output_format(format) {
+            return Err(PainterError::UnsupportedOutputFormat(format));
+        }
+        Ok(Self {
             shapes: ShapePass::new(device, format),
             images: ImagePass::new(device, format),
             text: TextPass::new(device, queue, format),
-        }
+        })
     }
 
     pub fn encode(
@@ -200,6 +213,13 @@ impl WgpuPainter {
     }
 }
 
+fn supports_output_format(format: wgpu::TextureFormat) -> bool {
+    matches!(
+        format,
+        wgpu::TextureFormat::Rgba8UnormSrgb | wgpu::TextureFormat::Bgra8UnormSrgb
+    )
+}
+
 enum PreparedDraw {
     Shape {
         instance_index: usize,
@@ -242,6 +262,19 @@ mod tests {
             scissor_rect(Some(Rect::new(12.0, 0.0, 2.0, 2.0)), (10, 10)),
             None
         );
+    }
+
+    #[test]
+    fn output_format_must_be_a_renderable_srgb_attachment() {
+        assert!(supports_output_format(wgpu::TextureFormat::Rgba8UnormSrgb));
+        assert!(supports_output_format(wgpu::TextureFormat::Bgra8UnormSrgb));
+        assert!(!supports_output_format(
+            wgpu::TextureFormat::Bc1RgbaUnormSrgb
+        ));
+        assert!(!supports_output_format(
+            wgpu::TextureFormat::Etc2Rgb8UnormSrgb
+        ));
+        assert!(!supports_output_format(wgpu::TextureFormat::Bgra8Unorm));
     }
 
     #[test]

@@ -44,12 +44,12 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
         view_formats: &[],
     });
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-    let mut painter = WgpuPainter::new(&device, &queue, format);
+    let mut painter = WgpuPainter::new(&device, &queue, format).expect("sRGB output format");
 
     let image = UiImage::from_rgba(1, 1, vec![0, 0, 255, 255]).unwrap();
     let list = DisplayList {
         revision: 1,
-        clear_color: Color::rgba(0, 0, 0, 255),
+        clear_color: Color::BACKGROUND,
         commands: vec![
             DisplayCommand::Shape {
                 bounds: Rect::new(1.0, 1.0, 12.0, 12.0),
@@ -68,7 +68,7 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
                 clip: None,
             },
             DisplayCommand::Shape {
-                bounds: Rect::new(6.0, 6.0, 4.0, 4.0),
+                bounds: Rect::new(2.0, 2.0, 12.0, 12.0),
                 paint: ShapePaint::fill(Color::rgba(0, 255, 0, 255)),
                 transform: Transform2D::IDENTITY,
                 clip: Some(Rect::new(6.0, 6.0, 2.0, 4.0)),
@@ -124,6 +124,12 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
                 transform: Transform2D::translation(16.0, 10.0),
                 clip: None,
             },
+            DisplayCommand::Shape {
+                bounds: Rect::new(27.0, 1.0, 3.0, 5.0),
+                paint: ShapePaint::fill(Color::rgba(48, 90, 160, 255)),
+                transform: Transform2D::IDENTITY,
+                clip: None,
+            },
         ],
     };
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -136,7 +142,7 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
                 view: &view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: wgpu::LoadOp::Clear(wgpu_color(Color::BACKGROUND)),
                     store: wgpu::StoreOp::Store,
                 },
                 depth_slice: None,
@@ -217,7 +223,7 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
         "image should draw over the first shape"
     );
     assert_eq!(
-        pixel(7, 7),
+        pixel(6, 8),
         [0, 255, 0, 255],
         "later shape should draw over the image"
     );
@@ -228,8 +234,18 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
     );
     assert_eq!(
         pixel(31, 30),
-        [0, 0, 0, 255],
+        [
+            Color::BACKGROUND.red,
+            Color::BACKGROUND.green,
+            Color::BACKGROUND.blue,
+            Color::BACKGROUND.alpha,
+        ],
         "rounded shape should not leak outside bounds"
+    );
+    assert_eq!(
+        pixel(28, 3),
+        [48, 90, 160, 255],
+        "shape colors should preserve their sRGB bytes in the output"
     );
     assert_eq!(
         pixel(25, 5),
@@ -271,4 +287,14 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
     }
     drop(mapped);
     readback.unmap();
+}
+
+fn wgpu_color(color: Color) -> wgpu::Color {
+    let [red, green, blue, alpha] = color.to_linear_rgba();
+    wgpu::Color {
+        r: f64::from(red),
+        g: f64::from(green),
+        b: f64::from(blue),
+        a: f64::from(alpha),
+    }
 }

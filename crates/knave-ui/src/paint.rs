@@ -1,3 +1,4 @@
+/// An 8-bit sRGB color, with straight alpha.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Color {
     pub red: u8,
@@ -18,6 +19,26 @@ impl Color {
             blue,
             alpha,
         }
+    }
+
+    /// Convert sRGB channels to linear-light RGBA for GPU rendering.
+    pub fn to_linear_rgba(self) -> [f32; 4] {
+        [
+            srgb_to_linear(self.red),
+            srgb_to_linear(self.green),
+            srgb_to_linear(self.blue),
+            f32::from(self.alpha) / 255.0,
+        ]
+    }
+}
+
+// Decode sRGB so GPU blending and shader math use linear-light values.
+fn srgb_to_linear(channel: u8) -> f32 {
+    let encoded = f32::from(channel) / 255.0;
+    if encoded <= 0.04045 {
+        encoded / 12.92
+    } else {
+        ((encoded + 0.055) / 1.055).powf(2.4)
     }
 }
 
@@ -168,5 +189,14 @@ mod tests {
         assert_eq!(shape.opacity, 1.0);
         assert_eq!(shape.radii, CornerRadii::default());
         assert_eq!(ImageStyle::default().fit, ImageFit::Stretch);
+    }
+
+    #[test]
+    fn color_converts_srgb_rgb_to_linear_but_keeps_alpha_linear() {
+        let channels = Color::rgba(10, 128, 255, 128).to_linear_rgba();
+        assert!((channels[0] - 0.003_035).abs() < 0.000_001);
+        assert!((channels[1] - 0.215_861).abs() < 0.000_01);
+        assert_eq!(channels[2], 1.0);
+        assert!((channels[3] - 128.0 / 255.0).abs() < 0.000_001);
     }
 }
