@@ -182,63 +182,79 @@ type WakeSender = channel::SyncSender<RuntimeWake>;
 
 enum SnapshotCommand {
     Refresh,
-    Stop,
 }
 
 struct SnapshotWorker {
-    commands: SyncSender<SnapshotCommand>,
-    updates: Receiver<DesktopSnapshot>,
+    commands: Option<SyncSender<SnapshotCommand>>,
+    updates: Arc<Mutex<Option<Result<DesktopSnapshot, ()>>>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl SnapshotWorker {
     fn start(wake: WakeSender) -> Self {
         let (commands, command_rx) = mpsc::sync_channel(1);
-        let (updates, update_rx) = mpsc::sync_channel(1);
+        let updates = Arc::new(Mutex::new(None));
+        let update_slot = Arc::clone(&updates);
         let thread = thread::spawn(move || {
             let mut client = None;
             let mut backoff = SNAPSHOT_REFRESH;
-            let mut last_generation = None;
+            let mut last_snapshot = None;
+            let mut unavailable = false;
             loop {
                 match query_snapshot(&mut client) {
                     Ok(snapshot) => {
                         backoff = SNAPSHOT_REFRESH;
-                        if last_generation != Some(snapshot.generation) {
-                            last_generation = Some(snapshot.generation);
-                            let _ = updates.try_send(snapshot);
+                        // Older providers use an allocation counter as generation; compare content too.
+                        if unavailable || last_snapshot.as_ref() != Some(&snapshot) {
+                            last_snapshot = Some(snapshot.clone());
+                            if let Ok(mut slot) = update_slot.lock() {
+                                *slot = Some(Ok(snapshot));
+                            }
                             let _ = wake.try_send(RuntimeWake::Redraw);
                         }
+                        unavailable = false;
                     }
                     Err(()) => {
+                        if !unavailable {
+                            if let Ok(mut slot) = update_slot.lock() {
+                                *slot = Some(Err(()));
+                            }
+                            let _ = wake.try_send(RuntimeWake::Redraw);
+                        }
+                        unavailable = true;
                         client = None;
                         backoff = backoff.saturating_mul(2).min(SNAPSHOT_MAX_BACKOFF);
                     }
                 }
                 match command_rx.recv_timeout(backoff) {
-                    Ok(SnapshotCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Ok(SnapshotCommand::Refresh) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
             }
         });
         Self {
-            commands,
-            updates: update_rx,
+            commands: Some(commands),
+            updates,
             thread: Some(thread),
         }
     }
 
     fn request_refresh(&self) {
-        let _ = self.commands.try_send(SnapshotCommand::Refresh);
+        let _ = self
+            .commands
+            .as_ref()
+            .unwrap()
+            .try_send(SnapshotCommand::Refresh);
     }
 
-    fn latest(&self) -> Option<DesktopSnapshot> {
-        self.updates.try_iter().last()
+    fn latest(&self) -> Option<Result<DesktopSnapshot, ()>> {
+        self.updates.lock().ok()?.take()
     }
 }
 
 impl Drop for SnapshotWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(SnapshotCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -256,11 +272,10 @@ enum PreviewCommand {
         generation: u64,
         workspaces: Vec<WorkspaceId>,
     },
-    Stop,
 }
 
 struct PreviewWorker {
-    commands: SyncSender<PreviewCommand>,
+    commands: Option<SyncSender<PreviewCommand>>,
     updates: Arc<Mutex<Option<PreviewUpdate>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -274,7 +289,6 @@ impl PreviewWorker {
             let mut client = None;
             while let Ok(command) = command_rx.recv() {
                 match command {
-                    PreviewCommand::Stop => break,
                     PreviewCommand::Refresh {
                         generation,
                         mut workspaces,
@@ -293,17 +307,21 @@ impl PreviewWorker {
             }
         });
         Self {
-            commands,
+            commands: Some(commands),
             updates,
             thread: Some(thread),
         }
     }
 
-    fn request_refresh(&self, generation: u64, workspaces: Vec<WorkspaceId>) {
-        let _ = self.commands.try_send(PreviewCommand::Refresh {
-            generation,
-            workspaces,
-        });
+    fn request_refresh(&self, generation: u64, workspaces: Vec<WorkspaceId>) -> bool {
+        self.commands
+            .as_ref()
+            .unwrap()
+            .try_send(PreviewCommand::Refresh {
+                generation,
+                workspaces,
+            })
+            .is_ok()
     }
 
     fn latest(&self) -> Option<PreviewUpdate> {
@@ -313,7 +331,7 @@ impl PreviewWorker {
 
 impl Drop for PreviewWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(PreviewCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -419,51 +437,56 @@ fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
 
 enum ActionCommand {
     Dispatch(DesktopCommand),
-    Stop,
 }
 
 struct ActionWorker {
-    commands: SyncSender<ActionCommand>,
+    results: Receiver<Result<(), String>>,
+    commands: Option<SyncSender<ActionCommand>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl ActionWorker {
-    fn start() -> Self {
+    fn start(wake: WakeSender) -> Self {
         let (commands, command_rx) = mpsc::sync_channel(1);
+        let (results_tx, results) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
             let mut client = None;
             while let Ok(command) = command_rx.recv() {
                 match command {
-                    ActionCommand::Stop => break,
                     ActionCommand::Dispatch(command) => {
-                        if let Err(error) = dispatch_action(&mut client, command) {
+                        let result = dispatch_action(&mut client, command);
+                        if let Err(error) = &result {
                             eprintln!("knave-shell: shell action failed: {error}");
                             client = None;
                         }
+                        let _ = results_tx.try_send(result);
+                        let _ = wake.try_send(RuntimeWake::Redraw);
                     }
                 }
             }
         });
         Self {
-            commands,
+            results,
+            commands: Some(commands),
             thread: Some(thread),
         }
     }
 
-    fn dispatch(&self, command: DesktopCommand) {
-        if self
-            .commands
+    fn dispatch(&self, command: DesktopCommand) -> Result<(), String> {
+        self.commands
+            .as_ref()
+            .unwrap()
             .try_send(ActionCommand::Dispatch(command))
-            .is_err()
-        {
-            eprintln!("knave-shell: shell action queue is full; dropping action");
-        }
+            .map_err(|_| "Desktop action queue is busy".into())
+    }
+    fn latest(&self) -> Option<Result<(), String>> {
+        self.results.try_iter().last()
     }
 }
 
 impl Drop for ActionWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(ActionCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -473,13 +496,19 @@ impl Drop for ActionWorker {
 fn dispatch_action(
     client: &mut Option<DesktopClient>,
     command: DesktopCommand,
-) -> Result<(), knave_desktop_api::ClientError> {
+) -> Result<(), String> {
     if client.is_none() {
-        *client = Some(DesktopClient::connect()?);
+        *client = Some(DesktopClient::connect().map_err(|error| error.to_string())?);
     }
-    let client = client.as_mut().expect("desktop client was initialized");
-    client.request(&DesktopRequest::Dispatch(command))?;
-    Ok(())
+    match client
+        .as_mut()
+        .expect("desktop client was initialized")
+        .request(&DesktopRequest::Dispatch(command))
+        .map_err(|error| error.to_string())?
+    {
+        DesktopResponse::Ok => Ok(()),
+        _ => Err("Unexpected desktop action response".into()),
+    }
 }
 
 fn query_snapshot(client: &mut Option<DesktopClient>) -> Result<DesktopSnapshot, ()> {
@@ -614,7 +643,7 @@ fn run_internal(
         })
         .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
 
-    let desktop_role = options.is_none();
+    let desktop_role = options.is_none() || app.as_ref().is_some_and(|app| app.uses_desktop());
     let clipboard_manager =
         smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(
             &globals,
@@ -653,12 +682,14 @@ fn run_internal(
         revision: 0,
         frame_pending: false,
         snapshot_worker: desktop_role.then(|| SnapshotWorker::start(wake_sender.clone())),
-        action_worker: desktop_role.then(ActionWorker::start),
+        action_worker: desktop_role.then(|| ActionWorker::start(wake_sender.clone())),
         preview_worker: (desktop_role && role == ShellRole::Overview)
             .then(|| PreviewWorker::start(wake_sender)),
         snapshot: None,
         previews: Vec::new(),
         preview_generation: 0,
+        preview_requested: Vec::new(),
+        preview_refresh: true,
         search_query: String::new(),
         search_index: 0,
         scene: UiScene::new(0),
@@ -714,6 +745,8 @@ struct Runtime {
     snapshot: Option<DesktopSnapshot>,
     previews: Vec<WorkspacePreviewImage>,
     preview_generation: u64,
+    preview_requested: Vec<WorkspaceId>,
+    preview_refresh: bool,
     search_query: String,
     search_index: usize,
     scene: UiScene,
@@ -759,35 +792,75 @@ impl Runtime {
         if !self.configured {
             return;
         }
+        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
+            && let Some(app) = &mut self.app
+        {
+            app.desktop_action_finished(result);
+            self.exit |= app.should_close();
+            self.scene_dirty = true;
+        }
+        if self.exit {
+            return;
+        }
         let mut should_render =
             self.scene_dirty || self.app.as_ref().is_some_and(|app| app.needs_frame());
-        if let Some(snapshot) = self
+        if let Some(update) = self
             .snapshot_worker
             .as_ref()
             .and_then(SnapshotWorker::latest)
-            && self.snapshot.as_ref() != Some(&snapshot)
         {
-            let generation = self.preview_generation.wrapping_add(1);
-            let workspaces = snapshot
-                .workspaces
-                .iter()
-                .take(MAX_PREVIEWS)
-                .map(|workspace| workspace.workspace)
-                .collect();
-            self.snapshot = Some(snapshot);
-            self.previews.clear();
-            self.preview_generation = generation;
-            if let Some(worker) = &self.preview_worker {
-                worker.request_refresh(generation, workspaces);
+            match update {
+                Ok(snapshot) => {
+                    if let Some(app) = &mut self.app {
+                        app.desktop_snapshot(&snapshot);
+                    }
+                    if self.snapshot.as_ref() != Some(&snapshot) {
+                        self.preview_refresh = true;
+                    }
+                    self.snapshot = Some(snapshot);
+                }
+                Err(()) => {
+                    if let Some(app) = &mut self.app {
+                        app.desktop_unavailable();
+                    }
+                }
             }
             self.scene_dirty = true;
             should_render = true;
+        }
+        let mut desired = self
+            .app
+            .as_ref()
+            .and_then(|app| app.preview_workspaces())
+            .unwrap_or_else(|| {
+                self.snapshot.as_ref().map_or_else(Vec::new, |s| {
+                    s.workspaces
+                        .iter()
+                        .take(MAX_PREVIEWS)
+                        .map(|w| w.workspace)
+                        .collect()
+                })
+            });
+        desired.truncate(MAX_PREVIEWS);
+        if (self.preview_refresh || desired != self.preview_requested)
+            && let Some(worker) = &self.preview_worker
+        {
+            let generation = self.preview_generation.wrapping_add(1);
+            // On a full queue retry when the existing job wakes us; never lose the newest selection.
+            if worker.request_refresh(generation, desired.clone()) {
+                self.preview_generation = generation;
+                self.preview_requested = desired;
+                self.preview_refresh = false;
+            }
         }
         if let Some(worker) = &self.preview_worker
             && let Some(update) = worker.latest()
             && self.preview_generation == update.generation
         {
             self.previews = update.previews;
+            if let Some(app) = &mut self.app {
+                app.workspace_previews(&self.previews);
+            }
             self.scene_dirty = true;
             should_render = true;
         }
@@ -823,6 +896,7 @@ impl Runtime {
         }
         self.sync_ime();
         self.sync_cursor();
+        self.application_requests(qh);
         let scaled;
         let render_list = if self.scale > 1 {
             scaled = scale_list(&self.render_list, self.scale as f32);
@@ -985,7 +1059,8 @@ impl Runtime {
         match action {
             UiAction::CloseOverview => self.exit = true,
             UiAction::FocusWorkspace(workspace) => {
-                self.action_worker
+                let _ = self
+                    .action_worker
                     .as_ref()
                     .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::FocusWorkspace { workspace });
@@ -994,7 +1069,8 @@ impl Runtime {
                 }
             }
             UiAction::FocusWindow(window) => {
-                self.action_worker
+                let _ = self
+                    .action_worker
                     .as_ref()
                     .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::FocusWindow { window });
@@ -1003,7 +1079,8 @@ impl Runtime {
                 }
             }
             UiAction::RestoreWindow(window) => {
-                self.action_worker
+                let _ = self
+                    .action_worker
                     .as_ref()
                     .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::RestoreWindow { window });
@@ -1263,7 +1340,7 @@ impl PointerHandler for Runtime {
         self.sync_cursor();
         if self.app.is_some() {
             self.sync_ime();
-            self.clipboard_requests(qh);
+            self.application_requests(qh);
             self.request_draw(qh);
         }
     }
@@ -1457,7 +1534,7 @@ impl Runtime {
         }
         self.sync_ime();
         self.sync_cursor();
-        self.clipboard_requests(qh);
+        self.application_requests(qh);
         self.request_draw(qh);
     }
 }

@@ -607,6 +607,7 @@ dependencies = [
 name = "knave-shell"
 version = "0.1.0"
 dependencies = [
+ "knave-desktop-api",
  "knave-renderer",
  "knave-ui",
  "knave-wayland",

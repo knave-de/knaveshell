@@ -11,18 +11,15 @@ backend. The direct Wayland layer-shell path is the runtime target.
     knave-shell bar
     knave-shell overview
 
-The bar is a top layer with a 36-pixel exclusive zone. The overview is an
-on-demand exclusive overlay; Escape closes it and number keys 1-9/0 focus the
-corresponding workspace before closing it. Typing opens a bounded search over
-windows, workspaces, and close; Up/Down changes selection and Enter activates it.
-The overview uses the same 36-pixel status/workspace strip at its top edge,
-instead of drawing a second workspace selector. The bar exposes workspace hit
-targets for pointer activation; overview cards focus normal windows or restore
-minimized ones, and clicking its background closes it. Both consume Knave's
-versioned
-desktop snapshot contract and keep IPC off the Wayland frame thread.
-Overview workspace cards request bounded 320x180 PNG previews asynchronously;
-the cards remain usable when a preview is unavailable.
+The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output
+with a workspace carousel, search, and a minimized-window shelf for the browsed
+workspace. Left/Right browse workspaces; click the center preview or press Enter
+to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
+search existing windows, use Tab to traverse controls, and Escape to clear search
+or leave overview. Activation closes only after the desktop service acknowledges
+success. The overview currently displays workspace snapshots, not independently
+interactive window previews. Both roles consume Knave's versioned desktop
+contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
 
@@ -49,7 +46,7 @@ Input actions use a separate one-entry bounded queue and one worker. A full
 queue drops an action with an explicit diagnostic instead of creating threads.
 
 Overview previews use one additional worker only for the overview role. It
-requests at most ten workspace captures per changed snapshot, keeps one latest
+requests the centered workspace and up to two neighbors on state or browsing changes, keeps one latest
 update slot, rejects malformed or oversized PNGs, and uploads decoded images
 through the renderer's bounded texture cache. No preview request or decode runs
 on the Wayland frame callback.
@@ -68,14 +65,12 @@ user actions back through that same contract.
 requesting sudo only for the target prefix. --prefix is explicit and useful for
 packaging. The installer also writes the README below the selected prefix.
 
-## Migration status
+## Implementation status
 
-The Rust/wgpu workspace is the sole shell implementation. It draws bounded
-rectangle, bitmap-text, and workspace-image commands through the direct Wayland
-layer-shell runtime. Pointer activation is limited to workspace targets and
-overview dismissal. Remaining product work is richer text primitives,
-packaging integration, and live direct-TTY/GPU coverage; none of these depend
-on restoring the removed Qt/CMake path.
+The supported runtime is Rust/wgpu over Wayland layer-shell. Overview uses the
+retained UI toolkit; the bar retains its existing scene projection. Individual
+window previews, fullscreen-hidden grouping, application launching/icons,
+fractional scaling and multiple-output hosting remain future work.
 
 ## Workspace
 

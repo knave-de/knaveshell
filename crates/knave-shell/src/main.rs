@@ -9,6 +9,13 @@ fn usage() -> &'static str {
 }
 
 fn check(role: ShellRole) {
+    if role == ShellRole::Overview {
+        knave_shell::overview::Overview::new()
+            .check([1920.0, 1080.0])
+            .expect("valid overview composition");
+        println!("knave-shell role=overview retained scene valid");
+        return;
+    }
     let scene = match role {
         ShellRole::Bar => UiScene::bar(1, 1920.0, 36.0),
         ShellRole::Overview => UiScene::overview(1, 1920.0, 1080.0),
@@ -46,7 +53,20 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
 
-    knave_wayland::run(role).map_err(|error| error.to_string())
+    if role == ShellRole::Overview {
+        knave_wayland::run_application(
+            knave_wayland::SurfaceOptions {
+                keyboard: knave_wayland::KeyboardMode::Exclusive,
+                layer: knave_wayland::SurfaceLayer::Overlay,
+                namespace: "knave-shell-overview".into(),
+                ..Default::default()
+            },
+            knave_shell::overview::Overview::new(),
+        )
+        .map_err(|error| error.to_string())
+    } else {
+        knave_wayland::run(role).map_err(|error| error.to_string())
+    }
 }
 
 fn main() -> ExitCode {

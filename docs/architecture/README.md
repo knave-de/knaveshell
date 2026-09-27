@@ -13,6 +13,7 @@ configuration, versioning, build, and compatibility policy.
 - [Renderer foundation](renderer-foundation.md)
 - [Retained scene toolkit](scene-toolkit.md)
 - [General shell application host](application-host.md)
+- [Workspace overview](overview.md)
 
 Local documents describe this repository's responsibilities; they do not create
 a second desktop-wide contract.
