@@ -5,6 +5,13 @@ use crate::{
 /// One renderer-independent drawing operation in back-to-front order.
 #[derive(Clone, Debug, PartialEq)]
 pub enum DisplayCommand {
+    RichText {
+        bounds: Rect,
+        spans: Vec<crate::TextSpan>,
+        style: TextStyle,
+        transform: Transform2D,
+        clip: Option<Rect>,
+    },
     Shape {
         bounds: Rect,
         paint: ShapePaint,

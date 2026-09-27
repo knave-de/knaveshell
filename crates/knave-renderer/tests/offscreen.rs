@@ -276,6 +276,39 @@ fn offscreen_frame_preserves_order_clips_images_and_renders_real_text() {
         "a later text run after a shape should retain its glyph-atlas entries"
     );
 
+    let warm = painter.stats();
+    let mut second = device.create_command_encoder(&Default::default());
+    painter
+        .encode(&device, &queue, &mut second, &view, size, &list)
+        .unwrap();
+    queue.submit([second.finish()]);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    let reused = painter.stats();
+    assert_eq!(reused.frames, warm.frames + 1);
+    assert_eq!(
+        reused.shape_buffer_allocations,
+        warm.shape_buffer_allocations
+    );
+    assert_eq!(
+        reused.image_buffer_allocations,
+        warm.image_buffer_allocations
+    );
+    use knave_ui::toolkit::TextMeasurer;
+    for value in ["office", "e\u{301}", "नेपाली", "abc אבג"] {
+        let layout = painter.measure(value, &TextStyle::default(), 400.0);
+        use unicode_segmentation::UnicodeSegmentation;
+        for byte in value
+            .grapheme_indices(true)
+            .map(|(byte, _)| byte)
+            .chain([value.len()])
+        {
+            assert!(
+                layout.caret(byte).is_some(),
+                "missing caret {byte} in {value:?}"
+            );
+        }
+    }
+
     if let Ok(path) = std::env::var("KNAVE_RENDERER_TEST_FRAME") {
         let file = std::fs::File::create(path).expect("create requested frame dump");
         let mut encoder = png::Encoder::new(file, size.0, size.1);

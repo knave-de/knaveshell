@@ -10,6 +10,7 @@ bytemuck.workspace = true
 glyphon.workspace = true
 knave-ui.workspace = true
 wgpu.workspace = true
+unicode-segmentation = "1.12"
 
 [dev-dependencies]
 png.workspace = true

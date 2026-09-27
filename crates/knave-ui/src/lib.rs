@@ -3,6 +3,7 @@
 mod display_list;
 mod geometry;
 mod paint;
+pub mod toolkit;
 
 use std::sync::Arc;
 
@@ -14,8 +15,8 @@ pub use display_list::{
 };
 pub use geometry::{Rect, Transform2D};
 pub use paint::{
-    Border, BoxShadow, Color, CornerRadii, ImageFit, ImageStyle, ShapePaint, TextAlign, TextStyle,
-    TextWrap,
+    Border, BoxShadow, Color, CornerRadii, ImageFit, ImageStyle, ShapePaint, TextAlign, TextSpan,
+    TextStyle, TextWrap,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

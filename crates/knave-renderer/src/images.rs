@@ -2,7 +2,6 @@ use std::{collections::HashMap, sync::Arc};
 
 use bytemuck::{Pod, Zeroable};
 use knave_ui::{DisplayCommand, ImageFit, ImageStyle, Rect, Transform2D, UiImage};
-use wgpu::util::DeviceExt;
 
 const MAX_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_IMAGE_CACHE_ENTRIES: usize = 128;
@@ -158,6 +157,9 @@ pub(super) struct ImagePass {
     sampler: wgpu::Sampler,
     cache: ImageCache,
     instances: Option<wgpu::Buffer>,
+    staging: Vec<ImageInstance>,
+    capacity: usize,
+    pub allocations: u64,
     bind_groups: Vec<wgpu::BindGroup>,
     resources: Vec<Arc<CachedImage>>,
     pub draws: Vec<Option<ImageDraw>>,
@@ -260,6 +262,9 @@ impl ImagePass {
             sampler,
             cache: ImageCache::default(),
             instances: None,
+            staging: Vec::new(),
+            capacity: 0,
+            allocations: 0,
             bind_groups: Vec::new(),
             resources: Vec::new(),
             draws: Vec::new(),
@@ -283,9 +288,9 @@ impl ImagePass {
         );
         self.draws.clear();
         self.draws.resize(commands.len(), None);
-        self.bind_groups.clear();
-        self.resources.clear();
-        let mut instances = Vec::new();
+        let previous_resources = std::mem::take(&mut self.resources);
+        self.staging.clear();
+        let mut instances = std::mem::take(&mut self.staging);
         let mut frame_budget = FrameImageBudget::default();
         let mut frame_resources = HashMap::<ImageKey, Arc<CachedImage>>::new();
         for (command_index, command) in commands.iter().enumerate() {
@@ -354,41 +359,58 @@ impl ImagePass {
             self.resources.push(resource);
         }
 
-        self.instances = None;
         if instances.is_empty() {
+            self.staging = instances;
+            self.bind_groups.clear();
             return;
         }
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("knave-images-instances"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        for resource in &self.resources {
-            self.bind_groups
-                .push(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("knave-images-bind-group"),
-                    layout: &self.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: self.viewport.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: buffer.as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::TextureView(&resource.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                    ],
-                }));
+        let grew = instances.len() > self.capacity;
+        if grew {
+            self.capacity = instances.len().next_power_of_two();
+            self.instances = Some(device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("knave-images-instances"),
+                size: (self.capacity * std::mem::size_of::<ImageInstance>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+            self.allocations += 1;
         }
-        self.instances = Some(buffer);
+        let buffer = self.instances.as_ref().expect("image capacity allocated");
+        queue.write_buffer(buffer, 0, bytemuck::cast_slice(&instances));
+        let same_resources = previous_resources.len() == self.resources.len()
+            && previous_resources
+                .iter()
+                .zip(&self.resources)
+                .all(|(a, b)| Arc::ptr_eq(a, b));
+        if grew || !same_resources {
+            self.bind_groups.clear();
+            for resource in &self.resources {
+                self.bind_groups
+                    .push(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("knave-images-bind-group"),
+                        layout: &self.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: self.viewport.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::TextureView(&resource.view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                    }));
+            }
+        }
+        self.staging = instances;
     }
 
     pub fn draw<'a>(
