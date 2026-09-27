@@ -1085,38 +1085,27 @@ impl Runtime {
 
 impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
-        match action {
-            UiAction::CloseOverview => self.exit = true,
-            UiAction::FocusWorkspace(workspace) => {
-                let _ = self
-                    .action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::FocusWorkspace { workspace });
+        let command = match action {
+            UiAction::CloseOverview => {
+                self.exit = true;
+                return;
+            }
+            UiAction::FocusWorkspace(workspace) => DesktopCommand::FocusWorkspace { workspace },
+            UiAction::FocusWindow(window) => DesktopCommand::FocusWindow { window },
+            UiAction::RestoreWindow(window) => DesktopCommand::RestoreWindow { window },
+        };
+        match self
+            .action_worker
+            .as_ref()
+            .expect("desktop role owns an action worker")
+            .dispatch(command)
+        {
+            Ok(()) => {
                 if self.role == ShellRole::Overview {
                     self.exit = true;
                 }
             }
-            UiAction::FocusWindow(window) => {
-                let _ = self
-                    .action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::FocusWindow { window });
-                if self.role == ShellRole::Overview {
-                    self.exit = true;
-                }
-            }
-            UiAction::RestoreWindow(window) => {
-                let _ = self
-                    .action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::RestoreWindow { window });
-                if self.role == ShellRole::Overview {
-                    self.exit = true;
-                }
-            }
+            Err(error) => eprintln!("knave-shell: shell action rejected: {error}"),
         }
     }
 

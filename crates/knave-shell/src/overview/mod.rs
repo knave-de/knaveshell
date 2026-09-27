@@ -248,12 +248,18 @@ impl Application for Overview {
         if self.snapshot.as_ref() == Some(snapshot) && self.connected {
             return;
         }
-        self.connected = true;
-        self.error = None;
         if snapshot.windows.len() > MAX_WINDOWS || snapshot.workspaces.len() > MAX_WORKSPACES {
+            self.connected = false;
+            // Cancel an activation not yet handed to the host against the rejected model.
+            if matches!(self.request, Some(HostRequest::Desktop(_))) {
+                self.request = None;
+                self.pending = false;
+            }
             self.host_error("Desktop exceeds the supported overview capacity");
             return;
         }
+        self.connected = true;
+        self.error = None;
         let previous = self.workspace;
         self.workspace = previous
             .filter(|id| snapshot.workspaces.iter().any(|w| w.workspace == *id))
