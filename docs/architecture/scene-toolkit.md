@@ -44,6 +44,11 @@ scroll, capture and popup state by ID.
   not separate native Wayland popup surfaces.
 - Single-line editing uses grapheme boundaries, selection, clipboard actions
   and preedit/commit events. Glyph-derived carets interpolate within ligatures.
+  `Action::Cut { id, copied, text }` reports the clipboard payload and resulting
+  value together; consumers must copy `copied` and process `text` as a value
+  change. Empty selections do not produce a cut. Copy remains `Action::Copy`.
+  Enter and clipboard/select-all shortcuts ignore key repeat; deletion,
+  navigation and ordinary text entry continue to repeat.
   Full bidirectional selection fidelity and IME preedit cursor attributes are
   not complete. Tooltips are immediate and bounded; there is no idle timer.
 
@@ -129,6 +134,8 @@ The new toolkit is additive to the workspace-internal Rust API.
 consumers are updated together; external Rust matches require a source update. `Element` also gains an optional
 cursor field; constructor users receive automatic defaults, while exhaustive
 struct literals must add `cursor: None`.
+`Action::Cut` is an additional exhaustive enum variant; action consumers must
+handle both the clipboard and value-change effects when adopting this revision.
 Workspace crate versions remain 0.1.0, unreleased; the source revision identifies
 the compatible combination. No desktop API, configuration schema, compositor
 protocol or persisted data changes. Production bar/overview projections are

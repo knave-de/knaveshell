@@ -689,3 +689,91 @@ fn checkbox_emits_checkmark_and_background_preserves_individual_radii() {
             .any(|c| matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.radii==radii))
     );
 }
+
+fn editor_key(s: &mut Scene, key: Key, control: bool, repeat: bool) -> Option<Action> {
+    s.event(Input::Key {
+        key,
+        pressed: true,
+        repeat,
+        modifiers: KeyModifiers {
+            control,
+            ..Default::default()
+        },
+    })
+    .action
+}
+
+#[test]
+fn cutting_reports_clipboard_and_resulting_value_without_losing_unicode() {
+    let mut s = scene(vec![leaf(
+        1,
+        Widget::TextInput(TextEdit::new("keep 👨‍👩‍👧‍👦").unwrap()),
+    )]);
+    key(&mut s, Key::Tab, false);
+    // Select only the final grapheme, leaving an observable nonempty field value.
+    key(&mut s, Key::Left, true);
+    s.display_list([400.0, 400.0], &mut Metrics);
+    assert_eq!(
+        editor_key(&mut s, Key::C, true, false),
+        Some(Action::Copy("👨‍👩‍👧‍👦".into()))
+    );
+    assert_eq!(
+        editor_key(&mut s, Key::X, true, false),
+        Some(Action::Cut {
+            id: ElementId(1),
+            copied: "👨‍👩‍👧‍👦".into(),
+            text: "keep ".into(),
+        })
+    );
+    assert!(s.needs_frame());
+    let Some(Widget::TextInput(edit)) = s.widget(ElementId(1)) else {
+        panic!("editor missing")
+    };
+    assert_eq!(edit.text(), "keep ");
+    assert!(edit.selection().is_empty());
+    assert_eq!(editor_key(&mut s, Key::X, true, false), None);
+}
+
+#[test]
+fn text_submission_and_clipboard_shortcuts_ignore_repeats() {
+    let mut s = scene(vec![leaf(
+        1,
+        Widget::TextInput(TextEdit::new("abc").unwrap()),
+    )]);
+    key(&mut s, Key::Tab, false);
+    assert_eq!(
+        editor_key(&mut s, Key::Enter, false, false),
+        Some(Action::Submitted(ElementId(1), "abc".into()))
+    );
+    assert_eq!(
+        editor_key(&mut s, Key::V, true, false),
+        Some(Action::RequestPaste(ElementId(1)))
+    );
+    for (key, control) in [
+        (Key::Enter, false),
+        (Key::A, true),
+        (Key::C, true),
+        (Key::X, true),
+        (Key::V, true),
+    ] {
+        assert_eq!(editor_key(&mut s, key, control, true), None);
+    }
+    let Some(Widget::TextInput(edit)) = s.widget(ElementId(1)) else {
+        panic!("editor missing")
+    };
+    assert_eq!(edit.text(), "abc");
+    assert!(edit.selection().is_empty());
+    assert_eq!(editor_key(&mut s, Key::Left, false, true), None);
+    assert_eq!(
+        editor_key(&mut s, Key::Backspace, false, true),
+        Some(Action::TextChanged(ElementId(1), "ac".into()))
+    );
+    assert_eq!(
+        editor_key(&mut s, Key::Delete, false, true),
+        Some(Action::TextChanged(ElementId(1), "a".into()))
+    );
+    assert_eq!(
+        s.event(Input::Text("z".into())).action,
+        Some(Action::TextChanged(ElementId(1), "az".into()))
+    );
+}

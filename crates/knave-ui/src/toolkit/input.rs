@@ -75,6 +75,12 @@ pub enum Action {
     Submitted(ElementId, String),
     PopupClosed(ElementId),
     Copy(String),
+    /// A cut carries both the clipboard payload and the resulting field value.
+    Cut {
+        id: ElementId,
+        copied: String,
+        text: String,
+    },
     RequestPaste(ElementId),
 }
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -529,6 +535,12 @@ impl Scene {
         repeat: bool,
         modifiers: KeyModifiers,
     ) -> Option<Action> {
+        if repeat
+            && (matches!(key, Key::Enter | Key::Space)
+                || (modifiers.control && matches!(key, Key::A | Key::C | Key::X | Key::V)))
+        {
+            return None;
+        }
         if !pressed {
             if matches!(key, Key::Space | Key::Enter)
                 && let Some(id) = self.key_pressed.take()
@@ -709,7 +721,11 @@ impl Scene {
             Key::X if m.control => {
                 let copied = edit.selected_text().to_owned();
                 changed = edit.insert("");
-                Some(Action::Copy(copied))
+                changed.then(|| Action::Cut {
+                    id,
+                    copied,
+                    text: edit.text().to_owned(),
+                })
             }
             Key::V if m.control => Some(Action::RequestPaste(id)),
             Key::Left => {
