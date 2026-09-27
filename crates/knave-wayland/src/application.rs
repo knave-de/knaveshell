@@ -57,9 +57,25 @@ impl Default for SurfaceOptions {
 pub enum HostRequest {
     Copy(String),
     Paste(knave_ui::toolkit::ElementId),
+    Desktop(knave_desktop_api::DesktopCommand),
 }
 
 pub trait Application {
+    /// Opt into the host's bounded desktop snapshot, preview and action workers.
+    fn uses_desktop(&self) -> bool {
+        false
+    }
+    fn desktop_snapshot(&mut self, _snapshot: &knave_desktop_api::DesktopSnapshot) {}
+    /// Request only the workspace previews currently visible to this application.
+    fn preview_workspaces(&self) -> Option<Vec<knave_desktop_api::WorkspaceId>> {
+        None
+    }
+    fn desktop_unavailable(&mut self) {
+        self.host_error("Desktop connection unavailable; retrying");
+    }
+    fn workspace_previews(&mut self, _previews: &[knave_ui::WorkspacePreviewImage]) {}
+    fn desktop_action_finished(&mut self, _result: Result<(), String>) {}
+
     /// Queried after input and layout. Existing applications receive a visible arrow.
     fn cursor(&self) -> knave_ui::toolkit::CursorShape {
         knave_ui::toolkit::CursorShape::Default
@@ -129,7 +145,32 @@ pub(super) fn key(raw: u32) -> knave_ui::toolkit::Key {
         0x78 | 0x58 => Key::X,
         0x76 | 0x56 => Key::V,
         0x71 | 0x51 => Key::Q,
+        0x6b | 0x4b => Key::K,
         _ => Key::Other,
+    }
+}
+
+impl super::Runtime {
+    pub(super) fn application_requests(&mut self, qh: &wayland_client::QueueHandle<Self>) {
+        match self.app.as_mut().and_then(|app| app.take_request()) {
+            Some(HostRequest::Copy(text)) => self.copy_text(text, qh),
+            Some(HostRequest::Paste(target)) => self.request_paste(target, qh),
+            Some(HostRequest::Desktop(command)) => {
+                let result = self
+                    .action_worker
+                    .as_ref()
+                    .ok_or_else(|| "Desktop service is not enabled".to_owned())
+                    .and_then(|worker| worker.dispatch(command));
+                if let Err(error) = result
+                    && let Some(app) = &mut self.app
+                {
+                    app.desktop_action_finished(Err(error));
+                    self.exit |= app.should_close();
+                    self.scene_dirty = true;
+                }
+            }
+            None => {}
+        }
     }
 }
 

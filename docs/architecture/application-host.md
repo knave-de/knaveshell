@@ -12,7 +12,9 @@ rejected before connecting.
 
 Input is delivered in protocol order, pointer batches coalesce before drawing,
 and one outstanding frame callback limits redraw scheduling. Idle applications
-have no redraw timer or desktop IPC workers. Keyboard repeat uses the seat's
+have no redraw timer. Desktop IPC workers are enabled only when an application
+opts in through `uses_desktop`; see [the overview contract](overview.md).
+Keyboard repeat uses the seat's
 repeat settings and an owned event-loop timer. Integer output scale updates the
 buffer and display transforms while scene coordinates stay logical.
 

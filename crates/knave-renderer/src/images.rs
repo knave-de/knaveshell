@@ -3,9 +3,9 @@ use std::{collections::HashMap, sync::Arc};
 use bytemuck::{Pod, Zeroable};
 use knave_ui::{DisplayCommand, ImageFit, ImageStyle, Rect, Transform2D, UiImage};
 
-const MAX_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_CACHE_BYTES: usize = 512 * 1024 * 1024;
 const MAX_IMAGE_CACHE_ENTRIES: usize = 128;
-const MAX_IMAGE_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MAX_IMAGE_FRAME_BYTES: usize = 512 * 1024 * 1024;
 
 const SHADER: &str = r#"
 struct Viewport { size: vec2<f32> };

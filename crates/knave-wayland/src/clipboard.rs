@@ -1,5 +1,5 @@
 //! Bounded, nonblocking clipboard transfers owned by the surface runtime.
-use super::{Runtime, application::HostRequest};
+use super::Runtime;
 use knave_ui::toolkit::{ElementId, Input, MAX_TEXT_BYTES};
 use smithay_client_toolkit::{
     data_device_manager::{
@@ -63,34 +63,25 @@ impl Clipboard {
     }
 }
 impl Runtime {
-    pub(super) fn clipboard_requests(&mut self, qh: &QueueHandle<Self>) {
-        let request = self.app.as_mut().and_then(|app| app.take_request());
-        match request {
-            Some(HostRequest::Copy(text)) => {
-                if text.len() > MAX_TEXT_BYTES {
-                    self.clipboard_error("copy exceeds text limit");
-                    return;
-                }
-                let (Some(manager), Some(device), Some(serial)) = (
-                    &self.clipboard.manager,
-                    &self.clipboard.device,
-                    self.clipboard.serial,
-                ) else {
-                    self.clipboard_error(
-                        "clipboard is unavailable without a seat and input serial",
-                    );
-                    return;
-                };
-                let source = manager.create_copy_paste_source(qh, MIMES);
-                source.set_selection(device, serial);
-                if let Some(previous) = self.clipboard.source.replace(source) {
-                    previous.inner().destroy();
-                }
-                self.clipboard.contents = Arc::from(text.into_bytes());
-            }
-            Some(HostRequest::Paste(target)) => self.request_paste(target, qh),
-            None => {}
+    pub(super) fn copy_text(&mut self, text: String, qh: &QueueHandle<Self>) {
+        if text.len() > MAX_TEXT_BYTES {
+            self.clipboard_error("copy exceeds text limit");
+            return;
         }
+        let (Some(manager), Some(device), Some(serial)) = (
+            &self.clipboard.manager,
+            &self.clipboard.device,
+            self.clipboard.serial,
+        ) else {
+            self.clipboard_error("clipboard is unavailable without a seat and input serial");
+            return;
+        };
+        let source = manager.create_copy_paste_source(qh, MIMES);
+        source.set_selection(device, serial);
+        if let Some(previous) = self.clipboard.source.replace(source) {
+            previous.inner().destroy();
+        }
+        self.clipboard.contents = Arc::from(text.into_bytes());
     }
     fn clipboard_error(&mut self, message: &str) {
         if let Some(app) = &mut self.app {
@@ -129,7 +120,7 @@ impl Runtime {
             }
         }
     }
-    fn request_paste(&mut self, target: ElementId, qh: &QueueHandle<Self>) {
+    pub(super) fn request_paste(&mut self, target: ElementId, qh: &QueueHandle<Self>) {
         if self.clipboard.transfers.len() >= 4 {
             self.clipboard_error("clipboard transfer capacity reached");
             return;

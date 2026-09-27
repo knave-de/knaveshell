@@ -168,11 +168,9 @@ pub enum WaylandError {
 
 const SNAPSHOT_REFRESH: Duration = Duration::from_millis(500);
 const SNAPSHOT_MAX_BACKOFF: Duration = Duration::from_secs(5);
-const MAX_PREVIEWS: usize = 10;
-const PREVIEW_WIDTH: u32 = 320;
-const PREVIEW_HEIGHT: u32 = 180;
-const MAX_PREVIEW_PIXELS: u64 = (PREVIEW_WIDTH as u64) * (PREVIEW_HEIGHT as u64);
-const MAX_PREVIEW_BASE64_LENGTH: usize = 512 * 1024;
+const MAX_PREVIEWS: usize = 3;
+const MAX_PREVIEW_PIXELS: u64 = 36 * 1024 * 1024;
+const MAX_PREVIEW_BASE64_LENGTH: usize = 192 * 1024 * 1024;
 
 enum RuntimeWake {
     Redraw,
@@ -182,63 +180,79 @@ type WakeSender = channel::SyncSender<RuntimeWake>;
 
 enum SnapshotCommand {
     Refresh,
-    Stop,
 }
 
 struct SnapshotWorker {
-    commands: SyncSender<SnapshotCommand>,
-    updates: Receiver<DesktopSnapshot>,
+    commands: Option<SyncSender<SnapshotCommand>>,
+    updates: Arc<Mutex<Option<Result<DesktopSnapshot, ()>>>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl SnapshotWorker {
     fn start(wake: WakeSender) -> Self {
         let (commands, command_rx) = mpsc::sync_channel(1);
-        let (updates, update_rx) = mpsc::sync_channel(1);
+        let updates = Arc::new(Mutex::new(None));
+        let update_slot = Arc::clone(&updates);
         let thread = thread::spawn(move || {
             let mut client = None;
             let mut backoff = SNAPSHOT_REFRESH;
-            let mut last_generation = None;
+            let mut last_snapshot = None;
+            let mut unavailable = false;
             loop {
                 match query_snapshot(&mut client) {
                     Ok(snapshot) => {
                         backoff = SNAPSHOT_REFRESH;
-                        if last_generation != Some(snapshot.generation) {
-                            last_generation = Some(snapshot.generation);
-                            let _ = updates.try_send(snapshot);
+                        // Older providers use an allocation counter as generation; compare content too.
+                        if unavailable || last_snapshot.as_ref() != Some(&snapshot) {
+                            last_snapshot = Some(snapshot.clone());
+                            if let Ok(mut slot) = update_slot.lock() {
+                                *slot = Some(Ok(snapshot));
+                            }
                             let _ = wake.try_send(RuntimeWake::Redraw);
                         }
+                        unavailable = false;
                     }
                     Err(()) => {
+                        if !unavailable {
+                            if let Ok(mut slot) = update_slot.lock() {
+                                *slot = Some(Err(()));
+                            }
+                            let _ = wake.try_send(RuntimeWake::Redraw);
+                        }
+                        unavailable = true;
                         client = None;
                         backoff = backoff.saturating_mul(2).min(SNAPSHOT_MAX_BACKOFF);
                     }
                 }
                 match command_rx.recv_timeout(backoff) {
-                    Ok(SnapshotCommand::Stop) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Ok(SnapshotCommand::Refresh) | Err(mpsc::RecvTimeoutError::Timeout) => {}
                 }
             }
         });
         Self {
-            commands,
-            updates: update_rx,
+            commands: Some(commands),
+            updates,
             thread: Some(thread),
         }
     }
 
     fn request_refresh(&self) {
-        let _ = self.commands.try_send(SnapshotCommand::Refresh);
+        let _ = self
+            .commands
+            .as_ref()
+            .unwrap()
+            .try_send(SnapshotCommand::Refresh);
     }
 
-    fn latest(&self) -> Option<DesktopSnapshot> {
-        self.updates.try_iter().last()
+    fn latest(&self) -> Option<Result<DesktopSnapshot, ()>> {
+        self.updates.lock().ok()?.take()
     }
 }
 
 impl Drop for SnapshotWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(SnapshotCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -255,12 +269,12 @@ enum PreviewCommand {
     Refresh {
         generation: u64,
         workspaces: Vec<WorkspaceId>,
+        size: [u32; 2],
     },
-    Stop,
 }
 
 struct PreviewWorker {
-    commands: SyncSender<PreviewCommand>,
+    commands: Option<SyncSender<PreviewCommand>>,
     updates: Arc<Mutex<Option<PreviewUpdate>>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -274,13 +288,13 @@ impl PreviewWorker {
             let mut client = None;
             while let Ok(command) = command_rx.recv() {
                 match command {
-                    PreviewCommand::Stop => break,
                     PreviewCommand::Refresh {
                         generation,
                         mut workspaces,
+                        size,
                     } => {
                         workspaces.truncate(MAX_PREVIEWS);
-                        let previews = query_previews(&mut client, &workspaces);
+                        let previews = query_previews(&mut client, &workspaces, size);
                         if let Ok(mut slot) = update_slot.lock() {
                             *slot = Some(PreviewUpdate {
                                 generation,
@@ -293,17 +307,27 @@ impl PreviewWorker {
             }
         });
         Self {
-            commands,
+            commands: Some(commands),
             updates,
             thread: Some(thread),
         }
     }
 
-    fn request_refresh(&self, generation: u64, workspaces: Vec<WorkspaceId>) {
-        let _ = self.commands.try_send(PreviewCommand::Refresh {
-            generation,
-            workspaces,
-        });
+    fn request_refresh(
+        &self,
+        generation: u64,
+        workspaces: Vec<WorkspaceId>,
+        size: [u32; 2],
+    ) -> bool {
+        self.commands
+            .as_ref()
+            .unwrap()
+            .try_send(PreviewCommand::Refresh {
+                generation,
+                workspaces,
+                size,
+            })
+            .is_ok()
     }
 
     fn latest(&self) -> Option<PreviewUpdate> {
@@ -313,7 +337,7 @@ impl PreviewWorker {
 
 impl Drop for PreviewWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(PreviewCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -323,6 +347,7 @@ impl Drop for PreviewWorker {
 fn query_previews(
     client: &mut Option<DesktopClient>,
     workspaces: &[WorkspaceId],
+    size: [u32; 2],
 ) -> Vec<WorkspacePreviewImage> {
     if workspaces.is_empty() {
         return Vec::new();
@@ -342,12 +367,12 @@ fn query_previews(
             .expect("preview client was initialized")
             .request(&DesktopRequest::Query(DesktopQuery::WorkspacePreview {
                 workspace,
-                width: PREVIEW_WIDTH,
-                height: PREVIEW_HEIGHT,
+                width: size[0],
+                height: size[1],
             }));
         match response {
             Ok(DesktopResponse::WorkspacePreview(preview)) => {
-                if let Some(preview) = decode_preview(preview) {
+                if let Some(preview) = decode_preview(preview, size) {
                     previews.push(preview);
                 }
             }
@@ -364,22 +389,32 @@ fn query_previews(
     previews
 }
 
-fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
-    if preview.width != PREVIEW_WIDTH || preview.height != PREVIEW_HEIGHT {
+fn decode_preview(preview: WorkspacePreview, size: [u32; 2]) -> Option<WorkspacePreviewImage> {
+    if [preview.width, preview.height] != size {
         return None;
     }
-    if preview.png_base64.len() > MAX_PREVIEW_BASE64_LENGTH {
+    if preview.width == 0
+        || preview.height == 0
+        || u64::from(preview.width) * u64::from(preview.height) > MAX_PREVIEW_PIXELS
+        || preview.png_base64.len() > MAX_PREVIEW_BASE64_LENGTH
+    {
         return None;
     }
     let encoded = base64::engine::general_purpose::STANDARD
         .decode(preview.png_base64)
         .ok()?;
     let mut decoder = png::Decoder::new(Cursor::new(encoded));
+    decoder.set_limits(png::Limits {
+        bytes: MAX_PREVIEW_BASE64_LENGTH,
+    });
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
     let pixel_count =
         u64::from(reader.info().width).checked_mul(u64::from(reader.info().height))?;
-    if pixel_count == 0 || pixel_count > MAX_PREVIEW_PIXELS {
+    if [reader.info().width, reader.info().height] != size
+        || pixel_count == 0
+        || pixel_count > MAX_PREVIEW_PIXELS
+    {
         return None;
     }
     let max_bytes = usize::try_from(pixel_count.checked_mul(4)?).ok()?;
@@ -394,7 +429,10 @@ fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
     }
     let data = &buffer[..info.buffer_size()];
     let rgba = match info.color_type {
-        png::ColorType::Rgba => data.to_vec(),
+        png::ColorType::Rgba => {
+            buffer.truncate(info.buffer_size());
+            buffer
+        }
         png::ColorType::Rgb => data
             .chunks(3)
             .filter(|pixel| pixel.len() == 3)
@@ -419,51 +457,56 @@ fn decode_preview(preview: WorkspacePreview) -> Option<WorkspacePreviewImage> {
 
 enum ActionCommand {
     Dispatch(DesktopCommand),
-    Stop,
 }
 
 struct ActionWorker {
-    commands: SyncSender<ActionCommand>,
+    results: Receiver<Result<(), String>>,
+    commands: Option<SyncSender<ActionCommand>>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl ActionWorker {
-    fn start() -> Self {
+    fn start(wake: WakeSender) -> Self {
         let (commands, command_rx) = mpsc::sync_channel(1);
+        let (results_tx, results) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
             let mut client = None;
             while let Ok(command) = command_rx.recv() {
                 match command {
-                    ActionCommand::Stop => break,
                     ActionCommand::Dispatch(command) => {
-                        if let Err(error) = dispatch_action(&mut client, command) {
+                        let result = dispatch_action(&mut client, command);
+                        if let Err(error) = &result {
                             eprintln!("knave-shell: shell action failed: {error}");
                             client = None;
                         }
+                        let _ = results_tx.try_send(result);
+                        let _ = wake.try_send(RuntimeWake::Redraw);
                     }
                 }
             }
         });
         Self {
-            commands,
+            results,
+            commands: Some(commands),
             thread: Some(thread),
         }
     }
 
-    fn dispatch(&self, command: DesktopCommand) {
-        if self
-            .commands
+    fn dispatch(&self, command: DesktopCommand) -> Result<(), String> {
+        self.commands
+            .as_ref()
+            .unwrap()
             .try_send(ActionCommand::Dispatch(command))
-            .is_err()
-        {
-            eprintln!("knave-shell: shell action queue is full; dropping action");
-        }
+            .map_err(|_| "Desktop action queue is busy".into())
+    }
+    fn latest(&self) -> Option<Result<(), String>> {
+        self.results.try_iter().last()
     }
 }
 
 impl Drop for ActionWorker {
     fn drop(&mut self) {
-        let _ = self.commands.try_send(ActionCommand::Stop);
+        self.commands.take();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -473,13 +516,19 @@ impl Drop for ActionWorker {
 fn dispatch_action(
     client: &mut Option<DesktopClient>,
     command: DesktopCommand,
-) -> Result<(), knave_desktop_api::ClientError> {
+) -> Result<(), String> {
     if client.is_none() {
-        *client = Some(DesktopClient::connect()?);
+        *client = Some(DesktopClient::connect().map_err(|error| error.to_string())?);
     }
-    let client = client.as_mut().expect("desktop client was initialized");
-    client.request(&DesktopRequest::Dispatch(command))?;
-    Ok(())
+    match client
+        .as_mut()
+        .expect("desktop client was initialized")
+        .request(&DesktopRequest::Dispatch(command))
+        .map_err(|error| error.to_string())?
+    {
+        DesktopResponse::Ok => Ok(()),
+        _ => Err("Unexpected desktop action response".into()),
+    }
 }
 
 fn query_snapshot(client: &mut Option<DesktopClient>) -> Result<DesktopSnapshot, ()> {
@@ -614,7 +663,7 @@ fn run_internal(
         })
         .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
 
-    let desktop_role = options.is_none();
+    let desktop_role = options.is_none() || app.as_ref().is_some_and(|app| app.uses_desktop());
     let clipboard_manager =
         smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(
             &globals,
@@ -653,12 +702,15 @@ fn run_internal(
         revision: 0,
         frame_pending: false,
         snapshot_worker: desktop_role.then(|| SnapshotWorker::start(wake_sender.clone())),
-        action_worker: desktop_role.then(ActionWorker::start),
+        action_worker: desktop_role.then(|| ActionWorker::start(wake_sender.clone())),
         preview_worker: (desktop_role && role == ShellRole::Overview)
             .then(|| PreviewWorker::start(wake_sender)),
         snapshot: None,
         previews: Vec::new(),
         preview_generation: 0,
+        preview_requested: Vec::new(),
+        preview_size: [0, 0],
+        preview_refresh: true,
         search_query: String::new(),
         search_index: 0,
         scene: UiScene::new(0),
@@ -714,6 +766,9 @@ struct Runtime {
     snapshot: Option<DesktopSnapshot>,
     previews: Vec<WorkspacePreviewImage>,
     preview_generation: u64,
+    preview_requested: Vec<WorkspaceId>,
+    preview_size: [u32; 2],
+    preview_refresh: bool,
     search_query: String,
     search_index: usize,
     scene: UiScene,
@@ -759,35 +814,82 @@ impl Runtime {
         if !self.configured {
             return;
         }
+        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
+            && let Some(app) = &mut self.app
+        {
+            app.desktop_action_finished(result);
+            self.exit |= app.should_close();
+            self.scene_dirty = true;
+        }
+        if self.exit {
+            return;
+        }
         let mut should_render =
             self.scene_dirty || self.app.as_ref().is_some_and(|app| app.needs_frame());
-        if let Some(snapshot) = self
+        if let Some(update) = self
             .snapshot_worker
             .as_ref()
             .and_then(SnapshotWorker::latest)
-            && self.snapshot.as_ref() != Some(&snapshot)
         {
-            let generation = self.preview_generation.wrapping_add(1);
-            let workspaces = snapshot
-                .workspaces
-                .iter()
-                .take(MAX_PREVIEWS)
-                .map(|workspace| workspace.workspace)
-                .collect();
-            self.snapshot = Some(snapshot);
-            self.previews.clear();
-            self.preview_generation = generation;
-            if let Some(worker) = &self.preview_worker {
-                worker.request_refresh(generation, workspaces);
+            match update {
+                Ok(snapshot) => {
+                    if let Some(app) = &mut self.app {
+                        app.desktop_snapshot(&snapshot);
+                    }
+                    if self.snapshot.as_ref() != Some(&snapshot) {
+                        self.preview_refresh = true;
+                    }
+                    self.snapshot = Some(snapshot);
+                }
+                Err(()) => {
+                    if let Some(app) = &mut self.app {
+                        app.desktop_unavailable();
+                    }
+                }
             }
             self.scene_dirty = true;
             should_render = true;
+        }
+        let mut desired = self
+            .app
+            .as_ref()
+            .and_then(|app| app.preview_workspaces())
+            .unwrap_or_else(|| {
+                self.snapshot.as_ref().map_or_else(Vec::new, |s| {
+                    s.workspaces
+                        .iter()
+                        .take(MAX_PREVIEWS)
+                        .map(|w| w.workspace)
+                        .collect()
+                })
+            });
+        desired.truncate(MAX_PREVIEWS);
+        let preview_size = [
+            self.width.saturating_mul(self.scale),
+            self.height.saturating_mul(self.scale),
+        ];
+        if (self.preview_refresh
+            || desired != self.preview_requested
+            || preview_size != self.preview_size)
+            && let Some(worker) = &self.preview_worker
+        {
+            let generation = self.preview_generation.wrapping_add(1);
+            // On a full queue retry when the existing job wakes us; never lose the newest selection.
+            if worker.request_refresh(generation, desired.clone(), preview_size) {
+                self.preview_generation = generation;
+                self.preview_requested = desired;
+                self.preview_size = preview_size;
+                self.preview_refresh = false;
+            }
         }
         if let Some(worker) = &self.preview_worker
             && let Some(update) = worker.latest()
             && self.preview_generation == update.generation
         {
             self.previews = update.previews;
+            if let Some(app) = &mut self.app {
+                app.workspace_previews(&self.previews);
+            }
             self.scene_dirty = true;
             should_render = true;
         }
@@ -823,6 +925,7 @@ impl Runtime {
         }
         self.sync_ime();
         self.sync_cursor();
+        self.application_requests(qh);
         let scaled;
         let render_list = if self.scale > 1 {
             scaled = scale_list(&self.render_list, self.scale as f32);
@@ -982,35 +1085,27 @@ impl Runtime {
 
 impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
-        match action {
-            UiAction::CloseOverview => self.exit = true,
-            UiAction::FocusWorkspace(workspace) => {
-                self.action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::FocusWorkspace { workspace });
+        let command = match action {
+            UiAction::CloseOverview => {
+                self.exit = true;
+                return;
+            }
+            UiAction::FocusWorkspace(workspace) => DesktopCommand::FocusWorkspace { workspace },
+            UiAction::FocusWindow(window) => DesktopCommand::FocusWindow { window },
+            UiAction::RestoreWindow(window) => DesktopCommand::RestoreWindow { window },
+        };
+        match self
+            .action_worker
+            .as_ref()
+            .expect("desktop role owns an action worker")
+            .dispatch(command)
+        {
+            Ok(()) => {
                 if self.role == ShellRole::Overview {
                     self.exit = true;
                 }
             }
-            UiAction::FocusWindow(window) => {
-                self.action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::FocusWindow { window });
-                if self.role == ShellRole::Overview {
-                    self.exit = true;
-                }
-            }
-            UiAction::RestoreWindow(window) => {
-                self.action_worker
-                    .as_ref()
-                    .expect("desktop role owns an action worker")
-                    .dispatch(DesktopCommand::RestoreWindow { window });
-                if self.role == ShellRole::Overview {
-                    self.exit = true;
-                }
-            }
+            Err(error) => eprintln!("knave-shell: shell action rejected: {error}"),
         }
     }
 
@@ -1263,7 +1358,7 @@ impl PointerHandler for Runtime {
         self.sync_cursor();
         if self.app.is_some() {
             self.sync_ime();
-            self.clipboard_requests(qh);
+            self.application_requests(qh);
             self.request_draw(qh);
         }
     }
@@ -1457,7 +1552,7 @@ impl Runtime {
         }
         self.sync_ime();
         self.sync_cursor();
-        self.clipboard_requests(qh);
+        self.application_requests(qh);
         self.request_draw(qh);
     }
 }
@@ -1506,6 +1601,8 @@ mod tests {
 
     #[test]
     fn preview_decoder_accepts_bounded_rgba_png() {
+        const PREVIEW_WIDTH: u32 = 1920;
+        const PREVIEW_HEIGHT: u32 = 1080;
         let mut encoded = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut encoded, PREVIEW_WIDTH, PREVIEW_HEIGHT);
@@ -1516,12 +1613,15 @@ mod tests {
                 .write_image_data(&vec![17; (PREVIEW_WIDTH * PREVIEW_HEIGHT * 4) as usize])
                 .unwrap();
         }
-        let preview = decode_preview(WorkspacePreview {
-            workspace: WorkspaceId(1),
-            width: PREVIEW_WIDTH,
-            height: PREVIEW_HEIGHT,
-            png_base64: base64::engine::general_purpose::STANDARD.encode(encoded),
-        })
+        let preview = decode_preview(
+            WorkspacePreview {
+                workspace: WorkspaceId(1),
+                width: PREVIEW_WIDTH,
+                height: PREVIEW_HEIGHT,
+                png_base64: base64::engine::general_purpose::STANDARD.encode(encoded),
+            },
+            [PREVIEW_WIDTH, PREVIEW_HEIGHT],
+        )
         .unwrap();
 
         assert_eq!(preview.workspace, WorkspaceId(1));
@@ -1536,12 +1636,15 @@ mod tests {
     #[test]
     fn preview_decoder_rejects_unrequested_dimensions() {
         assert!(
-            decode_preview(WorkspacePreview {
-                workspace: WorkspaceId(1),
-                width: 64,
-                height: 36,
-                png_base64: String::new(),
-            })
+            decode_preview(
+                WorkspacePreview {
+                    workspace: WorkspaceId(1),
+                    width: 64,
+                    height: 36,
+                    png_base64: String::new(),
+                },
+                [1920, 1080]
+            )
             .is_none()
         );
     }

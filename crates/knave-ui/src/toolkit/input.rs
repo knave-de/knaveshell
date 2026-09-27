@@ -26,6 +26,7 @@ pub enum Key {
     X,
     V,
     Q,
+    K,
     Other,
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -90,6 +91,22 @@ pub struct EventResult {
 }
 
 impl Scene {
+    /// Focus an eligible control in the current modal scope, or clear focus.
+    pub fn set_focus(&mut self, target: Option<ElementId>) -> Result<(), UiError> {
+        if let Some(id) = target
+            && !self.focus_candidates(None).contains(&id)
+        {
+            return Err(UiError::MissingElement(id));
+        }
+        if self.focus != target {
+            self.cancel_capture();
+            self.key_pressed = None;
+            self.focus = target;
+            self.reveal_focus();
+            self.paint_dirty = true;
+        }
+        Ok(())
+    }
     pub fn event(&mut self, input: Input) -> EventResult {
         let action = match input {
             Input::PointerMove(p) => self.motion(p),
