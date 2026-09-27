@@ -11,6 +11,8 @@ configuration, versioning, build, and compatibility policy.
 - [Performance and resource usage](performance.md)
 - [Change impact](change-impact.md)
 - [Renderer foundation](renderer-foundation.md)
+- [Retained scene toolkit](scene-toolkit.md)
+- [General shell application host](application-host.md)
 
 Local documents describe this repository's responsibilities; they do not create
 a second desktop-wide contract.

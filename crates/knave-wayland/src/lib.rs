@@ -1,5 +1,14 @@
 //! Knave-owned Wayland layer-shell and wgpu runtime.
 
+mod application;
+mod clipboard;
+mod cursor;
+mod ime;
+pub use application::{
+    Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, run_application,
+};
+use knave_ui::toolkit::{Input, KeyModifiers};
+
 use std::{
     io::Cursor,
     num::NonZeroU32,
@@ -32,7 +41,9 @@ use smithay_client_toolkit::{
     seat::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Modifiers, RawModifiers},
-        pointer::{BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{
+            BTN_LEFT, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec, ThemedPointer,
+        },
     },
     shell::{
         WaylandSurface,
@@ -41,6 +52,7 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
+    shm::{Shm, ShmHandler},
 };
 use wayland_client::{
     Connection, Proxy, QueueHandle,
@@ -132,12 +144,16 @@ struct SceneInput<'a> {
 
 #[derive(Debug, thiserror::Error)]
 pub enum WaylandError {
+    #[error("invalid surface options: {0}")]
+    InvalidOptions(&'static str),
     #[error("could not connect to the Knave Wayland compositor: {0}")]
     Connect(String),
     #[error("could not enumerate Wayland globals: {0}")]
     Globals(String),
     #[error("wl_compositor is unavailable: {0}")]
     Compositor(String),
+    #[error("wl_shm is unavailable: {0}")]
+    Shm(String),
     #[error("wlr-layer-shell is unavailable: {0}")]
     LayerShell(String),
     #[error("no compatible GPU adapter was found: {0}")]
@@ -489,6 +505,18 @@ fn query_snapshot(client: &mut Option<DesktopClient>) -> Result<DesktopSnapshot,
 }
 
 pub fn run(role: ShellRole) -> Result<(), WaylandError> {
+    run_internal(role, None)
+}
+
+fn run_internal(
+    role: ShellRole,
+    application: Option<(SurfaceOptions, Box<dyn Application>)>,
+) -> Result<(), WaylandError> {
+    let (options, app) = match application {
+        Some((options, app)) => (Some(options), Some(app)),
+        None => (None, None),
+    };
+
     let connection = Connection::connect_to_env().map_err(|error| {
         WaylandError::Connect(format!(
             "{error}; start the Knave compositor and use its WAYLAND_DISPLAY"
@@ -500,6 +528,8 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
 
     let compositor = CompositorState::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::Compositor(error.to_string()))?;
+    let shm =
+        Shm::bind(&globals, &queue_handle).map_err(|error| WaylandError::Shm(error.to_string()))?;
     let layer_shell = LayerShell::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::LayerShell(error.to_string()))?;
 
@@ -507,15 +537,37 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
     let layer = layer_shell.create_layer_surface(
         &queue_handle,
         surface,
-        role.layer(),
-        Some(role.namespace()),
+        options
+            .as_ref()
+            .map_or_else(|| role.layer(), |options| options.layer.wayland()),
+        Some(
+            options
+                .as_ref()
+                .map_or(role.namespace(), |o| o.namespace.as_str()),
+        ),
         None,
     );
-    layer.set_anchor(role.anchors());
-    layer.set_keyboard_interactivity(role.keyboard_interactivity());
-    layer.set_exclusive_zone(role.exclusive_zone());
-    let (width, height) = role.requested_size();
-    layer.set_size(width, height);
+    if let Some(options) = &options {
+        layer.set_anchor(if options.size.is_none() {
+            Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT
+        } else {
+            Anchor::empty()
+        });
+        layer.set_keyboard_interactivity(match options.keyboard {
+            KeyboardMode::None => KeyboardInteractivity::None,
+            KeyboardMode::OnDemand => KeyboardInteractivity::OnDemand,
+            KeyboardMode::Exclusive => KeyboardInteractivity::Exclusive,
+        });
+        layer.set_exclusive_zone(-1);
+        let [w, h] = options.size.unwrap_or([0, 0]);
+        layer.set_size(w, h);
+    } else {
+        layer.set_anchor(role.anchors());
+        layer.set_keyboard_interactivity(role.keyboard_interactivity());
+        layer.set_exclusive_zone(role.exclusive_zone());
+        let (width, height) = role.requested_size();
+        layer.set_size(width, height);
+    }
     layer.commit();
 
     let renderer = WgpuRenderer::new();
@@ -562,13 +614,34 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
         })
         .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
 
+    let desktop_role = options.is_none();
+    let clipboard_manager =
+        smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(
+            &globals,
+            &queue_handle,
+        )
+        .ok();
+    let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
     let mut state = Runtime {
+        wake_sender: wake_sender.clone(),
+        connection: connection.clone(),
+        compositor,
+        shm,
+        cursor: cursor::CursorState::default(),
+        clipboard: clipboard::Clipboard::new(clipboard_manager),
+        ime: ime::Ime::new(ime_manager),
+        loop_handle: event_loop.handle(),
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &queue_handle),
         seat_state: SeatState::new(&globals, &queue_handle),
+        active_seat: None,
         keyboard: None,
         pointer: None,
         role,
+        app,
+        options,
+        scale: 1,
+        modifiers: KeyModifiers::default(),
         layer,
         renderer,
         surface,
@@ -579,9 +652,10 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
         height: 1,
         revision: 0,
         frame_pending: false,
-        snapshot_worker: SnapshotWorker::start(wake_sender.clone()),
-        action_worker: ActionWorker::start(),
-        preview_worker: (role == ShellRole::Overview).then(|| PreviewWorker::start(wake_sender)),
+        snapshot_worker: desktop_role.then(|| SnapshotWorker::start(wake_sender.clone())),
+        action_worker: desktop_role.then(ActionWorker::start),
+        preview_worker: (desktop_role && role == ShellRole::Overview)
+            .then(|| PreviewWorker::start(wake_sender)),
         snapshot: None,
         previews: Vec::new(),
         preview_generation: 0,
@@ -602,16 +676,31 @@ pub fn run(role: ShellRole) -> Result<(), WaylandError> {
             .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
     }
 
+    state.cancel_clipboard();
     Ok(())
 }
 
 struct Runtime {
+    // Keep the wake source alive even when no desktop workers are needed.
+    wake_sender: WakeSender,
+    connection: Connection,
+    compositor: CompositorState,
+    shm: Shm,
+    cursor: cursor::CursorState,
+    ime: ime::Ime,
+    clipboard: clipboard::Clipboard,
+    loop_handle: smithay_client_toolkit::reexports::calloop::LoopHandle<'static, Self>,
     registry_state: RegistryState,
     output_state: OutputState,
     seat_state: SeatState,
+    active_seat: Option<wl_seat::WlSeat>,
     keyboard: Option<wl_keyboard::WlKeyboard>,
-    pointer: Option<wl_pointer::WlPointer>,
+    pointer: Option<ThemedPointer>,
     role: ShellRole,
+    app: Option<Box<dyn Application>>,
+    options: Option<SurfaceOptions>,
+    scale: u32,
+    modifiers: KeyModifiers,
     layer: LayerSurface,
     renderer: WgpuRenderer,
     surface: wgpu::Surface<'static>,
@@ -619,8 +708,8 @@ struct Runtime {
     device: wgpu::Device,
     queue: wgpu::Queue,
     painter: Option<WgpuPainter>,
-    snapshot_worker: SnapshotWorker,
-    action_worker: ActionWorker,
+    snapshot_worker: Option<SnapshotWorker>,
+    action_worker: Option<ActionWorker>,
     preview_worker: Option<PreviewWorker>,
     snapshot: Option<DesktopSnapshot>,
     previews: Vec<WorkspacePreviewImage>,
@@ -641,9 +730,11 @@ struct Runtime {
 
 impl Runtime {
     fn configure_surface(&self, width: u32, height: u32) -> Option<wgpu::SurfaceConfiguration> {
-        let mut config =
-            self.surface
-                .get_default_config(&self.adapter, width.max(1), height.max(1))?;
+        let mut config = self.surface.get_default_config(
+            &self.adapter,
+            width.max(1).saturating_mul(self.scale),
+            height.max(1).saturating_mul(self.scale),
+        )?;
         let Some(format) = self
             .surface
             .get_capabilities(&self.adapter)
@@ -668,8 +759,12 @@ impl Runtime {
         if !self.configured {
             return;
         }
-        let mut should_render = self.scene_dirty;
-        if let Some(snapshot) = self.snapshot_worker.latest()
+        let mut should_render =
+            self.scene_dirty || self.app.as_ref().is_some_and(|app| app.needs_frame());
+        if let Some(snapshot) = self
+            .snapshot_worker
+            .as_ref()
+            .and_then(SnapshotWorker::latest)
             && self.snapshot.as_ref() != Some(&snapshot)
         {
             let generation = self.preview_generation.wrapping_add(1);
@@ -696,7 +791,7 @@ impl Runtime {
             self.scene_dirty = true;
             should_render = true;
         }
-        if self.scene_dirty {
+        if self.app.is_none() && self.scene_dirty {
             self.scene = self.role.scene(
                 self.revision,
                 self.width as f32,
@@ -714,7 +809,27 @@ impl Runtime {
         if !should_render {
             return;
         }
-        let render_list = &self.render_list;
+        if let Some(app) = &mut self.app {
+            if app.should_close() {
+                self.exit = true;
+                return;
+            }
+            if let Some(painter) = &mut self.painter {
+                self.render_list = app
+                    .frame([self.width as f32, self.height as f32], painter)
+                    .clone();
+            }
+            self.scene_dirty = false;
+        }
+        self.sync_ime();
+        self.sync_cursor();
+        let scaled;
+        let render_list = if self.scale > 1 {
+            scaled = scale_list(&self.render_list, self.scale as f32);
+            &scaled
+        } else {
+            &self.render_list
+        };
         let [red, green, blue, alpha] = render_list.clear_color.to_linear_rgba();
         let clear_color = wgpu::Color {
             r: f64::from(red),
@@ -727,13 +842,21 @@ impl Runtime {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
+                self.scene_dirty = true;
                 if let Some(config) = self.configure_surface(self.width, self.height) {
                     self.surface.configure(&self.device, &config);
                 }
                 return;
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
-            wgpu::CurrentSurfaceTexture::Validation => return,
+            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => {
+                self.scene_dirty = true;
+                return;
+            }
+            wgpu::CurrentSurfaceTexture::Validation => {
+                eprintln!("knave-shell: GPU surface validation failed");
+                self.exit = true;
+                return;
+            }
         };
 
         let view = frame
@@ -768,7 +891,10 @@ impl Runtime {
                 &self.queue,
                 &mut encoder,
                 &view,
-                (self.width, self.height),
+                (
+                    self.width.saturating_mul(self.scale),
+                    self.height.saturating_mul(self.scale),
+                ),
                 render_list,
             )
         {
@@ -860,6 +986,8 @@ impl Runtime {
             UiAction::CloseOverview => self.exit = true,
             UiAction::FocusWorkspace(workspace) => {
                 self.action_worker
+                    .as_ref()
+                    .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::FocusWorkspace { workspace });
                 if self.role == ShellRole::Overview {
                     self.exit = true;
@@ -867,6 +995,8 @@ impl Runtime {
             }
             UiAction::FocusWindow(window) => {
                 self.action_worker
+                    .as_ref()
+                    .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::FocusWindow { window });
                 if self.role == ShellRole::Overview {
                     self.exit = true;
@@ -874,6 +1004,8 @@ impl Runtime {
             }
             UiAction::RestoreWindow(window) => {
                 self.action_worker
+                    .as_ref()
+                    .expect("desktop role owns an action worker")
                     .dispatch(DesktopCommand::RestoreWindow { window });
                 if self.role == ShellRole::Overview {
                     self.exit = true;
@@ -903,16 +1035,52 @@ impl SeatHandler for Runtime {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        if self
+            .active_seat
+            .as_ref()
+            .is_some_and(|active| *active != seat)
+        {
+            return;
+        }
+        self.active_seat = Some(seat.clone());
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            match self.seat_state.get_keyboard(qh, &seat, None) {
+            if let Some(manager) = &self.ime.manager {
+                self.ime.proxy = Some(manager.get_text_input(&seat, qh, ()));
+            }
+            if let Some(manager) = &self.clipboard.manager {
+                self.clipboard.device = Some(manager.get_data_device(qh, &seat));
+            }
+            let keyboard = if self.app.is_some() {
+                let repeat_qh = qh.clone();
+                self.seat_state.get_keyboard_with_repeat(
+                    qh,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(move |state, _, event| state.app_key(&repeat_qh, event, true, true)),
+                )
+            } else {
+                self.seat_state.get_keyboard(qh, &seat, None)
+            };
+            match keyboard {
                 Ok(keyboard) => self.keyboard = Some(keyboard),
                 Err(error) => eprintln!("knave-shell: could not acquire shell keyboard: {error}"),
             }
         }
         if capability == Capability::Pointer && self.pointer.is_none() {
-            match self.seat_state.get_pointer(qh, &seat) {
+            let surface = self.compositor.create_surface(qh);
+            match self.seat_state.get_pointer_with_theme::<_, ()>(
+                qh,
+                &seat,
+                self.shm.wl_shm(),
+                surface.clone(),
+                ThemeSpec::System,
+            ) {
                 Ok(pointer) => self.pointer = Some(pointer),
-                Err(error) => eprintln!("knave-shell: could not acquire shell pointer: {error}"),
+                Err(error) => {
+                    surface.destroy();
+                    eprintln!("knave-shell: could not acquire shell pointer: {error}");
+                }
             }
         }
     }
@@ -920,23 +1088,37 @@ impl SeatHandler for Runtime {
     fn remove_capability(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _seat: wl_seat::WlSeat,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
-        if capability == Capability::Keyboard
-            && let Some(keyboard) = self.keyboard.take()
-        {
-            keyboard.release();
+        if self.active_seat.as_ref() != Some(&seat) {
+            return;
         }
-        if capability == Capability::Pointer
-            && let Some(pointer) = self.pointer.take()
-        {
-            pointer.release();
+        self.app_input(Input::Cancel);
+        if capability == Capability::Keyboard {
+            self.app_input(Input::FocusLost);
+            self.cancel_clipboard();
+            self.clipboard.clear_seat();
+            self.ime.clear_seat();
+            self.modifiers = KeyModifiers::default();
+            if let Some(keyboard) = self.keyboard.take() {
+                keyboard.release();
+            }
         }
+        if capability == Capability::Pointer {
+            self.pointer = None; // ThemedPointer owns pointer, shape-device and cursor-surface cleanup.
+            self.cursor = cursor::CursorState::default();
+        }
+        self.request_draw(qh);
     }
 
-    fn remove_seat(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _seat: wl_seat::WlSeat) {
+    fn remove_seat(&mut self, conn: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        if self.active_seat.as_ref() == Some(&seat) {
+            self.remove_capability(conn, qh, seat.clone(), Capability::Keyboard);
+            self.remove_capability(conn, qh, seat, Capability::Pointer);
+            self.active_seat = None;
+        }
     }
 }
 
@@ -951,16 +1133,20 @@ impl KeyboardHandler for Runtime {
         _raw: &[u32],
         _keysyms: &[smithay_client_toolkit::seat::keyboard::Keysym],
     ) {
+        self.app_input(Input::FocusGained);
+        self.sync_ime();
     }
 
     fn leave(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _surface: &wl_surface::WlSurface,
         _serial: u32,
     ) {
+        self.app_input(Input::FocusLost);
+        self.request_draw(qh);
     }
 
     fn press_key(
@@ -968,42 +1154,57 @@ impl KeyboardHandler for Runtime {
         _conn: &Connection,
         qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
-        _serial: u32,
+        serial: u32,
         event: KeyEvent,
     ) {
-        self.handle_key(qh, event);
+        self.clipboard.serial = Some(serial);
+        if self.app.is_some() {
+            self.app_key(qh, event, true, false);
+        } else {
+            self.handle_key(qh, event);
+        }
     }
 
     fn repeat_key(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: KeyEvent,
+        event: KeyEvent,
     ) {
+        if self.app.is_some() {
+            self.app_key(qh, event, true, true);
+        }
     }
-
     fn release_key(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _event: KeyEvent,
+        event: KeyEvent,
     ) {
+        if self.app.is_some() {
+            self.app_key(qh, event, false, false);
+        }
     }
-
     fn update_modifiers(
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
         _keyboard: &wl_keyboard::WlKeyboard,
         _serial: u32,
-        _modifiers: Modifiers,
-        _raw_modifiers: RawModifiers,
+        modifiers: Modifiers,
+        _raw: RawModifiers,
         _layout: u32,
     ) {
+        self.modifiers = KeyModifiers {
+            shift: modifiers.shift,
+            control: modifiers.ctrl,
+            alt: modifiers.alt,
+            logo: modifiers.logo,
+        };
     }
 }
 
@@ -1011,7 +1212,7 @@ impl PointerHandler for Runtime {
     fn pointer_frame(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
+        qh: &QueueHandle<Self>,
         _pointer: &wl_pointer::WlPointer,
         events: &[PointerEvent],
     ) {
@@ -1020,11 +1221,50 @@ impl PointerHandler for Runtime {
             if event.surface != surface {
                 continue;
             }
-            if let PointerEventKind::Press { button, .. } = &event.kind
+            self.cursor.pointer_event(
+                &event.kind,
+                [event.position.0 as f32, event.position.1 as f32],
+            );
+            if let PointerEventKind::Press { serial, .. } = &event.kind {
+                self.clipboard.serial = Some(*serial);
+            }
+            let p = [event.position.0 as f32, event.position.1 as f32];
+            if self.app.is_some() {
+                let input = match &event.kind {
+                    PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                        Some(Input::PointerMove(p))
+                    }
+                    PointerEventKind::Leave { .. } => Some(Input::PointerLeave),
+                    PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
+                        Some(Input::PointerDown(p))
+                    }
+                    PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
+                        Some(Input::PointerUp(p))
+                    }
+                    PointerEventKind::Axis {
+                        horizontal,
+                        vertical,
+                        ..
+                    } => Some(Input::Scroll {
+                        position: p,
+                        delta: [horizontal.absolute as f32, vertical.absolute as f32],
+                    }),
+                    _ => None,
+                };
+                if let Some(input) = input {
+                    self.app_input(input);
+                }
+            } else if let PointerEventKind::Press { button, .. } = &event.kind
                 && *button == BTN_LEFT
             {
-                self.handle_pointer(event.position.0 as f32, event.position.1 as f32);
+                self.handle_pointer(p[0], p[1]);
             }
+        }
+        self.sync_cursor();
+        if self.app.is_some() {
+            self.sync_ime();
+            self.clipboard_requests(qh);
+            self.request_draw(qh);
         }
     }
 }
@@ -1033,10 +1273,31 @@ impl CompositorHandler for Runtime {
     fn scale_factor_changed(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
-        _new_factor: i32,
+        qh: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        new_factor: i32,
     ) {
+        if self
+            .pointer
+            .as_ref()
+            .is_some_and(|pointer| pointer.surface() == surface)
+        {
+            self.cursor.invalidate();
+            self.sync_cursor();
+            return;
+        }
+        if surface != self.layer.wl_surface() {
+            return;
+        }
+        self.scale = new_factor.clamp(1, 8) as u32;
+        self.layer.wl_surface().set_buffer_scale(self.scale as i32);
+        if self.configured {
+            if let Some(config) = self.configure_surface(self.width, self.height) {
+                self.surface.configure(&self.device, &config);
+            }
+            self.scene_dirty = true;
+            self.request_draw(qh);
+        }
     }
 
     fn transform_changed(
@@ -1121,7 +1382,12 @@ impl LayerShellHandler for Runtime {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        let requested = self.role.requested_size();
+        let requested = self
+            .options
+            .as_ref()
+            .and_then(|o| o.size)
+            .map(|s| (s[0], s[1]))
+            .unwrap_or_else(|| self.role.requested_size());
         self.width =
             NonZeroU32::new(configure.new_size.0).map_or(requested.0.max(1), NonZeroU32::get);
         self.height =
@@ -1145,7 +1411,9 @@ impl LayerShellHandler for Runtime {
         }
         self.scene_dirty = true;
         self.configured = true;
-        self.snapshot_worker.request_refresh();
+        if let Some(worker) = &self.snapshot_worker {
+            worker.request_refresh();
+        }
         self.draw(qh);
     }
 }
@@ -1161,6 +1429,67 @@ impl ProvidesRegistryState for Runtime {
 }
 
 smithay_client_toolkit::delegate_dispatch2!(Runtime);
+
+impl Runtime {
+    fn app_input(&mut self, event: Input) {
+        if let Some(app) = &mut self.app {
+            app.input(event);
+            if app.should_close() {
+                self.exit = true;
+            }
+        }
+    }
+    fn app_key(&mut self, qh: &QueueHandle<Self>, event: KeyEvent, pressed: bool, repeat: bool) {
+        self.app_input(Input::Key {
+            key: application::key(event.keysym.raw()),
+            pressed,
+            repeat,
+            modifiers: self.modifiers,
+        });
+        if pressed
+            && !self.modifiers.control
+            && !self.modifiers.alt
+            && !self.modifiers.logo
+            && let Some(text) = event.utf8
+            && text.chars().any(|c| !c.is_control())
+        {
+            self.app_input(Input::Text(text));
+        }
+        self.sync_ime();
+        self.sync_cursor();
+        self.clipboard_requests(qh);
+        self.request_draw(qh);
+    }
+}
+fn scale_list(list: &RenderList, scale: f32) -> RenderList {
+    use knave_ui::{DisplayCommand, Transform2D};
+    let mut result = list.clone();
+    for command in &mut result.commands {
+        let (transform, clip) = match command {
+            DisplayCommand::Shape {
+                transform, clip, ..
+            }
+            | DisplayCommand::Text {
+                transform, clip, ..
+            }
+            | DisplayCommand::RichText {
+                transform, clip, ..
+            }
+            | DisplayCommand::Image {
+                transform, clip, ..
+            } => (transform, clip),
+        };
+        *transform = Transform2D::scale(scale, scale).compose(*transform);
+        *clip = clip.map(|r| Transform2D::scale(scale, scale).transform_rect_bounds(r));
+    }
+    result
+}
+
+impl ShmHandler for Runtime {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
+    }
+}
 
 #[cfg(test)]
 mod tests {

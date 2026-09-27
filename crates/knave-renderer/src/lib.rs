@@ -4,7 +4,7 @@ mod images;
 mod painter;
 mod shapes;
 mod text;
-pub use painter::{PainterError, WgpuPainter};
+pub use painter::{PainterError, RendererStats, WgpuPainter};
 
 use knave_ui::UiScene;
 pub use knave_ui::{DisplayCommand, DisplayList, RenderCommand, RenderList};

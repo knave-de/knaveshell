@@ -4,7 +4,8 @@ use glyphon::{
     Attrs, Buffer, Cache, Family, FontSystem, Metrics, Resolution, Shaping, SwashCache, TextArea,
     TextAtlas, TextBounds, TextRenderer, Viewport, Weight, Wrap,
 };
-use knave_ui::{Rect, TextAlign, TextStyle, TextWrap, Transform2D};
+use knave_ui::{Rect, TextAlign, TextSpan, TextStyle, TextWrap, Transform2D};
+use unicode_segmentation::UnicodeSegmentation;
 
 const MAX_CACHED_LAYOUTS: usize = 128;
 const MAX_LAYOUT_CACHE_BYTES: usize = 4 * 1024 * 1024;
@@ -25,6 +26,7 @@ pub(crate) enum TextPassError {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct LayoutKey {
     text: String,
+    spans: Vec<TextSpan>,
     family: String,
     width: u32,
     height: u32,
@@ -36,9 +38,10 @@ struct LayoutKey {
 }
 
 impl LayoutKey {
-    fn new(text: &str, style: &TextStyle, bounds: Rect) -> Self {
+    fn new(text: &str, spans: Option<&[TextSpan]>, style: &TextStyle, bounds: Rect) -> Self {
         Self {
             text: text.to_owned(),
+            spans: spans.unwrap_or_default().to_vec(),
             family: style.font_family.clone(),
             width: sane_dimension(bounds.width).to_bits(),
             height: sane_dimension(bounds.height).to_bits(),
@@ -51,8 +54,7 @@ impl LayoutKey {
     }
 
     fn estimated_bytes(&self) -> usize {
-        self.text
-            .len()
+        (self.text.len() + self.spans.iter().map(|s| s.text.len()).sum::<usize>())
             .saturating_mul(64)
             .saturating_add(self.family.len())
             .saturating_add(std::mem::size_of::<Buffer>())
@@ -83,6 +85,7 @@ pub(super) struct TextPass {
 pub(super) struct TextItem<'a> {
     pub bounds: Rect,
     pub text: &'a str,
+    pub spans: Option<&'a [TextSpan]>,
     pub style: &'a TextStyle,
     pub transform: Transform2D,
     pub clip: Option<Rect>,
@@ -134,7 +137,17 @@ impl TextPass {
         }
         let run_text_bytes = items
             .iter()
-            .try_fold(0usize, |total, item| total.checked_add(item.text.len()))
+            .try_fold(0usize, |total, item| {
+                total.checked_add(
+                    item.text.len()
+                        + item
+                            .spans
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|s| s.text.len())
+                            .sum::<usize>(),
+                )
+            })
             .ok_or(TextPassError::TextBytesExceeded)?;
         self.frame_text_bytes = self
             .frame_text_bytes
@@ -147,7 +160,7 @@ impl TextPass {
             let Some(area) = prepared_area(item, viewport_size.width, viewport_size.height)? else {
                 continue;
             };
-            let key = LayoutKey::new(item.text, item.style, item.bounds);
+            let key = LayoutKey::new(item.text, item.spans, item.style, item.bounds);
             self.clock = self.clock.wrapping_add(1);
             if !self.layouts.contains_key(&key) {
                 self.insert_layout(key.clone(), item);
@@ -240,6 +253,82 @@ impl TextPass {
             .map_err(TextPassError::Glyphon)?;
         self.active_runs += 1;
         Ok(run_index)
+    }
+
+    pub fn measure(
+        &mut self,
+        text: &str,
+        spans: Option<&[TextSpan]>,
+        style: &TextStyle,
+        width: f32,
+    ) -> knave_ui::toolkit::TextLayout {
+        use knave_ui::toolkit::{Caret, TextLayout};
+        let item = TextItem {
+            bounds: Rect::new(0.0, 0.0, width, 16384.0),
+            text,
+            spans,
+            style,
+            transform: Transform2D::IDENTITY,
+            clip: None,
+        };
+        let key = LayoutKey::new(text, spans, style, item.bounds);
+        self.clock = self.clock.wrapping_add(1);
+        if !self.layouts.contains_key(&key) {
+            self.insert_layout(key.clone(), &item);
+        }
+        let buffer = if let Some(layout) = self.layouts.get_mut(&key) {
+            layout.last_used = self.clock;
+            Arc::clone(&layout.buffer)
+        } else {
+            Arc::new(create_buffer(&mut self.font_system, &item))
+        };
+        let mut result = TextLayout::default();
+        let content = spans.map(|spans| spans.iter().map(|s| s.text.as_str()).collect::<String>());
+        let text = content.as_deref().unwrap_or(text);
+        let offsets: Vec<_> = std::iter::once(0)
+            .chain(text.match_indices('\n').map(|(i, _)| i + 1))
+            .collect();
+        for run in buffer.layout_runs() {
+            result.size[0] = result.size[0].max(run.line_w);
+            result.size[1] = result.size[1].max(run.line_top + run.line_height);
+            let line_offset = offsets.get(run.line_i).copied().unwrap_or(0);
+            for glyph in run.glyphs {
+                let (start, end) = if glyph.level.is_rtl() {
+                    (glyph.x + glyph.w, glyph.x)
+                } else {
+                    (glyph.x, glyph.x + glyph.w)
+                };
+                // Match Cosmic Text's grapheme interpolation inside ligature clusters.
+                let cluster = &run.text[glyph.start..glyph.end];
+                let count = cluster.graphemes(true).count().max(1);
+                for (position, (byte, _)) in cluster.grapheme_indices(true).enumerate() {
+                    result.carets.push(Caret {
+                        byte: line_offset + glyph.start + byte,
+                        x: start + (end - start) * position as f32 / count as f32,
+                        y: run.line_top,
+                        height: run.line_height,
+                    });
+                }
+                result.carets.push(Caret {
+                    byte: line_offset + glyph.end,
+                    x: end,
+                    y: run.line_top,
+                    height: run.line_height,
+                });
+            }
+        }
+        result.carets.sort_by_key(|c| c.byte);
+        result.carets.dedup_by_key(|c| c.byte);
+        if result.carets.is_empty() {
+            result.carets.push(Caret {
+                byte: 0,
+                x: 0.0,
+                y: 0.0,
+                height: style.line_height,
+            });
+            result.size[1] = style.line_height;
+        }
+        result
     }
 
     pub fn render<'a>(
@@ -409,7 +498,30 @@ fn create_buffer(font_system: &mut FontSystem, item: &TextItem<'_>) -> Buffer {
         TextAlign::Center => Some(glyphon::cosmic_text::Align::Center),
         TextAlign::End => Some(glyphon::cosmic_text::Align::End),
     };
-    buffer.set_text(item.text, &attrs, Shaping::Advanced, align);
+    if let Some(spans) = item.spans {
+        buffer.set_rich_text(
+            spans.iter().map(|span| {
+                let color = span.color;
+                (
+                    span.text.as_str(),
+                    attrs
+                        .clone()
+                        .weight(Weight(span.weight.clamp(100, 900)))
+                        .color(glyphon::Color::rgba(
+                            color.red,
+                            color.green,
+                            color.blue,
+                            color.alpha,
+                        )),
+                )
+            }),
+            &attrs,
+            Shaping::Advanced,
+            align,
+        );
+    } else {
+        buffer.set_text(item.text, &attrs, Shaping::Advanced, align);
+    }
     buffer.shape_until_scroll(font_system, false);
     buffer
 }
@@ -448,6 +560,7 @@ mod tests {
         let item = TextItem {
             bounds: Rect::new(4.0, 5.0, 20.0, 10.0),
             text: "sample",
+            spans: None,
             style: &style,
             transform: Transform2D::translation(2.0, 3.0).compose(Transform2D::scale(2.0, 2.0)),
             clip: None,

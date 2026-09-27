@@ -1,5 +1,5 @@
 /// An 8-bit sRGB color, with straight alpha.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct Color {
     pub red: u8,
     pub green: u8,
@@ -199,4 +199,12 @@ mod tests {
         assert_eq!(channels[2], 1.0);
         assert!((channels[3] - 128.0 / 255.0).abs() < 0.000_001);
     }
+}
+
+/// A styled inline run; the paragraph supplies wrapping and alignment.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct TextSpan {
+    pub text: String,
+    pub color: Color,
+    pub weight: u16,
 }

@@ -6,3 +6,4 @@ license.workspace = true
 description = "Renderer-independent UI scene and interaction primitives for Knave"
 [dependencies]
 knave-desktop-api.workspace = true
+unicode-segmentation = "1.12"

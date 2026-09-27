@@ -43,8 +43,9 @@ revision.
 Text currently supports translation and positive uniform scaling. Rotation,
 shear, and non-uniform text scaling return an explicit frame-preparation error;
 shape and image transforms support general affine matrices. Animation scheduling,
-backdrop blur, non-rectangular clipping, and persistent cross-frame GPU scene
-buffers are outside this foundation slice.
+backdrop blur and non-rectangular clipping are outside this foundation slice.
+The [scene toolkit](scene-toolkit.md) subsequently added persistent GPU instance
+buffer capacity and conservative batching of disjoint text.
 
 ## Rollback and verification
 

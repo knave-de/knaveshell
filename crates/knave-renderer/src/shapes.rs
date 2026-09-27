@@ -1,6 +1,5 @@
 use bytemuck::{Pod, Zeroable};
 use knave_ui::{Color, DisplayCommand, Rect, ShapePaint, Transform2D};
-use wgpu::util::DeviceExt;
 
 const SHADER: &str = r#"
 struct Viewport { size: vec2<f32> };
@@ -122,6 +121,9 @@ pub(super) struct ShapePass {
     bind_group: Option<wgpu::BindGroup>,
     instances: Option<wgpu::Buffer>,
     prepared: Vec<Option<(usize, Option<Rect>)>>,
+    staging: Vec<ShapeInstance>,
+    capacity: usize,
+    pub allocations: u64,
 }
 
 impl ShapePass {
@@ -198,6 +200,9 @@ impl ShapePass {
             bind_group: None,
             instances: None,
             prepared: Vec::new(),
+            staging: Vec::new(),
+            capacity: 0,
+            allocations: 0,
         }
     }
 
@@ -216,7 +221,8 @@ impl ShapePass {
                 _pad: [0.0; 2],
             }),
         );
-        let mut instances = Vec::new();
+        self.staging.clear();
+        let instances = &mut self.staging;
         self.prepared.clear();
         self.prepared.resize(commands.len(), None);
         for (command_index, command) in commands.iter().enumerate() {
@@ -241,31 +247,39 @@ impl ShapePass {
             instances.push(instance(*bounds, paint, *transform));
             self.prepared[command_index] = Some((index, *clip));
         }
-        self.instances = None;
-        self.bind_group = None;
         if instances.is_empty() {
             return;
         }
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("knave-shapes-instances"),
-            contents: bytemuck::cast_slice(&instances),
-            usage: wgpu::BufferUsages::STORAGE,
-        });
-        self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("knave-shapes-bind-group"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.viewport.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: buffer.as_entire_binding(),
-                },
-            ],
-        }));
-        self.instances = Some(buffer);
+        if instances.len() > self.capacity {
+            self.capacity = instances.len().next_power_of_two();
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("knave-shapes-instances"),
+                size: (self.capacity * std::mem::size_of::<ShapeInstance>()) as u64,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("knave-shapes-bind-group"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.viewport.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: buffer.as_entire_binding(),
+                    },
+                ],
+            }));
+            self.instances = Some(buffer);
+            self.allocations += 1;
+        }
+        queue.write_buffer(
+            self.instances.as_ref().expect("shape capacity allocated"),
+            0,
+            bytemuck::cast_slice(instances),
+        );
     }
 
     pub fn draw_for_command(&self, command_index: usize) -> Option<(usize, Option<Rect>)> {
