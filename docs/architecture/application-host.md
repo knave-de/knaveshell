@@ -45,7 +45,10 @@ Applications return `HostRequest::Copy`/`Paste` and expose the active
 data-device manager. Pipes are nonblocking, capped at four transfers and
 16 KiB text, with a two-second timeout and cancellation on seat loss/shutdown.
 Late paste responses carry a target ID and are rejected after focus changes.
-Failures reach `Application::host_error` and stderr.
+Failures reach `Application::host_error` and stderr. After this callback the
+host checks `should_close` immediately; otherwise it marks the scene dirty and
+coalesces a redraw through the existing one-slot wake channel. Asynchronous
+failures therefore update error UI without waiting for unrelated input.
 
 Optional text-input-v3 publishes bounded UTF-8 surrounding text (4,000 bytes)
 and the logical cursor rectangle. IME updates apply as one batch on `done`;

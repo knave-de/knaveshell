@@ -623,7 +623,7 @@ fn run_internal(
         .ok();
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
     let mut state = Runtime {
-        _wake_sender: wake_sender.clone(),
+        wake_sender: wake_sender.clone(),
         connection: connection.clone(),
         compositor,
         shm,
@@ -682,7 +682,7 @@ fn run_internal(
 
 struct Runtime {
     // Keep the wake source alive even when no desktop workers are needed.
-    _wake_sender: WakeSender,
+    wake_sender: WakeSender,
     connection: Connection,
     compositor: CompositorState,
     shm: Shm,

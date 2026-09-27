@@ -94,7 +94,13 @@ impl Runtime {
     }
     fn clipboard_error(&mut self, message: &str) {
         if let Some(app) = &mut self.app {
-            app.host_error(message);
+            notify_error(
+                app.as_mut(),
+                message,
+                &mut self.scene_dirty,
+                &mut self.exit,
+                &self.wake_sender,
+            );
         }
         eprintln!("knave-shell: {message}");
     }
@@ -213,6 +219,23 @@ impl Runtime {
         }
     }
 }
+// Error callbacks can change UI state without another input event to drive the host.
+fn notify_error(
+    app: &mut dyn super::Application,
+    message: &str,
+    dirty: &mut bool,
+    exit: &mut bool,
+    wake: &super::WakeSender,
+) {
+    app.host_error(message);
+    *dirty = true;
+    *exit |= app.should_close();
+    if !*exit {
+        // A full one-slot channel already contains the redraw we need.
+        let _ = wake.try_send(super::RuntimeWake::Redraw);
+    }
+}
+
 fn nonblocking(fd: &impl std::os::fd::AsFd) -> std::io::Result<()> {
     let flags = rustix::fs::fcntl_getfl(fd)?;
     rustix::fs::fcntl_setfl(fd, flags | rustix::fs::OFlags::NONBLOCK)?;
@@ -339,5 +362,106 @@ impl DataSourceHandler for Runtime {
             Ok(token) => self.register_transfer(id, token),
             Err(error) => self.clipboard_error(&format!("clipboard write registration: {error}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{Application, RuntimeWake};
+    use knave_ui::{DisplayList, toolkit::TextMeasurer};
+    use smithay_client_toolkit::reexports::calloop::{EventLoop, channel};
+
+    #[derive(Default)]
+    struct ErrorApp {
+        message: String,
+        close_on_error: bool,
+        close: bool,
+    }
+    impl Application for ErrorApp {
+        fn input(&mut self, _: Input) {
+            panic!("no input required for host errors")
+        }
+        fn host_error(&mut self, message: &str) {
+            self.message = message.into();
+            self.close = self.close_on_error;
+        }
+        fn should_close(&self) -> bool {
+            self.close
+        }
+        fn needs_frame(&self) -> bool {
+            false
+        }
+        fn frame(&mut self, _: [f32; 2], _: &mut dyn TextMeasurer) -> &DisplayList {
+            unreachable!()
+        }
+    }
+
+    #[test]
+    fn asynchronous_errors_mark_dirty_and_coalesce_a_wake_without_input() {
+        let mut event_loop = EventLoop::<usize>::try_new().unwrap();
+        let (sender, receiver) = channel::sync_channel(1);
+        event_loop
+            .handle()
+            .insert_source(receiver, |event, _, count| {
+                if matches!(event, channel::Event::Msg(RuntimeWake::Redraw)) {
+                    *count += 1;
+                }
+            })
+            .unwrap();
+        let mut app = ErrorApp::default();
+        let (mut dirty, mut exit, mut wakes) = (false, false, 0);
+        for _ in 0..100 {
+            notify_error(
+                &mut app,
+                "clipboard transfer timed out",
+                &mut dirty,
+                &mut exit,
+                &sender,
+            );
+        }
+        assert_eq!(app.message, "clipboard transfer timed out");
+        assert!(dirty);
+        assert!(!exit);
+        event_loop
+            .dispatch(Some(Duration::ZERO), &mut wakes)
+            .unwrap();
+        assert_eq!(wakes, 1);
+        // Once drained, the next failure must schedule another frame.
+        dirty = false;
+        notify_error(
+            &mut app,
+            "clipboard read failed",
+            &mut dirty,
+            &mut exit,
+            &sender,
+        );
+        event_loop
+            .dispatch(Some(Duration::ZERO), &mut wakes)
+            .unwrap();
+        assert!(dirty);
+        assert_eq!(wakes, 2);
+    }
+
+    #[test]
+    fn host_errors_honor_close_immediately_and_preserve_shutdown() {
+        let (sender, _receiver) = channel::sync_channel(1);
+        let mut app = ErrorApp {
+            close_on_error: true,
+            ..Default::default()
+        };
+        let (mut dirty, mut exit) = (false, false);
+        notify_error(
+            &mut app,
+            "clipboard read failed",
+            &mut dirty,
+            &mut exit,
+            &sender,
+        );
+        assert!(app.close);
+        assert!(exit);
+        app.close_on_error = false;
+        notify_error(&mut app, "another failure", &mut dirty, &mut exit, &sender);
+        assert!(exit);
     }
 }
