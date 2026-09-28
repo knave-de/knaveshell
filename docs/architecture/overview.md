@@ -1,109 +1,35 @@
-# Workspace overview: first retained UI slice
+# Workspace overview
 
-## Decision and ownership
+`knave-shell::overview::Overview` owns the retained UI and its input state. It
+runs as an exclusive full-output layer surface. Villain owns workspace/window
+state and composes application surfaces into at most three overview rectangles.
+The shell does not configure, resize, focus, or deliver input to those preview
+surfaces. Its search, card, and minimized-window controls still dispatch normal
+desktop actions and wait for acknowledgement before closing.
 
-`knave-shell::overview::Overview` owns the overview controller and composes the
-retained toolkit. `knave-shell overview` uses an exclusive, full-output overlay
-through the general application host. The bar remains on its existing path.
-The existing public desktop wire contract is unchanged; the host supplies
-snapshots, workspace preview images, and acknowledged desktop actions.
+The shell computes one selected card and up to two neighboring cards from the
+current logical output size. It sends their interior rectangles and workspace
+IDs using desktop API 1.3 `set_overview_panes`. The selected pane leaves room
+for its workspace label and minimized shelf, which remain shell-drawn. Pane
+contents preserve the output aspect ratio and are clipped to the supplied
+rectangle. Browsing and resizing replace the entire set; search clears it.
+Villain also clears it when the overview layer surface unmaps or is destroyed.
+Only window textures are composed: there is no screenshot readback, PNG
+transport, decoded image cache, or window input remapping in this path.
 
-The UI has a search field, a centered workspace with immediate neighbors,
-workspace indicators and a paginated minimized-window shelf. Each minimized
-window appears individually in its own workspace. Workspace screenshots retain
-their aspect ratio. They are snapshots of compositor-rendered content, not
-individual interactive window surfaces. Hidden-by-fullscreen grouping, app
-icons/favorites, wallpaper blur, animations and live per-window previews are
-later slices. Search currently indexes window titles, app IDs and workspace
-labels; it does not launch installed applications.
+One bounded pane worker keeps IPC off the Wayland frame callback. It has a
+single pending update and wakes the UI after completion, so a full queue
+retries the latest layout without spawning more threads. Transient connection
+or unavailable errors retry with capped backoff; permanent API errors surface
+to the UI. Desktop actions use a separate bounded worker. The snapshot subscription remains event driven;
+failed connections use capped retry backoff. The legacy preview query remains
+available for older clients, and the non-application overview host still uses
+its existing preview worker.
 
-## Interaction and state
-
-Browsing a neighboring workspace does not activate it. Clicking the centered
-preview or pressing Enter on it requests workspace activation. Clicking a
-minimized item requests restore by stable window ID. Search spans workspaces
-and focuses or restores the selected window. Successful action acknowledgement
-closes the overview; an error leaves it open and visible. Duplicate activation
-is blocked while a request is pending. Escape clears search before dismissing;
-Ctrl+K and ordinary typing target search. Tab traverses controls. Arrow keys
-browse workspaces outside search; Alt+Left/Right explicitly browse.
-
-Window IDs preserve identity across snapshots. The browsed workspace remains
-selected when compositor focus changes; removing that workspace selects the
-active workspace, then the first remaining workspace. Snapshot delivery compares
-full contents because older providers use window allocation counters as their
-generation. A one-entry replacement mailbox retains the newest state. A lost
-connection is reported with backoff, and reconnect publishes state even when its
-generation/content matches the previous connection. Unsupported capacities are
-reported rather than silently hiding windows (1,024 windows, 128 workspaces).
-
-## Host API, resources and compatibility
-
-`Application::uses_desktop` opts into the existing three bounded desktop
-workers. New callbacks deliver snapshots, connection loss, preview updates and
-action results. `preview_workspaces` restricts requests to visible workspaces;
-this overview requests the selected workspace first and up to two neighbors.
-`HostRequest::Desktop` adds an exhaustive enum variant. Applications should
-maintain one outstanding desktop action and wait for its result. Requests are
-collected after input and frame composition. Applications not opting in keep
-no desktop workers. `Scene::set_focus` and `Key::K` are additive workspace APIs.
-All consuming crates rebuild together at the existing unreleased 0.1.0 version.
-
-Desktop snapshots arrive through an API 1.2 subscription; only disconnected
-clients use retry backoff (250 ms to 5 seconds). Previews refresh on
-snapshot or browsed-workspace changes, not continuously; this intentionally
-retains snapshot semantics. Requests/results are bounded, obsolete preview
-results are ignored, and a full request queue retries after existing work wakes
-the host. Closing drops worker senders before joining, preventing a full queue
-from swallowing a stop command. In-flight requests still obey transport timeouts.
-Idle frames reuse the display list. Hover/focus changes repaint without rebuilding
-the overview; desktop/model, search, page and size changes rebuild its small
-visible tree. Only the center and neighboring workspace cards are composed.
-
-There is no configuration migration, new persistent state or compositor policy
-change. Rollback restores the previous overview binary entry point and removes
-its opt-in host callbacks together. No installed binary is replaced implicitly.
-
-## Verification
-
-Controller regressions cover workspace-scoped minimized items, pagination,
-browse-versus-activate, stable selection on same-generation snapshots, restore
-acknowledgement/failure, search/Escape, compact layouts, disconnect handling,
-neighbor-only preview requests and idle display-list reuse. GPU captures and
-live startup are separate checks; fixture snapshots do not establish real
-compositor restoration or fresh workspace imagery.
-
-A development fixture measured 2,000 alternating hover transitions at about
-2.1 microseconds p95 CPU event/scene preparation, with one layout and seven text
-measurements throughout (GPU encode/presentation excluded). A five-second idle
-Wayland sample against a test desktop service held six threads, 71 FDs and about
-188 MiB RSS, with two CPU ticks. These are initial baselines, not improvement
-claims. The live host test delivered same-generation minimized-state changes,
-dispatched one restore for the correct window ID and exited after acknowledgement.
-Real Villain restoration remains unverified without its desktop socket.
-
-## Native-resolution previews
-
-The full-output overview requests its configured logical dimensions multiplied
-by the output buffer scale. Resize and scale changes invalidate the request size
-and stale responses. The existing width/height wire fields are unchanged; Villain
-now accepts larger explicit requests, bounded to 16,384 per axis and 36 Mi pixels
-per image. The shell checks returned metadata and PNG dimensions against the
-request before allocating decoded pixels. At most three previews are requested;
-GPU image cache and per-frame image budgets are capped at 512 MiB, allocated on
-demand. Three 4K RGBA images require about 95 MiB each in CPU and GPU storage;
-transient decoding and replacement images add to this baseline.
-
-Deploy the expanded Villain limits before the shell update. Existing thumbnail
-clients remain compatible. Older Villain builds reject native-size requests
-above their 1280x720 limit, so the overview reports unavailable previews rather
-than silently falling back to blurred thumbnails. Roll back the shell first.
-The native-resolution change did not alter desktop transport; the later
-subscription change is described in the desktop-state-subscriptions document. Both consumers remain at unreleased version 0.1.0.
-
-Native-resolution verification: live isolated GPU captures returned exact
-1920x1080 and 3840x2160 PNGs. A simple 64-pixel client fixture took approximately
-23 ms and 87 ms per request respectively (capture, PNG encoding and transport;
-not representative of complex window contents). Capture still runs synchronously
-on the compositor thread; this change improves fidelity, not update latency.
-The existing refresh-on-change policy is preserved.
+This needs Knave desktop API 1.3 and a Villain build that supports live panes.
+Deploy Villain before the new shell. Older 1.2 clients work with new Villain;
+a new shell on an older compositor keeps its API 1.2 subscription and reports
+the unavailable live preview command.
+Rollback the shell first. No persistent configuration changes. Direct TTY,
+nested GPU composition, focus restoration, and installed binaries require
+live smoke verification; a Rust build alone cannot establish them.

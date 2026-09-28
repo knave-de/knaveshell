@@ -17,15 +17,16 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc, Mutex,
-        mpsc::{self, Receiver, SyncSender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use base64::Engine;
 use knave_desktop_api::{
-    DesktopClient, DesktopCommand, DesktopQuery, DesktopRequest, DesktopResponse, DesktopSnapshot,
-    WorkspaceId, WorkspacePreview,
+    ClientError, DesktopClient, DesktopCommand, DesktopQuery, DesktopRequest, DesktopResponse,
+    DesktopSnapshot, OverviewPane, WorkspaceId, WorkspacePreview,
 };
 use knave_renderer::{RenderList, WgpuPainter, WgpuRenderer};
 use knave_ui::{MAX_SEARCH_QUERY, UiAction, UiImage, UiScene, WorkspacePreviewImage};
@@ -373,6 +374,98 @@ fn decode_preview(preview: WorkspacePreview, size: [u32; 2]) -> Option<Workspace
     })
 }
 
+/// One bounded IPC worker replaces the PNG preview worker for application overviews.
+struct PaneWorker {
+    commands: Option<SyncSender<Vec<OverviewPane>>>,
+    errors: Receiver<String>,
+    thread: Option<JoinHandle<()>>,
+}
+impl PaneWorker {
+    fn start(wake: WakeSender) -> Self {
+        let (commands, receiver) = mpsc::sync_channel::<Vec<OverviewPane>>(1);
+        let (errors_tx, errors) = mpsc::sync_channel(1);
+        let thread = thread::spawn(move || {
+            const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+            const MAX_BACKOFF: Duration = Duration::from_secs(5);
+            let mut client: Option<DesktopClient> = None;
+            while let Ok(mut panes) = receiver.recv() {
+                let mut backoff = INITIAL_BACKOFF;
+                loop {
+                    // New geometry replaces a failed request; never replay stale panes.
+                    while let Ok(newer) = receiver.try_recv() {
+                        panes = newer;
+                        backoff = INITIAL_BACKOFF;
+                    }
+                    let result = (|| {
+                        if client.is_none() {
+                            client = Some(DesktopClient::connect()?);
+                        }
+                        client.as_mut().expect("connected above").request(
+                            &DesktopRequest::SetOverviewPanes {
+                                panes: panes.clone(),
+                            },
+                        )
+                    })();
+                    let retry = match result {
+                        Ok(DesktopResponse::Ok) => false,
+                        Ok(_) => {
+                            let _ =
+                                errors_tx.try_send("Unexpected overview pane response".to_owned());
+                            client = None;
+                            false
+                        }
+                        Err(error) => {
+                            let retryable =
+                                !matches!(&error, ClientError::Remote(remote) if !remote.retryable);
+                            if !retryable {
+                                let _ = errors_tx.try_send(error.to_string());
+                            }
+                            client = None;
+                            retryable
+                        }
+                    };
+                    // Let the UI submit its newest geometry if the one-entry queue was full.
+                    let _ = wake.try_send(RuntimeWake::Redraw);
+                    if !retry {
+                        break;
+                    }
+                    match receiver.recv_timeout(backoff) {
+                        Ok(newer) => {
+                            panes = newer;
+                            backoff = INITIAL_BACKOFF;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            backoff = (backoff * 2).min(MAX_BACKOFF);
+                        }
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
+                }
+            }
+        });
+        Self {
+            commands: Some(commands),
+            errors,
+            thread: Some(thread),
+        }
+    }
+    fn update(&self, panes: Vec<OverviewPane>) -> bool {
+        self.commands
+            .as_ref()
+            .is_some_and(|sender| sender.try_send(panes).is_ok())
+    }
+    fn latest_error(&self) -> Option<String> {
+        self.errors.try_iter().last()
+    }
+}
+impl Drop for PaneWorker {
+    fn drop(&mut self) {
+        self.commands.take();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
 enum ActionCommand {
     Dispatch(DesktopCommand),
 }
@@ -560,6 +653,7 @@ fn run_internal(
         .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
 
     let desktop_role = options.is_none() || app.as_ref().is_some_and(|app| app.uses_desktop());
+    let application_overview = app.is_some() && role == ShellRole::Overview;
     let clipboard_manager =
         smithay_client_toolkit::data_device_manager::DataDeviceManagerState::bind(
             &globals,
@@ -599,8 +693,11 @@ fn run_internal(
         frame_pending: false,
         snapshot_worker: desktop_role.then(|| SnapshotWorker::start(wake_sender.clone())),
         action_worker: desktop_role.then(|| ActionWorker::start(wake_sender.clone())),
-        preview_worker: (desktop_role && role == ShellRole::Overview)
-            .then(|| PreviewWorker::start(wake_sender)),
+        preview_worker: (desktop_role && role == ShellRole::Overview && !application_overview)
+            .then(|| PreviewWorker::start(wake_sender.clone())),
+        pane_worker: (desktop_role && application_overview)
+            .then(|| PaneWorker::start(wake_sender.clone())),
+        pane_requested: Vec::new(),
         snapshot: None,
         previews: Vec::new(),
         preview_generation: 0,
@@ -659,6 +756,8 @@ struct Runtime {
     snapshot_worker: Option<SnapshotWorker>,
     action_worker: Option<ActionWorker>,
     preview_worker: Option<PreviewWorker>,
+    pane_worker: Option<PaneWorker>,
+    pane_requested: Vec<OverviewPane>,
     snapshot: Option<DesktopSnapshot>,
     previews: Vec<WorkspacePreviewImage>,
     preview_generation: u64,
@@ -720,6 +819,12 @@ impl Runtime {
         if self.exit {
             return;
         }
+        if let Some(error) = self.pane_worker.as_ref().and_then(PaneWorker::latest_error)
+            && let Some(app) = &mut self.app
+        {
+            app.host_error(&format!("Live workspace preview unavailable: {error}"));
+            self.scene_dirty = true;
+        }
         let mut should_render =
             self.scene_dirty || self.app.as_ref().is_some_and(|app| app.needs_frame());
         if let Some(update) = self
@@ -735,11 +840,13 @@ impl Runtime {
                     // Every frame is a change or reconnect initialization. A restarted
                     // compositor may reuse identical metadata with different pixels.
                     self.preview_refresh = true;
+                    self.pane_requested.clear();
                     self.snapshot = Some(snapshot);
                 }
                 Err(_) => {
                     self.snapshot = None;
                     self.preview_refresh = true;
+                    self.pane_requested.clear();
                     if let Some(app) = &mut self.app {
                         app.desktop_unavailable();
                     }
@@ -807,6 +914,13 @@ impl Runtime {
             self.scene_dirty = false;
         }
         if !should_render {
+            if let Some(panes) = self.app.as_ref().and_then(|app| app.overview_panes())
+                && panes != self.pane_requested
+                && let Some(worker) = &self.pane_worker
+                && worker.update(panes.clone())
+            {
+                self.pane_requested = panes;
+            }
             return;
         }
         if let Some(app) = &mut self.app {
@@ -820,6 +934,13 @@ impl Runtime {
                     .clone();
             }
             self.scene_dirty = false;
+        }
+        if let Some(panes) = self.app.as_ref().and_then(|app| app.overview_panes())
+            && panes != self.pane_requested
+            && let Some(worker) = &self.pane_worker
+            && worker.update(panes.clone())
+        {
+            self.pane_requested = panes;
         }
         self.sync_ime();
         self.sync_cursor();

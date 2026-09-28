@@ -144,22 +144,31 @@ fn search_is_unicode_editable_and_escape_clears_before_closing() {
     assert!(app.should_close());
 }
 #[test]
-fn idle_frames_reuse_layout_and_previews_are_bounded_to_neighbors() {
+fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {
     let mut app = app();
     let stats = app.scene.stats();
     assert!(!app.needs_frame());
     app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(app.scene.stats(), stats);
+    let panes = app.overview_panes().unwrap();
+    assert_eq!(panes.len(), 3);
     assert_eq!(
-        app.preview_workspaces(),
-        Some(vec![WorkspaceId(2), WorkspaceId(1), WorkspaceId(3)])
+        panes.iter().map(|pane| pane.workspace).collect::<Vec<_>>(),
+        vec![WorkspaceId(1), WorkspaceId(3), WorkspaceId(2)]
     );
+    assert!(panes.iter().all(|pane| pane.width > 0 && pane.height > 0));
     app.browse(WorkspaceId(3));
+    app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(
-        app.preview_workspaces(),
-        Some(vec![WorkspaceId(3), WorkspaceId(2)])
+        app.overview_panes()
+            .unwrap()
+            .iter()
+            .map(|pane| pane.workspace)
+            .collect::<Vec<_>>(),
+        vec![WorkspaceId(2), WorkspaceId(3)]
     );
 }
+
 #[test]
 fn layouts_fit_compact_and_portrait_outputs_with_unique_control_ids() {
     for size in [

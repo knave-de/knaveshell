@@ -21,49 +21,26 @@ baseline exists, establish one before declaring the change complete. Report live
 Wayland, GPU, and installed-session measurements separately from build and unit
 test results.
 
-## Scheduling
+## Scheduling and current bounds
 
-The runtime uses SCTK's calloop integration and an event-driven wake channel.
-The Wayland loop blocks when there is no compositor event or worker update.
-A snapshot worker polls the desktop contract at the existing 500ms interval but
-signals the UI only when the snapshot generation changes. Preview completion and
-input changes request one redraw; a frame callback is not rescheduled after an
-unchanged frame. The wake channel has one slot, and the runtime tracks one
-pending frame callback.
+The runtime uses SCTK's calloop integration and a one-slot wake channel. The
+Wayland loop blocks while idle. Desktop state arrives through a dedicated API
+subscription; only disconnected clients use retry backoff. The retained overview
+has one bounded pane IPC worker, replacing its former PNG capture worker. Its
+single pending request contains at most three workspace rectangles. User
+actions have a separate one-slot worker so browsing updates cannot occupy the
+action queue. The compositor renders window textures in those rectangles during
+its ordinary output frame and paces inactive pane window frame callbacks at the
+output refresh interval. Search and minimized controls remain in the shell.
 
-## Current shell bounds
-
-The current Rust/wgpu shell keeps the interactive overview bounded:
-
-- snapshot refreshes use one worker, one-entry command and update channels, a
-  500ms successful interval, and reconnect backoff capped at five seconds;
-- overview preview capture uses one worker only while the overview is running,
-  one command slot, and one latest-value update slot;
-- preview capture considers at most 10 workspaces per changed snapshot and asks
-  Villain for exactly 320x180 images; it does not poll or decode per frame;
-- overview rendering considers at most 32 windows from the active workspace;
-- the overview uses a fixed four-column card layout and caps each window label at
-  48 Unicode scalar values;
-- local search caps input at 64 Unicode scalar values and results at 12 entries; and
-- pointer and keyboard actions share one worker with a one-entry queue, so input
-  bursts are dropped with a diagnostic instead of creating parallel work;
-- the renderer caches the scene and render list, rebuilding them only after a
-  snapshot or surface-size change rather than on every frame callback;
-- the renderer retains at most 128 image textures and 64 MiB of GPU image data,
-  with a separate 64 MiB maximum for image resources referenced by one frame;
-- shaped text layouts use an estimated 4 MiB/128-entry LRU budget, and text
-  rendering retains at most 128 ordered text-run renderers, limits all text
-  input in one frame to 512 KiB, and limits font-family names to 256 bytes; and
-- display lists are capped at 8,192 commands per frame to bound transient GPU
-  instance and bind-group allocation.
-
-Preview decoding requires the requested dimensions, rejects malformed PNG data,
-rejects base64 payloads over 512 KiB, and caps decoded pixels at 320x180
-(230,400 RGBA bytes per image). Failed or
-unavailable captures leave the workspace card's fallback panel in place; they do
-not block frame rendering. Ten current previews therefore have a bounded CPU
-pixel payload of about 2.2 MiB. GPU image limits also account for larger user
-images and driver allocation overhead.
+The old PNG preview query and the non-application overview host remain for
+compatibility, but the retained overview no longer stores or decodes preview
+bitmaps. The renderer still bounds text, display-list, and other image
+resources. This change has not been measured in a live session: CPU, resident
+memory, threads, file descriptors, wakeups, output latency, and GPU time are
+unknown. The previous PNG path took roughly 35 ms at 1080p, 80 ms at 1440p,
+and 149 ms at 4K per request in one local capture measurement; those figures
+are a historical comparison, not a measured improvement for this implementation.
 
 ## Nested baseline
 

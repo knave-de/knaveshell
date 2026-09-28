@@ -1,7 +1,5 @@
 use super::*;
-use knave_ui::{
-    Border, Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap,
-};
+use knave_ui::{Border, Color, CornerRadii, Rect, ShapePaint, TextAlign, TextWrap};
 
 const INK: Color = Color::rgba(17, 23, 33, 255);
 const PANEL: Color = Color::rgba(32, 42, 56, 255);
@@ -57,6 +55,7 @@ fn short(value: &str, limit: usize) -> String {
 impl Overview {
     pub(super) fn compose(&mut self) -> Element {
         self.targets.clear();
+        self.panes.clear();
         let [width, height] = self.size;
         let mut root = Element::new(0, Widget::Panel).layout(Layout {
             height: Length::Fill,
@@ -319,48 +318,36 @@ impl Overview {
                 Target::Workspace(ws)
             },
         );
-        if let Some(preview) = self.previews.iter().find(|p| p.workspace == ws) {
-            card.children.push(placed(
-                Element::new(
-                    id + 1,
-                    Widget::Image(
-                        preview.image.clone(),
-                        ImageStyle {
-                            fit: ImageFit::Contain,
-                            corner_radius: 20.0,
-                            opacity: if selected { 1.0 } else { 0.6 },
-                        },
-                    ),
-                ),
-                Rect::new(
-                    4.0,
-                    4.0,
-                    (rect.width - 8.0).max(0.0),
-                    (rect.height - 8.0).max(0.0),
-                ),
-            ));
-        } else {
-            let count = self
-                .snapshot
-                .as_ref()
-                .unwrap()
+        let strip_h = 88.0f32.min(rect.height * 0.35);
+        let top = if selected { 38.0 } else { 20.0 };
+        let bottom = if selected { strip_h + 20.0 } else { 20.0 };
+        let pane_height = (rect.height - top - bottom).max(0.0);
+        if pane_height >= 1.0
+            && rect.width > 40.0
+            && rect.x + rect.width > 0.0
+            && rect.x < self.size[0]
+        {
+            self.panes.push(OverviewPane {
+                workspace: ws,
+                x: (rect.x + 20.0).round() as i32,
+                y: (rect.y + top).round() as i32,
+                width: (rect.width - 40.0).round() as u32,
+                height: pane_height.round() as u32,
+            });
+        }
+        if self.snapshot.as_ref().is_some_and(|snapshot| {
+            !snapshot
                 .windows
                 .iter()
-                .filter(|w| w.workspace == ws && !w.minimized)
-                .count();
-            let message = if count == 0 {
-                "No visible windows".to_owned()
-            } else {
-                format!("Workspace preview unavailable · {count} open windows")
-            };
+                .any(|window| window.workspace == ws && !window.minimized)
+        }) {
             let mut label = text(
                 id + 2,
-                message,
+                "No visible windows",
                 Rect::new(16.0, rect.height * 0.35, (rect.width - 32.0).max(0.0), 50.0),
                 18.0,
                 MUTED,
             );
-            label.style.text.wrap = TextWrap::Word;
             label.style.text.align = TextAlign::Center;
             card.children.push(label);
         }
