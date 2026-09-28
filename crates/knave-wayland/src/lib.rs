@@ -17,15 +17,16 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc, Mutex,
-        mpsc::{self, Receiver, SyncSender},
+        mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread::{self, JoinHandle},
+    time::Duration,
 };
 
 use base64::Engine;
 use knave_desktop_api::{
-    DesktopClient, DesktopCommand, DesktopQuery, DesktopRequest, DesktopResponse, DesktopSnapshot,
-    OverviewPane, WorkspaceId, WorkspacePreview,
+    ClientError, DesktopClient, DesktopCommand, DesktopQuery, DesktopRequest, DesktopResponse,
+    DesktopSnapshot, OverviewPane, WorkspaceId, WorkspacePreview,
 };
 use knave_renderer::{RenderList, WgpuPainter, WgpuRenderer};
 use knave_ui::{MAX_SEARCH_QUERY, UiAction, UiImage, UiScene, WorkspacePreviewImage};
@@ -381,31 +382,64 @@ struct PaneWorker {
 }
 impl PaneWorker {
     fn start(wake: WakeSender) -> Self {
-        let (commands, receiver) = mpsc::sync_channel(1);
+        let (commands, receiver) = mpsc::sync_channel::<Vec<OverviewPane>>(1);
         let (errors_tx, errors) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
+            const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
+            const MAX_BACKOFF: Duration = Duration::from_secs(5);
             let mut client: Option<DesktopClient> = None;
-            while let Ok(panes) = receiver.recv() {
-                if client.is_none() {
-                    client = DesktopClient::connect().ok();
+            while let Ok(mut panes) = receiver.recv() {
+                let mut backoff = INITIAL_BACKOFF;
+                loop {
+                    // New geometry replaces a failed request; never replay stale panes.
+                    while let Ok(newer) = receiver.try_recv() {
+                        panes = newer;
+                        backoff = INITIAL_BACKOFF;
+                    }
+                    let result = (|| {
+                        if client.is_none() {
+                            client = Some(DesktopClient::connect()?);
+                        }
+                        client.as_mut().expect("connected above").request(
+                            &DesktopRequest::SetOverviewPanes {
+                                panes: panes.clone(),
+                            },
+                        )
+                    })();
+                    let retry = match result {
+                        Ok(DesktopResponse::Ok) => false,
+                        Ok(_) => {
+                            let _ =
+                                errors_tx.try_send("Unexpected overview pane response".to_owned());
+                            client = None;
+                            false
+                        }
+                        Err(error) => {
+                            let retryable =
+                                !matches!(&error, ClientError::Remote(remote) if !remote.retryable);
+                            if !retryable {
+                                let _ = errors_tx.try_send(error.to_string());
+                            }
+                            client = None;
+                            retryable
+                        }
+                    };
+                    // Let the UI submit its newest geometry if the one-entry queue was full.
+                    let _ = wake.try_send(RuntimeWake::Redraw);
+                    if !retry {
+                        break;
+                    }
+                    match receiver.recv_timeout(backoff) {
+                        Ok(newer) => {
+                            panes = newer;
+                            backoff = INITIAL_BACKOFF;
+                        }
+                        Err(RecvTimeoutError::Timeout) => {
+                            backoff = (backoff * 2).min(MAX_BACKOFF);
+                        }
+                        Err(RecvTimeoutError::Disconnected) => return,
+                    }
                 }
-                let result = client
-                    .as_mut()
-                    .ok_or_else(|| "Desktop connection unavailable".to_owned())
-                    .and_then(|client| {
-                        client
-                            .request(&DesktopRequest::SetOverviewPanes { panes })
-                            .map_err(|error| error.to_string())
-                    })
-                    .and_then(|response| match response {
-                        DesktopResponse::Ok => Ok(()),
-                        _ => Err("Unexpected overview pane response".to_owned()),
-                    });
-                if let Err(error) = result {
-                    client = None;
-                    let _ = errors_tx.try_send(error);
-                }
-                let _ = wake.try_send(RuntimeWake::Redraw);
             }
         });
         Self {

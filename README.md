@@ -36,7 +36,7 @@ knave-desktop-api:
     $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
 KNAVE_SOCKET overrides the derived path for isolated tests. The client uses one
-dedicated API 1.3 subscription worker and a one-entry snapshot mailbox. Villain
+dedicated API 1.2 subscription worker and a one-entry snapshot mailbox. Villain
 pushes changed state; a healthy idle connection makes no periodic requests.
 Only failed connections use reconnect backoff, capped at five seconds. It never
 blocks the Wayland frame callback on desktop IPC. The Wayland loop blocks when
@@ -47,9 +47,10 @@ Input actions use a separate one-entry bounded queue and one worker. A full
 queue drops an action with an explicit diagnostic instead of creating threads.
 
 The retained overview uses one bounded geometry worker to send up to three
-workspace pane rectangles. Villain composes existing window textures during
-normal output frames. The shell does not request, decode, or upload PNGs for
-this overview. A legacy non-application overview host retains its preview worker.
+workspace pane rectangles. Transient failures retry with capped backoff, and
+new geometry replaces an older pending request. Villain composes existing
+window textures during normal output frames. The shell does not request,
+decode, or upload PNGs for this overview. A legacy non-application overview host retains its preview worker.
 
 The shell does not own persistent settings. It receives the compositor's
 workspace/window state from Villain through Knave's public contract and sends

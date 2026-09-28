@@ -19,15 +19,17 @@ transport, decoded image cache, or window input remapping in this path.
 
 One bounded pane worker keeps IPC off the Wayland frame callback. It has a
 single pending update and wakes the UI after completion, so a full queue
-retries the latest layout without spawning more threads. Desktop actions use
-a separate bounded worker. The snapshot subscription remains event driven;
+retries the latest layout without spawning more threads. Transient connection
+or unavailable errors retry with capped backoff; permanent API errors surface
+to the UI. Desktop actions use a separate bounded worker. The snapshot subscription remains event driven;
 failed connections use capped retry backoff. The legacy preview query remains
 available for older clients, and the non-application overview host still uses
 its existing preview worker.
 
 This needs Knave desktop API 1.3 and a Villain build that supports live panes.
 Deploy Villain before the new shell. Older 1.2 clients work with new Villain;
-a new shell on an older compositor reports the unavailable live preview.
+a new shell on an older compositor keeps its API 1.2 subscription and reports
+the unavailable live preview command.
 Rollback the shell first. No persistent configuration changes. Direct TTY,
 nested GPU composition, focus restoration, and installed binaries require
 live smoke verification; a Rust build alone cannot establish them.
