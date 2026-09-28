@@ -17,8 +17,8 @@ workspace. Left/Right browse workspaces; click the center preview or press Enter
 to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
 search existing windows, use Tab to traverse controls, and Escape to clear search
 or leave overview. Activation closes only after the desktop service acknowledges
-success. The overview currently displays workspace snapshots, not independently
-interactive window previews. Both roles consume Knave's versioned desktop
+success. The overview displays compositor-rendered workspace surfaces inside the cards;
+the surfaces are visual only and card controls retain input. Both roles consume Knave's versioned desktop
 contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
@@ -36,7 +36,7 @@ knave-desktop-api:
     $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
 KNAVE_SOCKET overrides the derived path for isolated tests. The client uses one
-dedicated API 1.2 subscription worker and a one-entry snapshot mailbox. Villain
+dedicated API 1.3 subscription worker and a one-entry snapshot mailbox. Villain
 pushes changed state; a healthy idle connection makes no periodic requests.
 Only failed connections use reconnect backoff, capped at five seconds. It never
 blocks the Wayland frame callback on desktop IPC. The Wayland loop blocks when
@@ -46,12 +46,10 @@ not submit an unchanged frame continuously.
 Input actions use a separate one-entry bounded queue and one worker. A full
 queue drops an action with an explicit diagnostic instead of creating threads.
 
-Overview previews use one additional worker only for the overview role. It
-requests the centered workspace and up to two neighbors at the overview output's
-pixel resolution. State, browsing, resize, and scale changes refresh previews.
-It keeps one latest update slot, rejects malformed or oversized PNGs, and uploads decoded images
-through the renderer's bounded texture cache. No preview request or decode runs
-on the Wayland frame callback.
+The retained overview uses one bounded geometry worker to send up to three
+workspace pane rectangles. Villain composes existing window textures during
+normal output frames. The shell does not request, decode, or upload PNGs for
+this overview. A legacy non-application overview host retains its preview worker.
 
 The shell does not own persistent settings. It receives the compositor's
 workspace/window state from Villain through Knave's public contract and sends
@@ -70,7 +68,7 @@ packaging. The installer also writes the README below the selected prefix.
 ## Implementation status
 
 The supported runtime is Rust/wgpu over Wayland layer-shell. Overview uses the
-retained UI toolkit; the bar retains its existing scene projection. Individual
+retained UI toolkit; the bar retains its existing scene projection. Individually interactive
 window previews, fullscreen-hidden grouping, application launching/icons,
 fractional scaling and multiple-output hosting remain future work.
 

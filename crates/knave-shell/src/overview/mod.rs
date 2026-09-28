@@ -1,7 +1,9 @@
 //! Workspace-first overview with a separate minimized-window shelf.
 mod view;
-use knave_desktop_api::{DesktopCommand, DesktopSnapshot, WindowId, WindowSummary, WorkspaceId};
-use knave_ui::{DisplayList, WorkspacePreviewImage, toolkit::*};
+use knave_desktop_api::{
+    DesktopCommand, DesktopSnapshot, OverviewPane, WindowId, WindowSummary, WorkspaceId,
+};
+use knave_ui::{DisplayList, toolkit::*};
 use knave_wayland::{Application, HostRequest};
 use std::collections::HashMap;
 
@@ -20,7 +22,7 @@ enum Target {
 
 pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
-    previews: Vec<WorkspacePreviewImage>,
+    panes: Vec<OverviewPane>,
     workspace: Option<WorkspaceId>,
     scene: Scene,
     targets: HashMap<ElementId, Target>,
@@ -49,7 +51,7 @@ impl Overview {
     pub fn new() -> Self {
         Self {
             snapshot: None,
-            previews: Vec::new(),
+            panes: Vec::new(),
             workspace: None,
             scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
             targets: HashMap::new(),
@@ -289,31 +291,8 @@ impl Application for Overview {
         self.connected = false;
         self.host_error("Desktop connection unavailable — retrying");
     }
-    fn preview_workspaces(&self) -> Option<Vec<WorkspaceId>> {
-        let Some(s) = &self.snapshot else {
-            return Some(Vec::new());
-        };
-        let Some(index) = s
-            .workspaces
-            .iter()
-            .position(|w| Some(w.workspace) == self.workspace)
-        else {
-            return Some(Vec::new());
-        };
-        let mut spaces = vec![s.workspaces[index].workspace];
-        for other in [index.checked_sub(1), Some(index + 1)]
-            .into_iter()
-            .flatten()
-        {
-            if let Some(w) = s.workspaces.get(other) {
-                spaces.push(w.workspace);
-            }
-        }
-        Some(spaces)
-    }
-    fn workspace_previews(&mut self, previews: &[WorkspacePreviewImage]) {
-        self.previews = previews.to_vec();
-        self.dirty = true;
+    fn overview_panes(&self) -> Option<Vec<OverviewPane>> {
+        Some(self.panes.clone())
     }
     fn desktop_action_finished(&mut self, result: Result<(), String>) {
         if !self.pending {

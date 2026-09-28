@@ -67,6 +67,10 @@ pub trait Application {
     }
     fn desktop_snapshot(&mut self, _snapshot: &knave_desktop_api::DesktopSnapshot) {}
     /// Request only the workspace previews currently visible to this application.
+    /// Display-only compositor panes for this shell surface, in logical output pixels.
+    fn overview_panes(&self) -> Option<Vec<knave_desktop_api::OverviewPane>> {
+        None
+    }
     fn preview_workspaces(&self) -> Option<Vec<knave_desktop_api::WorkspaceId>> {
         None
     }
