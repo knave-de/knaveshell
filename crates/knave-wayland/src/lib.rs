@@ -737,12 +737,11 @@ impl Runtime {
                     self.preview_refresh = true;
                     self.snapshot = Some(snapshot);
                 }
-                Err(error) => {
+                Err(_) => {
                     self.snapshot = None;
                     self.preview_refresh = true;
                     if let Some(app) = &mut self.app {
                         app.desktop_unavailable();
-                        app.host_error(&error);
                     }
                 }
             }
