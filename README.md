@@ -36,8 +36,9 @@ knave-desktop-api:
     $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
 KNAVE_SOCKET overrides the derived path for isolated tests. The client uses one
-bounded worker, a one-entry snapshot channel, a 500ms successful refresh
-interval, and exponential reconnect backoff capped at five seconds. It never
+dedicated API 1.2 subscription worker and a one-entry snapshot mailbox. Villain
+pushes changed state; a healthy idle connection makes no periodic requests.
+Only failed connections use reconnect backoff, capped at five seconds. It never
 blocks the Wayland frame callback on desktop IPC. The Wayland loop blocks when
 idle and redraws only for changed state, input, or preview completion; it does
 not submit an unchanged frame continuously.

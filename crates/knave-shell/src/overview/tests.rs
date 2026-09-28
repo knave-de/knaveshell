@@ -38,6 +38,7 @@ fn snapshot() -> DesktopSnapshot {
                 minimized: id != 1,
                 floating: false,
                 fullscreen: false,
+                maximized: false,
             })
             .collect(),
     }
