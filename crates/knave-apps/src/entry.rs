@@ -8,6 +8,7 @@ pub(crate) struct Entry {
     pub comment: String,
     pub keywords: Vec<String>,
     pub exec: String,
+    pub icon: Option<String>,
     pub try_exec: Option<String>,
     pub is_application: bool,
     pub no_display: bool,
@@ -73,6 +74,7 @@ pub(crate) fn parse(text: &str, locales: &[String]) -> Entry {
             _ if locale.is_some() => {}
             "Type" => entry.is_application = value == "Application",
             "Exec" => entry.exec = unescape(value),
+            "Icon" => entry.icon = Some(unescape(value)).filter(|v| !v.is_empty()),
             "TryExec" => entry.try_exec = Some(unescape(value)),
             "NoDisplay" => entry.no_display = value == "true",
             "Hidden" => entry.deleted = value == "true",

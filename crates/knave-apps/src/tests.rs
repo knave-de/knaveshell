@@ -49,6 +49,10 @@ fn only_visible_graphical_applications_are_listed() {
     let d = Dir::new();
     d.write("applications/a.desktop", &desktop("Alpha", "alpha", ""));
     d.write(
+        "applications/i.desktop",
+        &desktop("Iconic", "iconic", "Icon=my-icon\n"),
+    );
+    d.write(
         "applications/hidden.desktop",
         &desktop("Hid", "h", "NoDisplay=true\n"),
     );
@@ -71,8 +75,18 @@ fn only_visible_graphical_applications_are_listed() {
     d.write("applications/readme.txt", "ignored");
     let catalog = Catalog::load_with(&env(&[&d])).unwrap();
     assert_eq!(names(&catalog, "a"), ["Alpha"]);
-    assert_eq!(catalog.len(), 1);
+    assert_eq!(names(&catalog, "iconic"), ["Iconic"]);
+    assert_eq!(
+        catalog
+            .get(catalog.search("iconic", 1)[0])
+            .unwrap()
+            .icon
+            .as_deref(),
+        Some("my-icon")
+    );
+    assert_eq!(catalog.len(), 2);
     assert_eq!(catalog.get(0).unwrap().id, "a.desktop");
+    assert_eq!(catalog.get(0).unwrap().icon, None);
 }
 
 #[test]

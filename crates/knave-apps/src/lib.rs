@@ -70,6 +70,8 @@ pub struct App {
     /// Generic name or comment, whichever describes the application.
     pub description: String,
     pub argv: Vec<String>,
+    /// Icon theme name or absolute path from the `Icon` key.
+    pub icon: Option<String>,
     fields: Fields,
 }
 
@@ -279,6 +281,7 @@ fn build(id: String, text: &str, env: &Environment) -> Option<App> {
             comment: entry.comment.to_lowercase(),
         },
         name: entry.name,
+        icon: entry.icon,
         argv,
     })
 }
