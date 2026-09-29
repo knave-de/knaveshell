@@ -1,12 +1,15 @@
 //! Workspace-first overview with a separate minimized-window shelf.
 mod icons;
+mod loader;
 mod view;
-use knave_apps::Catalog;
+use knave_apps::{Catalog, Environment};
 use knave_desktop_api::{
     DesktopCommand, DesktopSnapshot, OverviewPane, WindowId, WindowSummary, WorkspaceId,
 };
+use knave_icons::IconLookup;
 use knave_ui::{DisplayList, toolkit::*};
 use knave_wayland::{Application, HostRequest};
+use loader::{Done, Job, Loader};
 use std::collections::HashMap;
 
 const SEARCH: ElementId = ElementId(2);
@@ -24,9 +27,11 @@ enum Target {
     Page(bool),
 }
 
-/// The catalog loads on the first query so overview startup never waits on the filesystem.
+/// The catalog loads on a worker after the first query, so neither startup nor
+/// typing ever waits on the filesystem.
 enum Apps {
     Unloaded,
+    Loading,
     Ready(Catalog),
     Unavailable,
 }
@@ -46,8 +51,13 @@ pub struct Overview {
     query: TextEdit,
     apps: Apps,
     icons: icons::Icons,
-    /// Visible rows still lack an icon; another frame finishes them.
-    icons_pending: bool,
+    loader: Option<Loader>,
+    /// Consumed when the worker starts.
+    lookup: Option<IconLookup>,
+    catalog_env: Option<Environment>,
+    waker: Option<knave_wayland::Waker>,
+    /// Enter arrived while the catalog was still loading.
+    launch_when_ready: bool,
     page: usize,
     result_page: usize,
     connected: bool,
@@ -78,8 +88,12 @@ impl Overview {
             next_id: 100_000,
             query: TextEdit::new("").expect("empty text"),
             apps: Apps::Unloaded,
-            icons: icons::Icons::new(knave_icons::IconLookup::from_process()),
-            icons_pending: false,
+            icons: icons::Icons::default(),
+            loader: None,
+            lookup: None,
+            catalog_env: None,
+            waker: None,
+            launch_when_ready: false,
             page: 0,
             result_page: 0,
             connected: false,
@@ -99,9 +113,18 @@ impl Overview {
         self.apps = Apps::Ready(catalog);
         self
     }
-    pub fn with_icon_lookup(mut self, lookup: knave_icons::IconLookup) -> Self {
-        self.icons = icons::Icons::new(lookup);
+    pub fn with_icon_lookup(mut self, lookup: IconLookup) -> Self {
+        self.lookup = Some(lookup);
         self
+    }
+    /// Scan these directories instead of the process's XDG environment.
+    pub fn with_catalog_environment(mut self, env: Environment) -> Self {
+        self.catalog_env = Some(env);
+        self
+    }
+    /// True while the worker still owes the UI a catalog or icons.
+    pub fn is_loading(&self) -> bool {
+        matches!(self.apps, Apps::Loading) || self.icons.is_loading()
     }
     pub fn browsed_workspace(&self) -> Option<WorkspaceId> {
         self.workspace
@@ -228,22 +251,61 @@ impl Overview {
         self.size = size;
         Scene::new(self.compose()).map(|_| ())
     }
+    fn loader(&mut self) -> &Loader {
+        if self.loader.is_none() {
+            let lookup = self.lookup.take().unwrap_or_else(IconLookup::from_process);
+            self.loader = Some(Loader::start(lookup, self.waker.clone()));
+        }
+        self.loader.as_ref().expect("started above")
+    }
     fn ensure_catalog(&mut self) {
         if matches!(self.apps, Apps::Unloaded) {
-            self.apps = match Catalog::load() {
-                Ok(catalog) => Apps::Ready(catalog),
-                Err(error) => {
-                    eprintln!("knave-shell: {error}");
-                    Apps::Unavailable
-                }
+            let env = self
+                .catalog_env
+                .clone()
+                .unwrap_or_else(Environment::from_process);
+            self.apps = if self.loader().submit(Job::Catalog(env)) {
+                Apps::Loading
+            } else {
+                Apps::Unavailable
             };
+        }
+    }
+    /// Move finished worker results into UI state.
+    fn absorb(&mut self) {
+        let done = match &self.loader {
+            Some(loader) => loader.take(),
+            None => return,
+        };
+        for result in done {
+            match result {
+                Done::Catalog(Ok(catalog)) => {
+                    if catalog.truncated() {
+                        eprintln!("knave-shell: application catalog is incomplete (scan limit)");
+                    }
+                    self.apps = Apps::Ready(catalog);
+                    self.result_page = 0;
+                    if std::mem::take(&mut self.launch_when_ready)
+                        && let Some(&index) = self.search().first()
+                    {
+                        self.launch(index);
+                    }
+                }
+                Done::Catalog(Err(error)) => {
+                    eprintln!("knave-shell: {error}");
+                    self.apps = Apps::Unavailable;
+                    self.launch_when_ready = false;
+                }
+                Done::Icon(name, image) => self.icons.finish(name, image),
+            }
+            self.dirty = true;
         }
     }
     /// Catalog indexes for the current query, best match first.
     fn search(&self) -> Vec<usize> {
         match &self.apps {
             Apps::Ready(catalog) => catalog.search(self.query.text(), MAX_RESULTS),
-            Apps::Unloaded | Apps::Unavailable => Vec::new(),
+            Apps::Unloaded | Apps::Loading | Apps::Unavailable => Vec::new(),
         }
     }
     fn sync_query(&mut self) {
@@ -251,6 +313,7 @@ impl Overview {
             let changed = self.query.text() != edit.text();
             self.query = edit.clone();
             if changed {
+                self.launch_when_ready = false;
                 if !self.query.text().is_empty() {
                     self.ensure_catalog();
                 }
@@ -290,7 +353,7 @@ impl Overview {
                 self.error = Some(error.to_string());
             }
         }
-        self.dirty = std::mem::take(&mut self.icons_pending);
+        self.dirty = false;
     }
 }
 impl Application for Overview {
@@ -373,7 +436,12 @@ impl Application for Overview {
         self.close
     }
     fn needs_frame(&self) -> bool {
-        self.dirty || self.scene.needs_frame()
+        self.dirty
+            || self.scene.needs_frame()
+            || self.loader.as_ref().is_some_and(Loader::has_results)
+    }
+    fn set_waker(&mut self, waker: knave_wayland::Waker) {
+        self.waker = Some(waker);
     }
     fn input(&mut self, event: Input) {
         match &event {
@@ -429,6 +497,8 @@ impl Application for Overview {
                         .get(self.result_page * self.search_page_size())
                     {
                         self.launch(index);
+                    } else if matches!(self.apps, Apps::Loading) {
+                        self.launch_when_ready = true;
                     }
                     return;
                 }
@@ -468,6 +538,7 @@ impl Application for Overview {
         }
     }
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
+        self.absorb();
         if size != self.size {
             self.size = size;
             self.dirty = true;

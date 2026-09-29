@@ -14,6 +14,10 @@ Input is delivered in protocol order, pointer batches coalesce before drawing,
 and one outstanding frame callback limits redraw scheduling. Idle applications
 have no redraw timer. Desktop IPC workers are enabled only when an application
 opts in through `uses_desktop`; see [the overview contract](overview.md).
+Applications with background work receive a cloneable `Waker` through
+`Application::set_waker` before the first frame. `wake()` uses the same one-slot
+channel as the host's workers, so completed work schedules one draw without a
+timer, and the application reports finished results through `needs_frame`.
 Keyboard repeat uses the seat's
 repeat settings and an owned event-loop timer. Integer output scale updates the
 buffer and display transforms while scene coordinates stay logical.

@@ -6,7 +6,7 @@ mod cursor;
 mod ime;
 mod snapshot;
 pub use application::{
-    Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, run_application,
+    Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker, run_application,
 };
 use knave_ui::toolkit::{Input, KeyModifiers};
 use snapshot::SnapshotWorker;
@@ -715,6 +715,9 @@ fn run_internal(
         exit: false,
     };
 
+    if let Some(app) = &mut state.app {
+        app.set_waker(application::Waker::new(wake_sender.clone()));
+    }
     while !state.exit {
         event_loop
             .dispatch(None, &mut state)

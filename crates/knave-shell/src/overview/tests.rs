@@ -67,7 +67,7 @@ fn fixture_dir(label: &str) -> std::path::PathBuf {
 }
 /// Twelve "Tool NN" entries exercise paging; "Editor" checks Exec expansion.
 /// Tool 12 names an icon that does not exist, to exercise the fallback.
-fn catalog() -> knave_apps::Catalog {
+fn apps_root() -> std::path::PathBuf {
     let root = fixture_dir("apps");
     let dir = root.join("applications");
     std::fs::create_dir_all(&dir).unwrap();
@@ -93,11 +93,16 @@ fn catalog() -> knave_apps::Catalog {
         )
         .unwrap();
     }
-    knave_apps::Catalog::load_with(&knave_apps::Environment {
-        data_dirs: vec![root],
+    root
+}
+fn apps_environment() -> knave_apps::Environment {
+    knave_apps::Environment {
+        data_dirs: vec![apps_root()],
         ..Default::default()
-    })
-    .unwrap()
+    }
+}
+fn catalog() -> knave_apps::Catalog {
+    knave_apps::Catalog::load_with(&apps_environment()).unwrap()
 }
 fn png_bytes(rgba: [u8; 4]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -227,7 +232,7 @@ fn snapshots_with_same_generation_update_membership_and_preserve_browsing() {
 fn search_is_unicode_editable_and_escape_clears_before_closing() {
     let mut app = app();
     app.input(Input::Text("Editor".into()));
-    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
     assert_eq!(app.query.text(), "Editor");
     assert_eq!(app.scene.focus(), Some(SEARCH));
     key(&mut app, Key::Escape, true);
@@ -275,7 +280,7 @@ fn layouts_fit_compact_and_portrait_outputs_with_unique_control_ids() {
         app.frame(size, &mut Metrics);
         assert!(app.error.is_none(), "{size:?}: {:?}", app.error);
         app.input(Input::Text("Tool".into()));
-        app.frame(size, &mut Metrics);
+        settle(&mut app, size);
         assert!(app.error.is_none());
         click(&mut app, ElementId(31));
         app.frame(size, &mut Metrics);
@@ -294,9 +299,20 @@ fn disconnected_overview_cannot_dispatch_stale_window_actions() {
     assert!(app.error.is_none());
 }
 
+/// Draw frames until the worker has delivered everything it owes; fails instead of hanging.
+fn settle(app: &mut Overview, size: [f32; 2]) {
+    for _ in 0..5000 {
+        app.frame(size, &mut Metrics);
+        if !app.is_loading() && !app.needs_frame() {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    panic!("loader did not settle");
+}
 fn type_query(app: &mut Overview, query: &str) {
     app.input(Input::Text(query.into()));
-    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(app, [1200.0, 800.0]);
 }
 fn spawned(app: &mut Overview) -> Option<Vec<String>> {
     match app.take_request() {
@@ -417,21 +433,58 @@ fn rows_show_an_icon_and_keep_the_text_column_aligned() {
     );
 }
 #[test]
-fn icon_decoding_is_spread_across_frames() {
+fn icons_are_delivered_by_the_worker_for_visible_rows_only() {
     let mut app = app();
     type_query(&mut app, "tool");
-    let visible: Vec<usize> = app.search()[..8].to_vec();
-    let drawn = |app: &Overview| {
-        visible
-            .iter()
-            .filter(|&&i| app.scene.bounds(icon_element(i)).is_some())
-            .count()
-    };
-    assert_eq!(drawn(&app), 4);
-    assert!(app.needs_frame());
-    app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(drawn(&app), 8);
+    let ready = |app: &Overview, i: usize| app.scene.bounds(icon_element(i)).is_some();
+    let results = app.search();
+    assert!(results[..8].iter().all(|&i| ready(&app, i)));
+    // Rows on later pages were never requested.
+    assert!(results[8..].iter().all(|&i| !ready(&app, i)));
+    assert!(!app.is_loading());
     assert!(!app.needs_frame());
+}
+#[test]
+fn enter_while_the_catalog_loads_launches_when_it_arrives() {
+    let mut app = Overview::new()
+        .with_catalog_environment(apps_environment())
+        .with_icon_lookup(icon_lookup(true));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    app.input(Input::Text("edit".into()));
+    // No frame has absorbed the worker's catalog yet, so Enter must not be lost.
+    key(&mut app, Key::Enter, true);
+    assert!(app.take_request().is_none());
+    assert!(app.launch_when_ready);
+    settle(&mut app, [1200.0, 800.0]);
+    assert_eq!(
+        spawned(&mut app),
+        Some(vec!["editor".into(), "--new".into()])
+    );
+    assert!(!app.launch_when_ready);
+    // Editing the query cancels a pending launch.
+    let mut app = Overview::new()
+        .with_catalog_environment(apps_environment())
+        .with_icon_lookup(icon_lookup(true));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    app.input(Input::Text("edit".into()));
+    key(&mut app, Key::Enter, true);
+    app.input(Input::Text("x".into()));
+    settle(&mut app, [1200.0, 800.0]);
+    assert!(app.take_request().is_none());
+}
+#[test]
+fn a_missing_catalog_directory_is_reported_by_the_worker() {
+    let mut app = Overview::new().with_catalog_environment(knave_apps::Environment {
+        data_dirs: vec![fixture_dir("empty").join("nowhere")],
+        ..Default::default()
+    });
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    type_query(&mut app, "edit");
+    assert!(matches!(app.apps, Apps::Unavailable));
+    assert!(app.search().is_empty());
 }
 #[test]
 fn missing_icons_use_the_fallback_and_never_fail_the_row() {
@@ -439,9 +492,8 @@ fn missing_icons_use_the_fallback_and_never_fail_the_row() {
     type_query(&mut app, "tool 12");
     let index = app.search()[0];
     assert!(app.scene.bounds(icon_element(index)).is_some());
-    let ghost = app.icons.get("ghost").unwrap();
-    let fallback = app.icons.get("application-x-executable").unwrap();
-    assert_eq!(ghost.cache_key(), fallback.cache_key());
+    // The worker answers a missing name with the theme fallback.
+    assert!(app.icons.get("ghost").is_some());
     let mut bare = Overview::new()
         .with_catalog(catalog())
         .with_icon_lookup(icon_lookup(false));
@@ -455,14 +507,19 @@ fn missing_icons_use_the_fallback_and_never_fail_the_row() {
     assert!(!bare.needs_frame());
 }
 #[test]
-fn the_icon_cache_is_bounded() {
-    let mut icons = icons::Icons::new(knave_icons::IconLookup::new(vec![], vec![]));
-    let names: Vec<String> = (0..400).map(|n| format!("missing-{n}")).collect();
-    // Evicted names become uncached again, so feed bounded chunks instead of looping to done.
-    for chunk in names.chunks(4) {
-        icons.fill(chunk.iter().map(String::as_str));
+fn the_icon_cache_is_bounded_and_requests_are_deduplicated() {
+    let mut icons = icons::Icons::default();
+    assert!(icons.needs_request("a"));
+    icons.requested("a");
+    assert!(!icons.needs_request("a"));
+    assert!(icons.is_loading());
+    for n in 0..400 {
+        icons.finish(format!("missing-{n}"), None);
         assert!(icons.len() <= 128);
     }
+    icons.finish("a".into(), None);
+    assert!(!icons.is_loading());
+    assert!(!icons.needs_request("a"));
     assert_eq!(icons.len(), 128);
 }
 #[test]

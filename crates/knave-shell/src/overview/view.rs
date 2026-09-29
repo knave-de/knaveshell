@@ -57,9 +57,6 @@ fn short(value: &str, limit: usize) -> String {
 }
 impl Overview {
     pub(super) fn compose(&mut self) -> Element {
-        if !self.query.text().is_empty() {
-            self.ensure_catalog();
-        }
         self.targets.clear();
         self.panes.clear();
         let [width, height] = self.size;
@@ -427,11 +424,16 @@ impl Overview {
                     Some((index, label, icon))
                 })
                 .collect(),
-            Apps::Unloaded | Apps::Unavailable => Vec::new(),
+            Apps::Unloaded | Apps::Loading | Apps::Unavailable => Vec::new(),
         };
-        self.icons_pending |= self
-            .icons
-            .fill(visible.iter().map(|(_, _, icon)| icon.as_str()));
+        for (_, _, icon) in &visible {
+            // Failed submits retry on the next frame, which the worker's results trigger.
+            if self.icons.needs_request(icon)
+                && self.loader().submit(loader::Job::Icon(icon.clone()))
+            {
+                self.icons.requested(icon);
+            }
+        }
         let rows: Vec<(usize, String, Option<UiImage>)> = visible
             .into_iter()
             .map(|(index, label, icon)| (index, label, self.icons.get(&icon).cloned()))
@@ -505,10 +507,10 @@ impl Overview {
         if matches.is_empty() {
             panel.children.push(text(
                 42,
-                if matches!(self.apps, Apps::Unavailable) {
-                    "Application list unavailable"
-                } else {
-                    "No applications found"
+                match self.apps {
+                    Apps::Unavailable => "Application list unavailable",
+                    Apps::Unloaded | Apps::Loading => "Loading applications…",
+                    Apps::Ready(_) => "No applications found",
                 },
                 Rect::new(18.0, 36.0, (search.width - 36.0).max(0.0), 24.0),
                 13.0,

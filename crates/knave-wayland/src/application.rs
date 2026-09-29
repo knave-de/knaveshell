@@ -60,7 +60,23 @@ pub enum HostRequest {
     Desktop(knave_desktop_api::DesktopCommand),
 }
 
+/// Wakes the host to draw after background work completes. Cheap to clone and safe to
+/// call from any thread; a wake already queued absorbs further calls.
+#[derive(Clone)]
+pub struct Waker(super::WakeSender);
+impl Waker {
+    pub(super) fn new(sender: super::WakeSender) -> Self {
+        Self(sender)
+    }
+    pub fn wake(&self) {
+        let _ = self.0.try_send(super::RuntimeWake::Redraw);
+    }
+}
+
 pub trait Application {
+    /// Called once before the first frame. Applications that run background work
+    /// keep the waker, and report finished results through `needs_frame`.
+    fn set_waker(&mut self, _waker: Waker) {}
     /// Opt into the host's bounded desktop snapshot, preview and action workers.
     fn uses_desktop(&self) -> bool {
         false

@@ -15,17 +15,28 @@ contents preserve the output aspect ratio and are clipped to the supplied
 rectangle. Browsing and resizing replace the entire set; search clears it.
 Villain also clears it when the overview layer surface unmaps or is destroyed.
 Search lists installed applications, not windows. `knave-apps` reads XDG
-`.desktop` entries once, on the first query, with bounded file counts and sizes;
-entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet `TryExec`/`OnlyShowIn`
-are skipped. Launching sends the existing `Spawn { argv }` desktop command, so
-Villain starts the process with the session environment and the overview closes
-only after it acknowledges. No new desktop API is involved.
+`.desktop` entries; entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet
+`TryExec`/`OnlyShowIn` are skipped. Launching sends the existing `Spawn { argv }`
+desktop command, so Villain starts the process with the session environment and
+the overview closes only after it acknowledges. No new desktop API is involved.
+
 Rows show each application's `Icon`, resolved by `knave-icons` with the icon theme
 spec's size rule. Knave has no icon-theme setting and the shell reads no other
 desktop's settings, so lookup tries `hicolor`, then every other installed theme by
-name, then `pixmaps`. Icons are rasterized at 64px (SVG through resvg without text
-or system fonts, PNG downscaled if oversized), at most four per frame for visible
-rows only, and kept in a 128-entry cache.
+name, then `pixmaps`.
+
+Catalog and icon loading run on one worker owned by the `Overview`, started on the
+first typed character. The input and frame paths never read the filesystem. The
+job queue holds 32 jobs; icon requests are limited to visible rows and
+deduplicated, and finished icons live in a 128-entry cache. The worker wakes the
+host through `Application::set_waker`, and `needs_frame` reports delivered
+results, so there is no polling. A scan examines at most 16,384 directory entries
+and keeps at most 4,096 applications; reaching a limit marks the catalog
+incomplete and logs it. Only regular files are opened, so a FIFO cannot block the
+worker. Dropping the overview closes the queue and never waits on the worker. Enter
+pressed before the catalog arrives launches the top result when it does.
+Icons rasterize at 64px (SVG through resvg without text or system fonts, PNG
+downscaled if oversized).
 Only window textures are composed: there is no screenshot readback, PNG
 transport, decoded image cache, or window input remapping in this path.
 
