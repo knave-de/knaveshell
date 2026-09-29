@@ -54,6 +54,9 @@ fn short(value: &str, limit: usize) -> String {
 }
 impl Overview {
     pub(super) fn compose(&mut self) -> Element {
+        if !self.query.text().is_empty() {
+            self.ensure_catalog();
+        }
         self.targets.clear();
         self.panes.clear();
         let [width, height] = self.size;
@@ -92,7 +95,7 @@ impl Overview {
         if self.query.text().is_empty() {
             search.children.push(text(
                 3,
-                "Search windows and workspaces…",
+                "Search applications…",
                 Rect::new(22.0, 16.0, (search_width - 44.0).max(0.0), 22.0),
                 16.0,
                 MUTED,
@@ -398,47 +401,58 @@ impl Overview {
         card
     }
     fn search_results(&mut self, search: Rect) -> Element {
-        let matches: Vec<_> = self.search().into_iter().cloned().collect();
+        let matches = self.search();
         let page_size = self.search_page_size();
         self.result_page = self
             .result_page
             .min(matches.len().saturating_sub(1) / page_size);
         let start = self.result_page * page_size;
         let shown = matches.len().saturating_sub(start).min(page_size);
+        let rows: Vec<(usize, String)> = match &self.apps {
+            Apps::Ready(catalog) => matches
+                .iter()
+                .skip(start)
+                .take(shown)
+                .filter_map(|&index| {
+                    let app = catalog.get(index)?;
+                    let label = if app.description.is_empty() {
+                        short(&app.name, 70)
+                    } else {
+                        format!("{}\n{}", short(&app.name, 70), short(&app.description, 90))
+                    };
+                    Some((index, label))
+                })
+                .collect(),
+            Apps::Unloaded | Apps::Unavailable => Vec::new(),
+        };
         let mut panel = panel(
             40,
             Rect::new(
                 search.x,
                 search.y + search.height + 12.0,
                 search.width,
-                66.0 + shown as f32 * 60.0,
+                66.0 + rows.len() as f32 * 60.0,
             ),
             INK,
             18.0,
         );
-        panel.children.push(text(
-            41,
-            format!("{} matching windows", matches.len()),
-            Rect::new(18.0, 10.0, (search.width - 150.0).max(0.0), 22.0),
-            13.0,
-            MUTED,
-        ));
-        for (n, w) in matches.iter().skip(start).take(shown).enumerate() {
-            let id = self.window_ids[&w.id];
-            let title = if w.title.is_empty() {
-                &w.app_id
-            } else {
-                &w.title
-            };
+        if matches!(self.apps, Apps::Ready(_)) && !matches.is_empty() {
+            panel.children.push(text(
+                41,
+                match matches.len() {
+                    1 => "1 application".to_owned(),
+                    n => format!("{n} applications"),
+                },
+                Rect::new(18.0, 10.0, (search.width - 150.0).max(0.0), 22.0),
+                13.0,
+                MUTED,
+            ));
+        }
+        for (n, (index, label)) in rows.into_iter().enumerate() {
+            let id = app_element(index);
             let mut result = control(
                 id.0,
-                format!(
-                    "{}\n{} · Workspace {}{}",
-                    short(title, 70),
-                    short(&w.app_id, 32),
-                    w.workspace.0,
-                    if w.minimized { " · Minimized" } else { "" }
-                ),
+                label,
                 Rect::new(
                     12.0,
                     38.0 + n as f32 * 60.0,
@@ -448,13 +462,17 @@ impl Overview {
             );
             result.layout = result.layout.with_padding(Insets::symmetric(6.0, 12.0));
             result.enabled = !self.pending;
-            self.targets.insert(id, Target::Window(w.id));
+            self.targets.insert(id, Target::App(index));
             panel.children.push(result);
         }
         if matches.is_empty() {
             panel.children.push(text(
                 42,
-                "Try a window title, app ID, or workspace number",
+                if matches!(self.apps, Apps::Unavailable) {
+                    "Application list unavailable"
+                } else {
+                    "No applications found"
+                },
                 Rect::new(18.0, 36.0, (search.width - 36.0).max(0.0), 24.0),
                 13.0,
                 MUTED,

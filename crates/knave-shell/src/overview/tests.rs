@@ -43,8 +43,44 @@ fn snapshot() -> DesktopSnapshot {
             .collect(),
     }
 }
+/// Twelve "Tool NN" entries exercise paging; "Editor" checks Exec expansion.
+fn catalog() -> knave_apps::Catalog {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static N: AtomicU32 = AtomicU32::new(0);
+    let root = std::env::temp_dir().join(format!(
+        "knave-shell-apps-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, Ordering::Relaxed)
+    ));
+    let dir = root.join("applications");
+    std::fs::create_dir_all(&dir).unwrap();
+    let entry = |name: &str, exec: &str| {
+        format!(
+            "[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nComment=About {name}\n"
+        )
+    };
+    std::fs::write(
+        dir.join("editor.desktop"),
+        entry("Editor", "editor --new %U"),
+    )
+    .unwrap();
+    for n in 1..=12 {
+        std::fs::write(
+            dir.join(format!("tool{n:02}.desktop")),
+            entry(&format!("Tool {n:02}"), &format!("tool{n:02}")),
+        )
+        .unwrap();
+    }
+    let catalog = knave_apps::Catalog::load_with(&knave_apps::Environment {
+        data_dirs: vec![root.clone()],
+        ..Default::default()
+    })
+    .unwrap();
+    std::fs::remove_dir_all(root).unwrap();
+    catalog
+}
 fn app() -> Overview {
-    let mut app = Overview::new();
+    let mut app = Overview::new().with_catalog(catalog());
     app.desktop_snapshot(&snapshot());
     app.frame([1200.0, 800.0], &mut Metrics);
     app
@@ -180,7 +216,7 @@ fn layouts_fit_compact_and_portrait_outputs_with_unique_control_ids() {
         let mut app = app();
         app.frame(size, &mut Metrics);
         assert!(app.error.is_none(), "{size:?}: {:?}", app.error);
-        app.input(Input::Text("Editor".into()));
+        app.input(Input::Text("Tool".into()));
         app.frame(size, &mut Metrics);
         assert!(app.error.is_none());
         click(&mut app, ElementId(31));
@@ -198,4 +234,104 @@ fn disconnected_overview_cannot_dispatch_stale_window_actions() {
     app.desktop_snapshot(&snapshot());
     assert!(app.connected);
     assert!(app.error.is_none());
+}
+
+fn type_query(app: &mut Overview, query: &str) {
+    app.input(Input::Text(query.into()));
+    app.frame([1200.0, 800.0], &mut Metrics);
+}
+fn spawned(app: &mut Overview) -> Option<Vec<String>> {
+    match app.take_request() {
+        Some(HostRequest::Desktop(DesktopCommand::Spawn { argv })) => Some(argv),
+        _ => None,
+    }
+}
+#[test]
+fn enter_launches_the_best_application_match_and_closes_after_ack() {
+    let mut app = app();
+    type_query(&mut app, "edit");
+    key(&mut app, Key::Enter, true);
+    key(&mut app, Key::Enter, false);
+    assert_eq!(
+        spawned(&mut app),
+        Some(vec!["editor".into(), "--new".into()])
+    );
+    assert!(!app.should_close());
+    app.desktop_action_finished(Ok(()));
+    assert!(app.should_close());
+}
+#[test]
+fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
+    let mut app = app();
+    type_query(&mut app, "tool 03");
+    let id = app_element(app.search()[0]);
+    click(&mut app, id);
+    assert_eq!(spawned(&mut app), Some(vec!["tool03".into()]));
+    app.desktop_action_finished(Err("No such file".into()));
+    assert!(!app.should_close());
+    assert_eq!(app.error.as_deref(), Some("No such file"));
+}
+#[test]
+fn results_are_applications_only_and_paginate() {
+    let mut app = app();
+    // Window titles and app IDs from the snapshot must not appear as results.
+    type_query(&mut app, "Window");
+    assert!(app.search().is_empty());
+    key(&mut app, Key::Escape, true);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    type_query(&mut app, "tool");
+    assert_eq!(app.search().len(), 12);
+    let size = app.search_page_size();
+    assert_eq!(size, 8);
+    let first_page: Vec<_> = app.search()[..size].to_vec();
+    assert!(
+        first_page
+            .iter()
+            .all(|&i| app.scene.bounds(app_element(i)).is_some())
+    );
+    click(&mut app, ElementId(31));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(
+        first_page
+            .iter()
+            .all(|&i| app.scene.bounds(app_element(i)).is_none())
+    );
+    assert!(app.scene.bounds(app_element(app.search()[size])).is_some());
+}
+#[test]
+fn disconnected_overview_reports_instead_of_launching() {
+    let mut app = app();
+    type_query(&mut app, "edit");
+    app.desktop_unavailable();
+    app.error = None;
+    key(&mut app, Key::Enter, true);
+    key(&mut app, Key::Enter, false);
+    assert!(app.take_request().is_none());
+    assert_eq!(app.error.as_deref(), Some("Desktop connection unavailable"));
+}
+#[test]
+fn queries_without_matches_render_and_a_missing_catalog_is_reported() {
+    let mut app = app();
+    type_query(&mut app, "zzzz");
+    assert!(app.search().is_empty());
+    assert!(app.error.is_none());
+    key(&mut app, Key::Enter, true);
+    assert!(app.take_request().is_none());
+    let mut broken = Overview::new();
+    broken.apps = Apps::Unavailable;
+    broken.desktop_snapshot(&snapshot());
+    broken.frame([1200.0, 800.0], &mut Metrics);
+    type_query(&mut broken, "edit");
+    assert!(broken.search().is_empty());
+    assert!(broken.error.is_none());
+}
+#[test]
+fn enter_right_after_typing_launches_without_waiting_for_a_frame() {
+    let mut app = app();
+    app.input(Input::Text("edit".into()));
+    key(&mut app, Key::Enter, true);
+    assert_eq!(
+        spawned(&mut app),
+        Some(vec!["editor".into(), "--new".into()])
+    );
 }

@@ -10,10 +10,16 @@ desktop actions and wait for acknowledgement before closing.
 The shell computes one selected card and up to two neighboring cards from the
 current logical output size. It sends their interior rectangles and workspace
 IDs using desktop API 1.3 `set_overview_panes`. The selected pane leaves room
-for its workspace label and minimized shelf, which remain shell-drawn. Pane
+for the minimized shelf, which remains shell-drawn. Pane
 contents preserve the output aspect ratio and are clipped to the supplied
 rectangle. Browsing and resizing replace the entire set; search clears it.
 Villain also clears it when the overview layer surface unmaps or is destroyed.
+Search lists installed applications, not windows. `knave-apps` reads XDG
+`.desktop` entries once, on the first query, with bounded file counts and sizes;
+entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet `TryExec`/`OnlyShowIn`
+are skipped. Launching sends the existing `Spawn { argv }` desktop command, so
+Villain starts the process with the session environment and the overview closes
+only after it acknowledges. No new desktop API is involved.
 Only window textures are composed: there is no screenshot readback, PNG
 transport, decoded image cache, or window input remapping in this path.
 

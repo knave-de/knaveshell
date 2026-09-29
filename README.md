@@ -15,8 +15,8 @@ The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output
 with a workspace carousel, search, and a minimized-window shelf for the browsed
 workspace. Left/Right browse workspaces; click the center preview or press Enter
 to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
-search existing windows, use Tab to traverse controls, and Escape to clear search
-or leave overview. Activation closes only after the desktop service acknowledges
+search installed applications and press Enter to launch the top match, use Tab
+to traverse controls, and Escape to clear search or leave overview. Activation closes only after the desktop service acknowledges
 success. The overview displays compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume Knave's versioned desktop
 contract and keep desktop IPC off the Wayland frame thread.

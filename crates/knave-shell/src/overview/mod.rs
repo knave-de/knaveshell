@@ -1,5 +1,6 @@
 //! Workspace-first overview with a separate minimized-window shelf.
 mod view;
+use knave_apps::Catalog;
 use knave_desktop_api::{
     DesktopCommand, DesktopSnapshot, OverviewPane, WindowId, WindowSummary, WorkspaceId,
 };
@@ -11,13 +12,26 @@ const SEARCH: ElementId = ElementId(2);
 const MAX_WINDOWS: usize = 1024;
 const MAX_WORKSPACES: usize = 128;
 const PAGE_SIZE: usize = 5;
+const MAX_RESULTS: usize = 64;
 
 #[derive(Clone, Copy)]
 enum Target {
     Workspace(WorkspaceId),
     EnterWorkspace(WorkspaceId),
     Window(WindowId),
+    App(usize),
     Page(bool),
+}
+
+/// The catalog loads on the first query so overview startup never waits on the filesystem.
+enum Apps {
+    Unloaded,
+    Ready(Catalog),
+    Unavailable,
+}
+
+fn app_element(index: usize) -> ElementId {
+    ElementId(0x300_0000_0000 + index as u64)
 }
 
 pub struct Overview {
@@ -29,6 +43,7 @@ pub struct Overview {
     window_ids: HashMap<WindowId, ElementId>,
     next_id: u64,
     query: TextEdit,
+    apps: Apps,
     page: usize,
     result_page: usize,
     connected: bool,
@@ -58,6 +73,7 @@ impl Overview {
             window_ids: HashMap::new(),
             next_id: 100_000,
             query: TextEdit::new("").expect("empty text"),
+            apps: Apps::Unloaded,
             page: 0,
             result_page: 0,
             connected: false,
@@ -71,6 +87,11 @@ impl Overview {
             background_pressed: false,
             pointer: None,
         }
+    }
+    /// Use an already-loaded catalog instead of scanning the XDG directories.
+    pub fn with_catalog(mut self, catalog: Catalog) -> Self {
+        self.apps = Apps::Ready(catalog);
+        self
     }
     pub fn browsed_workspace(&self) -> Option<WorkspaceId> {
         self.workspace
@@ -124,7 +145,10 @@ impl Overview {
         }
     }
     fn dispatch(&mut self, command: DesktopCommand) {
-        if !self.pending && self.connected {
+        if !self.connected {
+            self.error = Some("Desktop connection unavailable".into());
+            self.dirty = true;
+        } else if !self.pending {
             self.request = Some(HostRequest::Desktop(command));
             self.pending = true;
             self.error = None;
@@ -149,6 +173,7 @@ impl Overview {
                     });
                 }
             }
+            Some(Target::App(index)) => self.launch(index),
             Some(Target::Page(next)) => {
                 let page = if self.query.text().is_empty() {
                     &mut self.page
@@ -163,6 +188,14 @@ impl Overview {
                 self.dirty = true;
             }
             None => {}
+        }
+    }
+    fn launch(&mut self, index: usize) {
+        if let Apps::Ready(catalog) = &self.apps
+            && let Some(app) = catalog.get(index)
+        {
+            let argv = app.argv.clone();
+            self.dispatch(DesktopCommand::Spawn { argv });
         }
     }
     fn clear_query(&mut self) {
@@ -185,24 +218,32 @@ impl Overview {
         self.size = size;
         Scene::new(self.compose()).map(|_| ())
     }
-    fn search(&self) -> Vec<&WindowSummary> {
-        let needle = self.query.text().trim().to_lowercase();
-        self.snapshot.as_ref().map_or_else(Vec::new, |s| {
-            s.windows
-                .iter()
-                .filter(|w| {
-                    w.title.to_lowercase().contains(&needle)
-                        || w.app_id.to_lowercase().contains(&needle)
-                        || format!("workspace {}", w.workspace.0).contains(&needle)
-                })
-                .collect()
-        })
+    fn ensure_catalog(&mut self) {
+        if matches!(self.apps, Apps::Unloaded) {
+            self.apps = match Catalog::load() {
+                Ok(catalog) => Apps::Ready(catalog),
+                Err(error) => {
+                    eprintln!("knave-shell: {error}");
+                    Apps::Unavailable
+                }
+            };
+        }
+    }
+    /// Catalog indexes for the current query, best match first.
+    fn search(&self) -> Vec<usize> {
+        match &self.apps {
+            Apps::Ready(catalog) => catalog.search(self.query.text(), MAX_RESULTS),
+            Apps::Unloaded | Apps::Unavailable => Vec::new(),
+        }
     }
     fn sync_query(&mut self) {
         if let Some(Widget::TextInput(edit)) = self.scene.widget(SEARCH) {
             let changed = self.query.text() != edit.text();
             self.query = edit.clone();
             if changed {
+                if !self.query.text().is_empty() {
+                    self.ensure_catalog();
+                }
                 self.result_page = 0;
                 self.dirty = true;
             }
@@ -373,12 +414,11 @@ impl Application for Overview {
                     return;
                 }
                 if *key == Key::Enter && !repeat && self.scene.focus() == Some(SEARCH) {
-                    if let Some(w) = self
+                    if let Some(&index) = self
                         .search()
                         .get(self.result_page * self.search_page_size())
                     {
-                        let id = self.window_ids[&w.id];
-                        self.activate(id);
+                        self.launch(index);
                     }
                     return;
                 }
@@ -386,11 +426,11 @@ impl Application for Overview {
                     && self.scene.focus() == Some(SEARCH)
                     && !self.query.text().is_empty()
                 {
-                    if let Some(w) = self
+                    if let Some(&index) = self
                         .search()
                         .get(self.result_page * self.search_page_size())
                     {
-                        let _ = self.scene.set_focus(Some(self.window_ids[&w.id]));
+                        let _ = self.scene.set_focus(Some(app_element(index)));
                     }
                     return;
                 }
