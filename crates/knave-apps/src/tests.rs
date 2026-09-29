@@ -163,6 +163,7 @@ fn desktop_filters_locale_and_tryexec_apply() {
         &desktop("Files", "f", "Name[de]=Dateien\n"),
     );
     let catalog = Catalog::load_with(&Environment {
+        limits: Limits::default(),
         data_dirs: vec![d.0.clone()],
         path: vec![bin.0.clone()],
         locales: vec!["de".into()],
@@ -233,4 +234,57 @@ fn oversized_files_and_missing_directories_are_handled() {
     let empty = Dir::new();
     fs::create_dir_all(empty.0.join("applications")).unwrap();
     assert!(Catalog::load_with(&env(&[&empty])).unwrap().is_empty());
+}
+
+#[test]
+fn hostile_directories_are_bounded_before_being_collected() {
+    let d = Dir::new();
+    d.write("applications/keep.desktop", &desktop("Keep", "keep", ""));
+    // Thousands of irrelevant entries and nested directories must still count.
+    for n in 0..300 {
+        d.write(&format!("applications/junk{n}.txt"), "x");
+    }
+    for n in 0..60 {
+        d.write(
+            &format!("applications/sub{n}/deep.desktop"),
+            &desktop("Deep", "deep", ""),
+        );
+    }
+    let limited = Environment {
+        limits: Limits {
+            entries: 100,
+            apps: 4096,
+        },
+        ..env(&[&d])
+    };
+    let catalog = Catalog::load_with(&limited).unwrap();
+    assert!(catalog.truncated());
+    assert!(catalog.len() < 60);
+    let capped = Environment {
+        limits: Limits {
+            entries: 100_000,
+            apps: 5,
+        },
+        ..env(&[&d])
+    };
+    let catalog = Catalog::load_with(&capped).unwrap();
+    assert!(catalog.truncated());
+    assert_eq!(catalog.len(), 5);
+    assert!(!Catalog::load_with(&env(&[&d])).unwrap().truncated());
+}
+
+#[test]
+fn special_files_are_skipped_instead_of_blocking_the_scan() {
+    let d = Dir::new();
+    d.write("applications/ok.desktop", &desktop("Ok", "ok", ""));
+    fs::create_dir_all(d.0.join("applications")).unwrap();
+    let fifo = d.0.join("applications/pipe.desktop");
+    // A FIFO with no writer blocks forever on open.
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if !made.is_ok_and(|s| s.success()) {
+        eprintln!("skipping: mkfifo unavailable");
+        return;
+    }
+    let catalog = Catalog::load_with(&env(&[&d])).unwrap();
+    assert_eq!(names(&catalog, "o"), ["Ok"]);
 }

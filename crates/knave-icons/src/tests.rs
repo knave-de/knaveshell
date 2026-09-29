@@ -216,3 +216,19 @@ fn large_real_world_indexes_keep_every_directory() {
     );
     assert!(lookup(&d).load("late", 48).unwrap().is_some());
 }
+
+#[test]
+fn special_files_are_never_opened() {
+    let d = Dir::new();
+    d.write("hicolor/index.theme", INDEX.as_bytes());
+    fs::create_dir_all(d.0.join("hicolor/48x48/apps")).unwrap();
+    let fifo = d.0.join("hicolor/48x48/apps/pipe.png");
+    let made = std::process::Command::new("mkfifo").arg(&fifo).status();
+    if !made.is_ok_and(|s| s.success()) {
+        eprintln!("skipping: mkfifo unavailable");
+        return;
+    }
+    assert!(lookup(&d).load("pipe", 48).unwrap().is_none());
+    let absolute = fifo.to_str().unwrap().to_owned();
+    assert!(lookup(&d).load(&absolute, 48).unwrap().is_none());
+}

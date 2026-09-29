@@ -161,6 +161,9 @@ fn discover(roots: &[PathBuf]) -> Vec<Theme> {
 
 fn read_index(path: &Path) -> Option<String> {
     use std::io::Read;
+    if !fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
     let mut bytes = Vec::new();
     fs::File::open(path)
         .ok()?

@@ -12,8 +12,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const MAX_APPS: usize = 4096;
-const MAX_FILES: usize = 8192;
 const MAX_FILE_BYTES: u64 = 64 * 1024;
 const MAX_DEPTH: usize = 3;
 const MAX_QUERY_TERMS: usize = 8;
@@ -24,9 +22,26 @@ pub enum CatalogError {
     NoApplicationDirectories,
 }
 
+/// Upper bounds on one scan. Reaching either stops the scan and marks the catalog truncated.
+#[derive(Clone, Copy, Debug)]
+pub struct Limits {
+    /// Directory entries examined across all directories, whatever their type.
+    pub entries: usize,
+    pub apps: usize,
+}
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            entries: 16_384,
+            apps: 4096,
+        }
+    }
+}
+
 /// Environment inputs that decide which entries are visible. Injectable for tests.
 #[derive(Clone, Debug, Default)]
 pub struct Environment {
+    pub limits: Limits,
     pub data_dirs: Vec<PathBuf>,
     pub path: Vec<PathBuf>,
     pub locales: Vec<String>,
@@ -52,6 +67,7 @@ impl Environment {
             .or_else(|| var("LANG"))
             .unwrap_or_default();
         Self {
+            limits: Limits::default(),
             data_dirs,
             path: std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect(),
             locales: entry::locale_candidates(&locale),
@@ -87,6 +103,16 @@ struct Fields {
 #[derive(Debug, Default)]
 pub struct Catalog {
     apps: Vec<App>,
+    truncated: bool,
+}
+
+/// Mutable state shared by one scan.
+struct Scan<'a> {
+    env: &'a Environment,
+    seen: HashSet<String>,
+    apps: Vec<App>,
+    entries: usize,
+    truncated: bool,
 }
 
 impl Catalog {
@@ -95,9 +121,13 @@ impl Catalog {
     }
 
     pub fn load_with(env: &Environment) -> Result<Self, CatalogError> {
-        let mut seen = HashSet::new();
-        let mut apps = Vec::new();
-        let mut scanned = 0;
+        let mut scan = Scan {
+            env,
+            seen: HashSet::new(),
+            apps: Vec::new(),
+            entries: 0,
+            truncated: false,
+        };
         let mut readable = false;
         let mut roots = HashSet::new();
         for dir in &env.data_dirs {
@@ -106,12 +136,20 @@ impl Catalog {
             if !roots.insert(root.clone()) {
                 continue;
             }
-            readable |= scan(&root, "", 0, env, &mut seen, &mut apps, &mut scanned);
+            readable |= scan.dir(&root, "", 0);
         }
         if !readable {
             return Err(CatalogError::NoApplicationDirectories);
         }
-        Ok(Self { apps })
+        Ok(Self {
+            apps: scan.apps,
+            truncated: scan.truncated,
+        })
+    }
+
+    /// True when a limit stopped the scan, so some installed applications are missing.
+    pub fn truncated(&self) -> bool {
+        self.truncated
     }
 
     pub fn len(&self) -> usize {
@@ -183,56 +221,63 @@ impl Fields {
     }
 }
 
-/// Returns whether `dir` could be read. Bounds are shared across the whole scan.
-fn scan(
-    dir: &Path,
-    prefix: &str,
-    depth: usize,
-    env: &Environment,
-    seen: &mut HashSet<String>,
-    apps: &mut Vec<App>,
-    scanned: &mut usize,
-) -> bool {
-    let Ok(read) = fs::read_dir(dir) else {
-        return false;
-    };
-    // Stable order keeps duplicate resolution and ties deterministic.
-    let mut entries: Vec<_> = read.filter_map(Result::ok).collect();
-    entries.sort_by_key(|e| e.file_name());
-    for item in entries {
-        if *scanned >= MAX_FILES || apps.len() >= MAX_APPS {
-            break;
-        }
-        let file_name = item.file_name().to_string_lossy().into_owned();
-        let Ok(kind) = item.file_type() else { continue };
-        if kind.is_dir() {
-            // Real directories only; following symlinked directories could loop.
-            if depth < MAX_DEPTH {
-                let nested = format!("{prefix}{file_name}-");
-                scan(&item.path(), &nested, depth + 1, env, seen, apps, scanned);
-            }
-            continue;
-        }
-        if !file_name.ends_with(".desktop") {
-            continue;
-        }
-        *scanned += 1;
-        let id = format!("{prefix}{file_name}");
-        // Higher-priority directories win, including when they hide the entry.
-        if !seen.insert(id.clone()) {
-            continue;
-        }
-        let Some(text) = read_bounded(&item.path()) else {
-            continue;
+impl Scan<'_> {
+    /// Returns whether `dir` could be read.
+    fn dir(&mut self, dir: &Path, prefix: &str, depth: usize) -> bool {
+        let Ok(read) = fs::read_dir(dir) else {
+            return false;
         };
-        if let Some(app) = build(id, &text, env) {
-            apps.push(app);
+        // Count entries as they are read, so a huge directory is never fully collected.
+        let mut entries = Vec::new();
+        for item in read.filter_map(Result::ok) {
+            if self.entries >= self.env.limits.entries {
+                self.truncated = true;
+                break;
+            }
+            self.entries += 1;
+            entries.push(item);
         }
+        // Stable order keeps duplicate resolution and ties deterministic.
+        entries.sort_by_key(|e| e.file_name());
+        for item in entries {
+            if self.apps.len() >= self.env.limits.apps {
+                self.truncated = true;
+                break;
+            }
+            let file_name = item.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = item.file_type() else { continue };
+            if kind.is_dir() {
+                // Real directories only; following symlinked directories could loop.
+                if depth < MAX_DEPTH {
+                    let nested = format!("{prefix}{file_name}-");
+                    self.dir(&item.path(), &nested, depth + 1);
+                }
+                continue;
+            }
+            if !file_name.ends_with(".desktop") {
+                continue;
+            }
+            let id = format!("{prefix}{file_name}");
+            // Higher-priority directories win, including when they hide the entry.
+            if !self.seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(text) = read_bounded(&item.path()) else {
+                continue;
+            };
+            if let Some(app) = build(id, &text, self.env) {
+                self.apps.push(app);
+            }
+        }
+        true
     }
-    true
 }
 
 fn read_bounded(path: &Path) -> Option<String> {
+    // Opening a FIFO or device would block the loader forever; follow symlinks, read files only.
+    if !fs::metadata(path).ok()?.is_file() {
+        return None;
+    }
     let mut bytes = Vec::new();
     // Symlinks (Flatpak exports) are followed for files; a longer file is malformed.
     fs::File::open(path)

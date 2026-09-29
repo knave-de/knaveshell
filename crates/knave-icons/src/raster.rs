@@ -12,6 +12,9 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, IconError> {
         path: path.to_path_buf(),
         reason,
     };
+    if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
+        return Err(fail("not a regular file".into()));
+    }
     let mut bytes = Vec::new();
     File::open(path)
         .and_then(|f| f.take(limit + 1).read_to_end(&mut bytes))
