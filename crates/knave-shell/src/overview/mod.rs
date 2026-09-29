@@ -71,6 +71,7 @@ pub struct Overview {
     close: bool,
     surface_focused: bool,
     background_pressed: bool,
+    pressed_pane: Option<WorkspaceId>,
     pointer: Option<[f32; 2]>,
 }
 impl Default for Overview {
@@ -107,6 +108,7 @@ impl Overview {
             close: false,
             surface_focused: true,
             background_pressed: false,
+            pressed_pane: None,
             pointer: None,
         }
     }
@@ -242,6 +244,15 @@ impl Overview {
         self.query = TextEdit::new("").expect("empty text");
         self.result_page = 0;
         self.dirty = true;
+    }
+    fn pane_at(&self, p: [f32; 2]) -> Option<WorkspaceId> {
+        self.panes.iter().find_map(|pane| {
+            (p[0] >= pane.x as f32
+                && p[1] >= pane.y as f32
+                && p[0] < pane.x as f32 + pane.width as f32
+                && p[1] < pane.y as f32 + pane.height as f32)
+                .then_some(pane.workspace)
+        })
     }
     fn search_page_size(&self) -> usize {
         (((self.size[1]
@@ -455,13 +466,19 @@ impl Application for Overview {
             Input::FocusLost => {
                 self.surface_focused = false;
                 self.background_pressed = false;
+                self.pressed_pane = None;
             }
             Input::PointerMove(p) => self.pointer = Some(*p),
             Input::PointerLeave => {
                 self.pointer = None;
                 self.background_pressed = false;
+                self.pressed_pane = None;
             }
-            Input::PointerDown(p) => self.background_pressed = self.scene.hit_test(*p).is_none(),
+            Input::PointerDown(p) => {
+                self.pressed_pane = self.pane_at(*p);
+                self.background_pressed =
+                    self.pressed_pane.is_none() && self.scene.hit_test(*p).is_none();
+            }
             Input::PointerUp(p) => {
                 if self.background_pressed && self.scene.hit_test(*p).is_none() {
                     self.close = true;
@@ -521,32 +538,23 @@ impl Application for Overview {
             _ => {}
         }
         let pane_click = if let Input::PointerUp(p) = &event {
-            self.panes
-                .iter()
-                .find(|pane| {
-                    p[0] >= pane.x as f32
-                        && p[1] >= pane.y as f32
-                        && p[0] < (pane.x as f32 + pane.width as f32)
-                        && p[1] < (pane.y as f32 + pane.height as f32)
-                })
-                .map(|pane| (pane.workspace, p[0].floor() as i32, p[1].floor() as i32))
+            self.pressed_pane
+                .take()
+                .filter(|workspace| self.pane_at(*p) == Some(*workspace))
+                .map(|workspace| (workspace, p[0].floor() as i32, p[1].floor() as i32))
         } else {
             None
         };
         let result = self.scene.event(event);
         self.sync_query();
+        if let Some((workspace, x, y)) = pane_click {
+            // A scene rebuild may drop button capture between press and release.
+            // Pane selection belongs to the pointer gesture, not the card widget.
+            self.dispatch(DesktopCommand::FocusOverviewPoint { workspace, x, y });
+            return;
+        }
         match result.action {
-            Some(Action::Activated(id)) => {
-                if matches!(
-                    self.targets.get(&id),
-                    Some(Target::EnterWorkspace(_) | Target::PreviewWorkspace(_))
-                ) && let Some((workspace, x, y)) = pane_click
-                {
-                    self.dispatch(DesktopCommand::FocusOverviewPoint { workspace, x, y });
-                } else {
-                    self.activate(id);
-                }
-            }
+            Some(Action::Activated(id)) => self.activate(id),
             Some(Action::Copy(value) | Action::Cut { copied: value, .. }) => {
                 if !self.pending {
                     self.request = Some(HostRequest::Copy(value));

@@ -269,6 +269,20 @@ fn preview_click_uses_compositor_hit_test_and_side_card_enters_workspace() {
     ));
     assert!(!app.should_close());
 
+    let mut rebuilt = self::app();
+    rebuilt.input(Input::PointerDown(point));
+    // Snapshot changes can rebuild the scene while a physical click is held.
+    rebuilt.dirty = true;
+    rebuilt.frame([1200.0, 800.0], &mut Metrics);
+    rebuilt.input(Input::PointerUp(point));
+    assert!(matches!(
+        rebuilt.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusOverviewPoint {
+            workspace: WorkspaceId(2),
+            ..
+        }))
+    ));
+
     let mut other = self::app();
     let side = ElementId(0x100_0000_0000 + 3 * 32);
     let bounds = other.scene.bounds(side).unwrap();
