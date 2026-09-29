@@ -26,7 +26,9 @@ test results.
 The runtime uses SCTK's calloop integration and a one-slot wake channel. The
 Wayland loop blocks while idle. Desktop state arrives through a dedicated API
 subscription; only disconnected clients use retry backoff. The retained overview
-has one bounded pane IPC worker, replacing its former PNG capture worker. Its
+has one bounded pane IPC worker, replacing its former PNG capture worker. It also owns one loader thread, started on the first search keystroke, for the
+application catalog and icons: a 32-job queue, no timers, woken results only, and
+dropped without joining. Its
 single pending request contains at most three workspace rectangles. User
 actions have a separate one-slot worker so browsing updates cannot occupy the
 action queue. The compositor renders window textures in those rectangles during

@@ -10,7 +10,12 @@ name = "knave-shell"
 path = "src/main.rs"
 
 [dependencies]
+knave-apps.workspace = true
+knave-icons.workspace = true
 knave-renderer.workspace = true
 knave-wayland.workspace = true
 knave-ui.workspace = true
 knave-desktop-api.workspace = true
+
+[dev-dependencies]
+png.workspace = true

@@ -1,5 +1,8 @@
 use super::*;
-use knave_ui::{Border, Color, CornerRadii, Rect, ShapePaint, TextAlign, TextWrap};
+use knave_ui::{
+    Border, Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap,
+    UiImage,
+};
 
 const INK: Color = Color::rgba(17, 23, 33, 255);
 const PANEL: Color = Color::rgba(32, 42, 56, 255);
@@ -92,7 +95,7 @@ impl Overview {
         if self.query.text().is_empty() {
             search.children.push(text(
                 3,
-                "Search windows and workspaces…",
+                "Search applications…",
                 Rect::new(22.0, 16.0, (search_width - 44.0).max(0.0), 22.0),
                 16.0,
                 MUTED,
@@ -398,47 +401,71 @@ impl Overview {
         card
     }
     fn search_results(&mut self, search: Rect) -> Element {
-        let matches: Vec<_> = self.search().into_iter().cloned().collect();
+        let matches = self.search();
         let page_size = self.search_page_size();
         self.result_page = self
             .result_page
             .min(matches.len().saturating_sub(1) / page_size);
         let start = self.result_page * page_size;
         let shown = matches.len().saturating_sub(start).min(page_size);
+        let visible: Vec<(usize, String, String)> = match &self.apps {
+            Apps::Ready(catalog) => matches
+                .iter()
+                .skip(start)
+                .take(shown)
+                .filter_map(|&index| {
+                    let app = catalog.get(index)?;
+                    let icon = app.icon.clone().unwrap_or_else(|| icons::FALLBACK.into());
+                    let label = if app.description.is_empty() {
+                        short(&app.name, 70)
+                    } else {
+                        format!("{}\n{}", short(&app.name, 70), short(&app.description, 90))
+                    };
+                    Some((index, label, icon))
+                })
+                .collect(),
+            Apps::Unloaded | Apps::Loading | Apps::Unavailable => Vec::new(),
+        };
+        for (_, _, icon) in &visible {
+            // Failed submits retry on the next frame, which the worker's results trigger.
+            if self.icons.needs_request(icon)
+                && self.loader().submit(loader::Job::Icon(icon.clone()))
+            {
+                self.icons.requested(icon);
+            }
+        }
+        let rows: Vec<(usize, String, Option<UiImage>)> = visible
+            .into_iter()
+            .map(|(index, label, icon)| (index, label, self.icons.get(&icon).cloned()))
+            .collect();
         let mut panel = panel(
             40,
             Rect::new(
                 search.x,
                 search.y + search.height + 12.0,
                 search.width,
-                66.0 + shown as f32 * 60.0,
+                66.0 + rows.len() as f32 * 60.0,
             ),
             INK,
             18.0,
         );
-        panel.children.push(text(
-            41,
-            format!("{} matching windows", matches.len()),
-            Rect::new(18.0, 10.0, (search.width - 150.0).max(0.0), 22.0),
-            13.0,
-            MUTED,
-        ));
-        for (n, w) in matches.iter().skip(start).take(shown).enumerate() {
-            let id = self.window_ids[&w.id];
-            let title = if w.title.is_empty() {
-                &w.app_id
-            } else {
-                &w.title
-            };
+        if matches!(self.apps, Apps::Ready(_)) && !matches.is_empty() {
+            panel.children.push(text(
+                41,
+                match matches.len() {
+                    1 => "1 application".to_owned(),
+                    n => format!("{n} applications"),
+                },
+                Rect::new(18.0, 10.0, (search.width - 150.0).max(0.0), 22.0),
+                13.0,
+                MUTED,
+            ));
+        }
+        for (n, (index, label, image)) in rows.into_iter().enumerate() {
+            let id = app_element(index);
             let mut result = control(
                 id.0,
-                format!(
-                    "{}\n{} · Workspace {}{}",
-                    short(title, 70),
-                    short(&w.app_id, 32),
-                    w.workspace.0,
-                    if w.minimized { " · Minimized" } else { "" }
-                ),
+                label,
                 Rect::new(
                     12.0,
                     38.0 + n as f32 * 60.0,
@@ -446,15 +473,45 @@ impl Overview {
                     54.0,
                 ),
             );
-            result.layout = result.layout.with_padding(Insets::symmetric(6.0, 12.0));
+            // Text keeps a fixed column whether or not the icon resolved.
+            let pad = Insets {
+                top: 6.0,
+                right: 12.0,
+                bottom: 6.0,
+                left: 58.0,
+            };
+            result.layout = result.layout.with_padding(pad);
+            if let Some(image) = image {
+                // Child offsets are relative to the padded content area.
+                let icon = placed(
+                    Element::new(
+                        0x400_0000_0000 + index as u64,
+                        Widget::Image(
+                            image,
+                            ImageStyle {
+                                fit: ImageFit::Contain,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    Rect::new(14.0 - pad.left, 11.0 - pad.top, 32.0, 32.0),
+                );
+                // Without this the row clips children to its padded content area.
+                result.layout.clip = ClipMode::Bounds;
+                result.children.push(icon);
+            }
             result.enabled = !self.pending;
-            self.targets.insert(id, Target::Window(w.id));
+            self.targets.insert(id, Target::App(index));
             panel.children.push(result);
         }
         if matches.is_empty() {
             panel.children.push(text(
                 42,
-                "Try a window title, app ID, or workspace number",
+                match self.apps {
+                    Apps::Unavailable => "Application list unavailable",
+                    Apps::Unloaded | Apps::Loading => "Loading applications…",
+                    Apps::Ready(_) => "No applications found",
+                },
                 Rect::new(18.0, 36.0, (search.width - 36.0).max(0.0), 24.0),
                 13.0,
                 MUTED,
