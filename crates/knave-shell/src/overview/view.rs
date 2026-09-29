@@ -78,7 +78,7 @@ impl Overview {
         );
         search.layout = search.layout.with_padding(Insets {
             top: 10.0,
-            right: 82.0f32.min(search_width * 0.2),
+            right: 22.0,
             bottom: 10.0,
             left: 22.0,
         });
@@ -93,17 +93,8 @@ impl Overview {
             search.children.push(text(
                 3,
                 "Search windows and workspaces…",
-                Rect::new(22.0, 16.0, (search_width - 108.0).max(0.0), 22.0),
+                Rect::new(22.0, 16.0, (search_width - 44.0).max(0.0), 22.0),
                 16.0,
-                MUTED,
-            ));
-        }
-        if search_width > 280.0 {
-            search.children.push(text(
-                4,
-                "Ctrl K",
-                Rect::new(search_width - 68.0, 18.0, 54.0, 20.0),
-                12.0,
                 MUTED,
             ));
         }
@@ -149,7 +140,6 @@ impl Overview {
                 };
                 root.children.push(self.workspace_card(
                     w.workspace,
-                    w.active,
                     Rect::new(
                         side_x,
                         y + (preview_height - small_h) / 2.0,
@@ -159,22 +149,7 @@ impl Overview {
                     false,
                 ));
             }
-            let active = spaces.iter().any(|(_, w)| w.workspace == ws && w.active);
-            root.children
-                .push(self.workspace_card(ws, active, rect, true));
-            let mut caption = text(
-                10,
-                format!(
-                    "Workspace {}{}",
-                    ws.0,
-                    if active { " · Current" } else { "" }
-                ),
-                Rect::new(x, y + preview_height + 16.0, preview_width, 26.0),
-                18.0,
-                Color::TEXT,
-            );
-            caption.style.text.align = TextAlign::Center;
-            root.children.push(caption);
+            root.children.push(self.workspace_card(ws, rect, true));
             let count = self.snapshot.as_ref().unwrap().workspaces.len();
             let first = index.saturating_sub(4).min(count.saturating_sub(9));
             let dots: Vec<_> = self
@@ -195,7 +170,7 @@ impl Overview {
                     "",
                     Rect::new(
                         (width - dot_width) / 2.0 + n as f32 * 24.0,
-                        y + preview_height + 49.0,
+                        y + preview_height + 20.0,
                         16.0,
                         16.0,
                     ),
@@ -262,39 +237,33 @@ impl Overview {
             root.children.push(self.search_results(search_rect));
         }
         let footer = if self.pending {
-            "Opening…".into()
-        } else if let Some(error) = &self.error {
-            short(error, 140)
+            Some("Opening…".to_owned())
         } else {
-            "← → Browse workspaces    Enter Open    Tab Controls    Esc Leave overview".into()
+            self.error.as_deref().map(|error| short(error, 140))
         };
-        let mut hint = text(
-            12,
-            footer,
-            Rect::new(
-                pad,
-                (height - 26.0).max(0.0),
-                (width - pad * 2.0).max(0.0),
-                22.0,
-            ),
-            12.0,
-            if self.error.is_some() {
-                Color::rgba(255, 179, 166, 255)
-            } else {
-                MUTED
-            },
-        );
-        hint.style.text.align = TextAlign::Center;
-        root.children.push(hint);
+        if let Some(footer) = footer {
+            let mut status = text(
+                12,
+                footer,
+                Rect::new(
+                    pad,
+                    (height - 26.0).max(0.0),
+                    (width - pad * 2.0).max(0.0),
+                    22.0,
+                ),
+                12.0,
+                if self.error.is_some() {
+                    Color::rgba(255, 179, 166, 255)
+                } else {
+                    MUTED
+                },
+            );
+            status.style.text.align = TextAlign::Center;
+            root.children.push(status);
+        }
         root
     }
-    fn workspace_card(
-        &mut self,
-        ws: WorkspaceId,
-        active: bool,
-        rect: Rect,
-        selected: bool,
-    ) -> Element {
+    fn workspace_card(&mut self, ws: WorkspaceId, rect: Rect, selected: bool) -> Element {
         let id = 0x100_0000_0000 + u64::from(ws.0) * 32;
         let mut card = placed(Element::new(id, Widget::Button(String::new())), rect);
         card.style.background = Some(paint(
@@ -319,7 +288,7 @@ impl Overview {
             },
         );
         let strip_h = 88.0f32.min(rect.height * 0.35);
-        let top = if selected { 38.0 } else { 20.0 };
+        let top = 20.0;
         let bottom = if selected { strip_h + 20.0 } else { 20.0 };
         let pane_height = (rect.height - top - bottom).max(0.0);
         if pane_height >= 1.0
@@ -425,18 +394,6 @@ impl Overview {
                 }
             }
             card.children.push(shelf);
-            let state = if active {
-                "CURRENT WORKSPACE"
-            } else {
-                "BROWSING"
-            };
-            card.children.push(text(
-                id + 6,
-                state,
-                Rect::new(18.0, 14.0, (rect.width - 36.0).max(0.0), 20.0),
-                11.0,
-                BLUE,
-            ));
         }
         card
     }
