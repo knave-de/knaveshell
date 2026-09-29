@@ -1,5 +1,8 @@
 use super::*;
-use knave_ui::{Border, Color, CornerRadii, Rect, ShapePaint, TextAlign, TextWrap};
+use knave_ui::{
+    Border, Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap,
+    UiImage,
+};
 
 const INK: Color = Color::rgba(17, 23, 33, 255);
 const PANEL: Color = Color::rgba(32, 42, 56, 255);
@@ -408,23 +411,31 @@ impl Overview {
             .min(matches.len().saturating_sub(1) / page_size);
         let start = self.result_page * page_size;
         let shown = matches.len().saturating_sub(start).min(page_size);
-        let rows: Vec<(usize, String)> = match &self.apps {
+        let visible: Vec<(usize, String, String)> = match &self.apps {
             Apps::Ready(catalog) => matches
                 .iter()
                 .skip(start)
                 .take(shown)
                 .filter_map(|&index| {
                     let app = catalog.get(index)?;
+                    let icon = app.icon.clone().unwrap_or_else(|| icons::FALLBACK.into());
                     let label = if app.description.is_empty() {
                         short(&app.name, 70)
                     } else {
                         format!("{}\n{}", short(&app.name, 70), short(&app.description, 90))
                     };
-                    Some((index, label))
+                    Some((index, label, icon))
                 })
                 .collect(),
             Apps::Unloaded | Apps::Unavailable => Vec::new(),
         };
+        self.icons_pending |= self
+            .icons
+            .fill(visible.iter().map(|(_, _, icon)| icon.as_str()));
+        let rows: Vec<(usize, String, Option<UiImage>)> = visible
+            .into_iter()
+            .map(|(index, label, icon)| (index, label, self.icons.get(&icon).cloned()))
+            .collect();
         let mut panel = panel(
             40,
             Rect::new(
@@ -448,7 +459,7 @@ impl Overview {
                 MUTED,
             ));
         }
-        for (n, (index, label)) in rows.into_iter().enumerate() {
+        for (n, (index, label, image)) in rows.into_iter().enumerate() {
             let id = app_element(index);
             let mut result = control(
                 id.0,
@@ -460,7 +471,33 @@ impl Overview {
                     54.0,
                 ),
             );
-            result.layout = result.layout.with_padding(Insets::symmetric(6.0, 12.0));
+            // Text keeps a fixed column whether or not the icon resolved.
+            let pad = Insets {
+                top: 6.0,
+                right: 12.0,
+                bottom: 6.0,
+                left: 58.0,
+            };
+            result.layout = result.layout.with_padding(pad);
+            if let Some(image) = image {
+                // Child offsets are relative to the padded content area.
+                let icon = placed(
+                    Element::new(
+                        0x400_0000_0000 + index as u64,
+                        Widget::Image(
+                            image,
+                            ImageStyle {
+                                fit: ImageFit::Contain,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    Rect::new(14.0 - pad.left, 11.0 - pad.top, 32.0, 32.0),
+                );
+                // Without this the row clips children to its padded content area.
+                result.layout.clip = ClipMode::Bounds;
+                result.children.push(icon);
+            }
             result.enabled = !self.pending;
             self.targets.insert(id, Target::App(index));
             panel.children.push(result);

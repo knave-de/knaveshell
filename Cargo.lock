@@ -653,6 +653,7 @@ dependencies = [
  "knave-renderer",
  "knave-ui",
  "knave-wayland",
+ "png",
 ]
 
 [[package]]

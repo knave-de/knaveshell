@@ -1,4 +1,5 @@
 //! Workspace-first overview with a separate minimized-window shelf.
+mod icons;
 mod view;
 use knave_apps::Catalog;
 use knave_desktop_api::{
@@ -44,6 +45,9 @@ pub struct Overview {
     next_id: u64,
     query: TextEdit,
     apps: Apps,
+    icons: icons::Icons,
+    /// Visible rows still lack an icon; another frame finishes them.
+    icons_pending: bool,
     page: usize,
     result_page: usize,
     connected: bool,
@@ -74,6 +78,8 @@ impl Overview {
             next_id: 100_000,
             query: TextEdit::new("").expect("empty text"),
             apps: Apps::Unloaded,
+            icons: icons::Icons::new(knave_icons::IconLookup::from_process()),
+            icons_pending: false,
             page: 0,
             result_page: 0,
             connected: false,
@@ -91,6 +97,10 @@ impl Overview {
     /// Use an already-loaded catalog instead of scanning the XDG directories.
     pub fn with_catalog(mut self, catalog: Catalog) -> Self {
         self.apps = Apps::Ready(catalog);
+        self
+    }
+    pub fn with_icon_lookup(mut self, lookup: knave_icons::IconLookup) -> Self {
+        self.icons = icons::Icons::new(lookup);
         self
     }
     pub fn browsed_workspace(&self) -> Option<WorkspaceId> {
@@ -280,7 +290,7 @@ impl Overview {
                 self.error = Some(error.to_string());
             }
         }
-        self.dirty = false;
+        self.dirty = std::mem::take(&mut self.icons_pending);
     }
 }
 impl Application for Overview {

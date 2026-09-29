@@ -20,6 +20,12 @@ entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet `TryExec`/`OnlySho
 are skipped. Launching sends the existing `Spawn { argv }` desktop command, so
 Villain starts the process with the session environment and the overview closes
 only after it acknowledges. No new desktop API is involved.
+Rows show each application's `Icon`, resolved by `knave-icons` with the icon theme
+spec's size rule. Knave has no icon-theme setting and the shell reads no other
+desktop's settings, so lookup tries `hicolor`, then every other installed theme by
+name, then `pixmaps`. Icons are rasterized at 64px (SVG through resvg without text
+or system fonts, PNG downscaled if oversized), at most four per frame for visible
+rows only, and kept in a 128-entry cache.
 Only window textures are composed: there is no screenshot readback, PNG
 transport, decoded image cache, or window input remapping in this path.
 
