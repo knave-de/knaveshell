@@ -78,7 +78,7 @@ impl Overview {
         );
         search.layout = search.layout.with_padding(Insets {
             top: 10.0,
-            right: 82.0f32.min(search_width * 0.2),
+            right: 22.0,
             bottom: 10.0,
             left: 22.0,
         });
@@ -93,7 +93,7 @@ impl Overview {
             search.children.push(text(
                 3,
                 "Search windows and workspaces…",
-                Rect::new(22.0, 16.0, (search_width - 108.0).max(0.0), 22.0),
+                Rect::new(22.0, 16.0, (search_width - 44.0).max(0.0), 22.0),
                 16.0,
                 MUTED,
             ));
@@ -288,7 +288,7 @@ impl Overview {
             },
         );
         let strip_h = 88.0f32.min(rect.height * 0.35);
-        let top = if selected { 38.0 } else { 20.0 };
+        let top = 20.0;
         let bottom = if selected { strip_h + 20.0 } else { 20.0 };
         let pane_height = (rect.height - top - bottom).max(0.0);
         if pane_height >= 1.0
