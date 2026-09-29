@@ -13,12 +13,16 @@ backend. The direct Wayland layer-shell path is the runtime target.
 
 The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output
 with a workspace carousel, search, and a minimized-window shelf for the browsed
-workspace. Left/Right browse workspaces; click the center preview or press Enter
-to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
-search installed applications and press Enter to launch the top match, use Tab
-to traverse controls, and Escape to clear search or leave overview. Activation closes only after the desktop service acknowledges
-success. The overview displays compositor-rendered workspace surfaces inside the cards;
-the surfaces are visual only and card controls retain input. Both roles consume Knave's versioned desktop
+workspace. Left/Right and the arrows/dots browse without changing the desktop.
+Click a workspace preview to enter it, or click a visible window in that preview
+to enter its workspace focused on that window. Click a minimized card to restore
+and focus it. Type or press Ctrl+K to search installed applications and press
+Enter to launch the top match; the search clear button removes the query.
+Use Tab to traverse controls. Escape or a background click closes the overview;
+Super toggles it from Villain. Selection closes only after the desktop service
+acknowledges success. The overview displays compositor-rendered workspace
+surfaces inside the cards; the shell retains input and Villain resolves preview
+clicks against its rendered layout. Both roles consume Knave's versioned desktop
 contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
@@ -69,9 +73,8 @@ packaging. The installer also writes the README below the selected prefix.
 ## Implementation status
 
 The supported runtime is Rust/wgpu over Wayland layer-shell. Overview uses the
-retained UI toolkit; the bar retains its existing scene projection. Individually interactive
-window previews, fullscreen-hidden grouping, application launching/icons,
-fractional scaling and multiple-output hosting remain future work.
+retained UI toolkit; the bar retains its existing scene projection. Fullscreen-hidden
+grouping, fractional scaling and multiple-output hosting remain future work.
 
 ## Workspace
 

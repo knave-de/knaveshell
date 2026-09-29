@@ -200,9 +200,11 @@ fn restore_waits_for_ack_and_failure_keeps_overview_open() {
     click(&mut app, id);
     assert!(matches!(
         app.take_request(),
-        Some(HostRequest::Desktop(DesktopCommand::RestoreWindow {
-            window: WindowId(2)
-        }))
+        Some(HostRequest::Desktop(
+            DesktopCommand::RestoreAndFocusWindow {
+                window: WindowId(2)
+            }
+        ))
     ));
     assert!(!app.should_close());
     click(&mut app, id);
@@ -229,18 +231,56 @@ fn snapshots_with_same_generation_update_membership_and_preserve_browsing() {
     assert_eq!(app.workspace, Some(WorkspaceId(1)));
 }
 #[test]
-fn search_is_unicode_editable_and_escape_clears_before_closing() {
+fn search_has_clear_control_and_escape_closes_directly() {
     let mut app = app();
     app.input(Input::Text("Editor".into()));
     settle(&mut app, [1200.0, 800.0]);
     assert_eq!(app.query.text(), "Editor");
     assert_eq!(app.scene.focus(), Some(SEARCH));
-    key(&mut app, Key::Escape, true);
+    click(&mut app, ElementId(4));
     app.frame([1200.0, 800.0], &mut Metrics);
     assert!(!app.should_close());
     assert_eq!(app.query.text(), "");
+    app.input(Input::Text("Editor".into()));
     key(&mut app, Key::Escape, true);
     assert!(app.should_close());
+}
+#[test]
+fn preview_click_uses_compositor_hit_test_and_side_card_enters_workspace() {
+    let mut app = app();
+    let pane = app
+        .panes
+        .iter()
+        .find(|pane| pane.workspace == WorkspaceId(2))
+        .unwrap()
+        .clone();
+    let point = [
+        pane.x as f32 + pane.width as f32 / 2.0,
+        pane.y as f32 + pane.height as f32 / 2.0,
+    ];
+    app.input(Input::PointerDown(point));
+    app.input(Input::PointerUp(point));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusOverviewPoint {
+            workspace: WorkspaceId(2),
+            ..
+        }))
+    ));
+    assert!(!app.should_close());
+
+    let mut other = self::app();
+    let side = ElementId(0x100_0000_0000 + 3 * 32);
+    let bounds = other.scene.bounds(side).unwrap();
+    let point = [bounds.x + 30.0, bounds.y + 10.0];
+    other.input(Input::PointerDown(point));
+    other.input(Input::PointerUp(point));
+    assert!(matches!(
+        other.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
+            workspace: WorkspaceId(3)
+        }))
+    ));
 }
 #[test]
 fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {
@@ -351,7 +391,7 @@ fn results_are_applications_only_and_paginate() {
     // Window titles and app IDs from the snapshot must not appear as results.
     type_query(&mut app, "Window");
     assert!(app.search().is_empty());
-    key(&mut app, Key::Escape, true);
+    click(&mut app, ElementId(4));
     app.frame([1200.0, 800.0], &mut Metrics);
     type_query(&mut app, "tool");
     assert_eq!(app.search().len(), 12);

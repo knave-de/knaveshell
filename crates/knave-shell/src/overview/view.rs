@@ -109,6 +109,20 @@ impl Overview {
             child.layout.offset[1] -= 10.0;
         }
         root.children.push(search);
+        if !self.query.text().is_empty() {
+            let clear = control(
+                4,
+                "×",
+                Rect::new(
+                    search_rect.x + search_rect.width - 42.0,
+                    search_rect.y + 8.0,
+                    34.0,
+                    38.0,
+                ),
+            );
+            self.targets.insert(ElementId(4), Target::ClearSearch);
+            root.children.push(clear);
+        }
         if self.query.text().is_empty()
             && let (Some(snapshot), Some(ws)) = (&self.snapshot, self.workspace)
         {
@@ -287,7 +301,7 @@ impl Overview {
             if selected {
                 Target::EnterWorkspace(ws)
             } else {
-                Target::Workspace(ws)
+                Target::PreviewWorkspace(ws)
             },
         );
         let strip_h = 88.0f32.min(rect.height * 0.35);

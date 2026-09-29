@@ -22,9 +22,11 @@ const MAX_RESULTS: usize = 64;
 enum Target {
     Workspace(WorkspaceId),
     EnterWorkspace(WorkspaceId),
+    PreviewWorkspace(WorkspaceId),
     Window(WindowId),
     App(usize),
     Page(bool),
+    ClearSearch,
 }
 
 /// The catalog loads on a worker after the first query, so neither startup nor
@@ -197,16 +199,20 @@ impl Overview {
             Some(Target::EnterWorkspace(ws)) => {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
+            Some(Target::PreviewWorkspace(ws)) => {
+                self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
+            }
             Some(Target::Window(id)) => {
                 if let Some(window) = self.window(id) {
                     self.dispatch(if window.minimized {
-                        DesktopCommand::RestoreWindow { window: id }
+                        DesktopCommand::RestoreAndFocusWindow { window: id }
                     } else {
                         DesktopCommand::FocusWindow { window: id }
                     });
                 }
             }
             Some(Target::App(index)) => self.launch(index),
+            Some(Target::ClearSearch) => self.clear_query(),
             Some(Target::Page(next)) => {
                 let page = if self.query.text().is_empty() {
                     &mut self.page
@@ -458,11 +464,7 @@ impl Application for Overview {
             Input::PointerDown(p) => self.background_pressed = self.scene.hit_test(*p).is_none(),
             Input::PointerUp(p) => {
                 if self.background_pressed && self.scene.hit_test(*p).is_none() {
-                    if self.query.text().is_empty() {
-                        self.close = true
-                    } else {
-                        self.clear_query();
-                    }
+                    self.close = true;
                 }
                 self.background_pressed = false;
             }
@@ -473,11 +475,7 @@ impl Application for Overview {
                 modifiers,
             } => {
                 if *key == Key::Escape && !repeat {
-                    if self.query.text().is_empty() {
-                        self.close = true
-                    } else {
-                        self.clear_query();
-                    }
+                    self.close = true;
                     return;
                 }
                 if *key == Key::K && modifiers.control {
@@ -522,10 +520,33 @@ impl Application for Overview {
             }
             _ => {}
         }
+        let pane_click = if let Input::PointerUp(p) = &event {
+            self.panes
+                .iter()
+                .find(|pane| {
+                    p[0] >= pane.x as f32
+                        && p[1] >= pane.y as f32
+                        && p[0] < (pane.x as f32 + pane.width as f32)
+                        && p[1] < (pane.y as f32 + pane.height as f32)
+                })
+                .map(|pane| (pane.workspace, p[0].floor() as i32, p[1].floor() as i32))
+        } else {
+            None
+        };
         let result = self.scene.event(event);
         self.sync_query();
         match result.action {
-            Some(Action::Activated(id)) => self.activate(id),
+            Some(Action::Activated(id)) => {
+                if matches!(
+                    self.targets.get(&id),
+                    Some(Target::EnterWorkspace(_) | Target::PreviewWorkspace(_))
+                ) && let Some((workspace, x, y)) = pane_click
+                {
+                    self.dispatch(DesktopCommand::FocusOverviewPoint { workspace, x, y });
+                } else {
+                    self.activate(id);
+                }
+            }
             Some(Action::Copy(value) | Action::Cut { copied: value, .. }) => {
                 if !self.pending {
                     self.request = Some(HostRequest::Copy(value));
