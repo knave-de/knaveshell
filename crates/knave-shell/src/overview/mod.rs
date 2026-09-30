@@ -238,6 +238,23 @@ impl Overview {
         self.result_page = 0;
         self.dirty = true;
     }
+    fn reset_view(&mut self) {
+        self.query = TextEdit::new("").expect("empty text");
+        // Drop the old text widget and its captured input as well as the model,
+        // so a late key release cannot copy the old query back into state.
+        self.scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
+        self.targets.clear();
+        self.panes.clear();
+        self.workspace = None;
+        self.page = 0;
+        self.result_page = 0;
+        self.launch_when_ready = false;
+        self.hide_after_action = false;
+        self.background_pressed = false;
+        self.pointer = None;
+        self.error = None;
+        self.dirty = true;
+    }
     fn search_page_size(&self) -> usize {
         (((self.size[1]
             - 28.0f32.min(self.size[1] * 0.04)
@@ -375,6 +392,9 @@ impl Application for Overview {
             self.host_error("Desktop exceeds the supported overview capacity");
             return;
         }
+        if self.surface_visible() != snapshot.overview_visible {
+            self.reset_view();
+        }
         self.connected = true;
         self.error = None;
         if !snapshot.overview_visible {
@@ -406,6 +426,7 @@ impl Application for Overview {
         self.dirty = true;
     }
     fn desktop_unavailable(&mut self) {
+        self.reset_view();
         self.connected = false;
         if self.request.take().is_some() {
             self.pending = false;

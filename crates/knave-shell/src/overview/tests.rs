@@ -302,7 +302,7 @@ fn disconnected_overview_cannot_dispatch_stale_window_actions() {
     let mut app = app();
     app.desktop_unavailable();
     let id = app.window_ids[&WindowId(2)];
-    click(&mut app, id);
+    app.activate(id);
     assert!(app.take_request().is_none());
     app.desktop_snapshot(&snapshot());
     assert!(app.connected);
@@ -465,15 +465,20 @@ fn results_are_applications_only_and_paginate() {
     );
 }
 #[test]
-fn disconnected_overview_reports_instead_of_launching() {
+fn disconnected_overview_clears_search_without_launching() {
     let mut app = app();
     type_query(&mut app, "edit");
     app.desktop_unavailable();
-    app.error = None;
     key(&mut app, Key::Enter, true);
     key(&mut app, Key::Enter, false);
     assert!(app.take_request().is_none());
-    assert_eq!(app.error.as_deref(), Some("Desktop connection unavailable"));
+    assert!(app.query.text().is_empty());
+    assert!(
+        app.error
+            .as_deref()
+            .unwrap()
+            .starts_with("Desktop connection unavailable")
+    );
 }
 #[test]
 fn queries_without_matches_render_and_a_missing_catalog_is_reported() {
@@ -638,4 +643,102 @@ fn icons_are_painted_unclipped_not_just_laid_out() {
             && bounds.y + bounds.height <= clip.y + clip.height,
         "{bounds:?} outside {clip:?}"
     );
+}
+
+#[test]
+fn launching_then_reopening_resets_the_search_without_reloading_apps() {
+    let mut app = app();
+    type_query(&mut app, "edit");
+    key(&mut app, Key::Enter, true);
+    assert!(spawned(&mut app).is_some());
+    app.desktop_action_finished(Ok(()));
+    assert!(app.take_request().is_some());
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    app.desktop_action_finished(Ok(()));
+    // Input queued for the old widget must not resurrect its text.
+    key(&mut app, Key::Enter, false);
+    app.input(Input::FocusLost);
+    app.desktop_snapshot(&snapshot());
+    app.input(Input::FocusGained);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.query.text().is_empty());
+    assert!(
+        matches!(app.scene.widget(SEARCH), Some(Widget::TextInput(edit)) if edit.text().is_empty())
+    );
+    assert!(matches!(app.apps, Apps::Ready(_)));
+    assert_eq!(app.workspace, Some(WorkspaceId(2)));
+    assert!(!app.panes.is_empty());
+    assert!(!app.should_close());
+    assert!(app.take_request().is_none());
+}
+
+#[test]
+fn external_hide_resets_browsing_pages_selection_and_errors() {
+    let mut app = app();
+    app.browse(WorkspaceId(3));
+    type_query(&mut app, "tool");
+    app.page = 2;
+    app.result_page = 1;
+    app.error = Some("Earlier launch failed".into());
+    app.background_pressed = true;
+    app.pointer = Some([10.0, 10.0]);
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    assert!(app.query.text().is_empty());
+    assert_eq!((app.page, app.result_page), (0, 0));
+    assert!(app.scene.focus().is_none());
+    assert!(app.targets.is_empty());
+    assert!(app.error.is_none());
+    assert!(!app.background_pressed);
+    assert!(app.pointer.is_none());
+    let mut reopened = snapshot();
+    reopened.workspaces[1].active = false;
+    reopened.workspaces[0].active = true;
+    app.desktop_snapshot(&reopened);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(app.workspace, Some(WorkspaceId(1)));
+    assert_eq!((app.page, app.result_page), (0, 0));
+    assert_ne!(app.scene.focus(), Some(SEARCH));
+}
+
+#[test]
+fn hiding_while_catalog_loads_cancels_the_deferred_launch() {
+    let mut app = Overview::new()
+        .with_catalog_environment(apps_environment())
+        .with_icon_lookup(icon_lookup(true));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    app.input(Input::Text("edit".into()));
+    key(&mut app, Key::Enter, true);
+    assert!(app.launch_when_ready);
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    assert!(!app.launch_when_ready);
+    app.desktop_snapshot(&snapshot());
+    settle(&mut app, [1200.0, 800.0]);
+    assert!(app.query.text().is_empty());
+    assert!(app.take_request().is_none());
+    assert!(matches!(app.apps, Apps::Ready(_)));
+}
+
+#[test]
+fn live_snapshots_preserve_the_query_until_the_view_is_hidden() {
+    let mut app = app();
+    type_query(&mut app, "edit");
+    let mut next = snapshot();
+    next.generation += 1;
+    next.windows[0].title = "New title".into();
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(app.query.text(), "edit");
+    app.desktop_unavailable();
+    assert!(app.query.text().is_empty());
+    assert!(!app.surface_visible());
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.query.text().is_empty());
 }
