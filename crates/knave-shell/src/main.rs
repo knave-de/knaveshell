@@ -90,6 +90,7 @@ fn overview_lock() -> Result<File, String> {
         .read(true)
         .write(true)
         .create(true)
+        .truncate(false)
         .mode(0o600)
         .open(&path)
         .map_err(|error| {

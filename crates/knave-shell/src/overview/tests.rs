@@ -331,7 +331,7 @@ fn spawned(app: &mut Overview) -> Option<Vec<String>> {
     }
 }
 #[test]
-fn enter_launches_the_best_application_match_and_closes_after_ack() {
+fn enter_launches_the_best_application_match_and_hides_after_ack() {
     let mut app = app();
     type_query(&mut app, "edit");
     key(&mut app, Key::Enter, true);
@@ -342,7 +342,14 @@ fn enter_launches_the_best_application_match_and_closes_after_ack() {
     );
     assert!(!app.should_close());
     app.desktop_action_finished(Ok(()));
-    assert!(app.should_close());
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.should_close());
 }
 #[test]
 fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
@@ -357,30 +364,37 @@ fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
 }
 #[test]
 fn results_are_applications_only_and_paginate() {
-    let mut app = app();
-    // Window titles and app IDs from the snapshot must not appear as results.
-    type_query(&mut app, "Window");
-    assert!(app.search().is_empty());
-    key(&mut app, Key::Escape, true);
-    app.frame([1200.0, 800.0], &mut Metrics);
-    type_query(&mut app, "tool");
-    assert_eq!(app.search().len(), 12);
-    let size = app.search_page_size();
+    {
+        let mut app = app();
+        // Window titles and app IDs from the snapshot must not appear as results.
+        type_query(&mut app, "Window");
+        assert!(app.search().is_empty());
+    }
+    // Use a fresh instance for a separate query, independently of visibility actions.
+    let mut paginated = app();
+    type_query(&mut paginated, "tool");
+    assert_eq!(paginated.search().len(), 12);
+    let size = paginated.search_page_size();
     assert_eq!(size, 8);
-    let first_page: Vec<_> = app.search()[..size].to_vec();
+    let first_page: Vec<_> = paginated.search()[..size].to_vec();
     assert!(
         first_page
             .iter()
-            .all(|&i| app.scene.bounds(app_element(i)).is_some())
+            .all(|&i| paginated.scene.bounds(app_element(i)).is_some())
     );
-    click(&mut app, ElementId(31));
-    app.frame([1200.0, 800.0], &mut Metrics);
+    click(&mut paginated, ElementId(31));
+    paginated.frame([1200.0, 800.0], &mut Metrics);
     assert!(
         first_page
             .iter()
-            .all(|&i| app.scene.bounds(app_element(i)).is_none())
+            .all(|&i| paginated.scene.bounds(app_element(i)).is_none())
     );
-    assert!(app.scene.bounds(app_element(app.search()[size])).is_some());
+    assert!(
+        paginated
+            .scene
+            .bounds(app_element(paginated.search()[size]))
+            .is_some()
+    );
 }
 #[test]
 fn disconnected_overview_reports_instead_of_launching() {
