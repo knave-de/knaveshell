@@ -404,6 +404,10 @@ impl Application for Overview {
     }
     fn desktop_unavailable(&mut self) {
         self.connected = false;
+        if self.request.take().is_some() {
+            self.pending = false;
+        }
+        self.hide_after_action = false;
         self.host_error("Desktop connection unavailable — retrying");
     }
     fn overview_panes(&self) -> Option<Vec<OverviewPane>> {
@@ -415,11 +419,11 @@ impl Application for Overview {
         }
         self.pending = false;
         match result {
-            Ok(()) if self.hide_after_action => {
+            Ok(()) if self.hide_after_action && self.surface_visible() => {
                 self.hide_after_action = false;
                 self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
             }
-            Ok(()) => {}
+            Ok(()) => self.hide_after_action = false,
             Err(error) => self.error = Some(error),
         }
         self.dirty = true;
@@ -441,9 +445,11 @@ impl Application for Overview {
         false
     }
     fn surface_visible(&self) -> bool {
-        self.snapshot
-            .as_ref()
-            .is_some_and(|snapshot| snapshot.overview_visible)
+        self.connected
+            && self
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.overview_visible)
     }
     fn needs_frame(&self) -> bool {
         self.dirty

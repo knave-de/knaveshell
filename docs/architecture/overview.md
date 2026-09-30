@@ -59,3 +59,10 @@ remain accepted by new Villain; a new session-owned shell requires API 1.4.
 Rollback the shell first. No persistent visibility configuration changes. Direct TTY,
 nested GPU composition, focus restoration, and installed binaries require
 live smoke verification; a Rust build alone cannot establish them.
+
+The additive `--supports-overview-service` capability probe exits successfully
+without a Wayland connection for service contract 1. Knave Session bounds it
+to two seconds and rejects incompatible Shell binaries. On desktop disconnection,
+Overview unmaps locally and keeps its process for reconnection. Pending
+activation completions do not queue a hide for an already-hidden surface,
+and the host processes requests while hidden.

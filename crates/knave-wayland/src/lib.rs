@@ -814,13 +814,6 @@ impl Runtime {
         if !self.configured {
             return;
         }
-        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
-            && let Some(app) = &mut self.app
-        {
-            app.desktop_action_finished(result);
-            self.exit |= app.should_close();
-            self.scene_dirty = true;
-        }
         if self.exit {
             return;
         }
@@ -860,6 +853,19 @@ impl Runtime {
             self.scene_dirty = true;
             should_render = true;
         }
+        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
+            && let Some(app) = &mut self.app
+        {
+            app.desktop_action_finished(result);
+            self.exit |= app.should_close();
+            self.scene_dirty = true;
+            should_render = true;
+        }
+        if self.exit {
+            return;
+        }
+        // Lifecycle requests must progress even when the application is unmapped.
+        self.application_requests(qh);
         if self.app.as_ref().is_some_and(|app| !app.surface_visible()) {
             if self.surface_buffer_attached {
                 self.layer.wl_surface().attach(None, 0, 0);

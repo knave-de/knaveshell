@@ -9,6 +9,7 @@ backend. The direct Wayland layer-shell path is the runtime target.
 ## Runtime
 
     knave-shell bar
+    knave-shell --supports-overview-service
 
 The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output
 with a workspace carousel, search, and a minimized-window shelf for the browsed

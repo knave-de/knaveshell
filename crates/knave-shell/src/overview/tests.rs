@@ -309,6 +309,57 @@ fn disconnected_overview_cannot_dispatch_stale_window_actions() {
     assert!(app.error.is_none());
 }
 
+#[test]
+fn disconnection_unmaps_and_cancels_unsent_actions_then_reconnects() {
+    let mut app = app();
+    assert!(app.surface_visible());
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    app.desktop_unavailable();
+    assert!(!app.surface_visible());
+    assert!(!app.should_close());
+    assert!(app.take_request().is_none());
+    assert!(!app.pending);
+    app.desktop_action_finished(Ok(()));
+    assert!(app.take_request().is_none());
+    app.desktop_snapshot(&snapshot());
+    assert!(app.surface_visible());
+}
+
+#[test]
+fn completing_activation_while_hidden_does_not_hide_the_next_opening() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.pending);
+    assert!(app.take_request().is_none());
+    app.desktop_snapshot(&snapshot());
+    assert!(app.surface_visible());
+    assert!(app.take_request().is_none());
+}
+
+#[test]
+fn disconnected_inflight_action_is_completed_without_a_stale_hide() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    app.desktop_unavailable();
+    app.desktop_snapshot(&snapshot());
+    assert!(app.pending);
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.pending);
+    assert!(app.take_request().is_none());
+}
+
 /// Draw frames until the worker has delivered everything it owes; fails instead of hanging.
 fn settle(app: &mut Overview, size: [f32; 2]) {
     for _ in 0..5000 {

@@ -10,7 +10,7 @@ use knave_ui::UiScene;
 use knave_wayland::ShellRole;
 
 fn usage() -> &'static str {
-    "usage: knave-shell [--check] [bar|overview]"
+    "usage: knave-shell [--check] [bar|overview]\n       knave-shell --supports-overview-service"
 }
 
 fn check(role: ShellRole) {
@@ -39,6 +39,9 @@ fn check(role: ShellRole) {
 }
 
 fn run() -> Result<(), String> {
+    if std::env::args().skip(1).eq(["--supports-overview-service"]) {
+        return Ok(());
+    }
     let mut check_only = false;
     let mut role = ShellRole::Bar;
 
