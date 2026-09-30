@@ -115,6 +115,10 @@ pub trait Application {
     fn should_close(&self) -> bool {
         false
     }
+    /// Whether the layer surface should have a committed buffer.
+    fn surface_visible(&self) -> bool {
+        true
+    }
 }
 
 pub fn run_application(

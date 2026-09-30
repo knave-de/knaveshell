@@ -712,6 +712,7 @@ fn run_internal(
         painter: None,
         painter_format: None,
         configured: false,
+        surface_buffer_attached: false,
         exit: false,
     };
 
@@ -778,6 +779,7 @@ struct Runtime {
     revision: u64,
     frame_pending: bool,
     configured: bool,
+    surface_buffer_attached: bool,
     exit: bool,
 }
 
@@ -811,13 +813,6 @@ impl Runtime {
     fn draw(&mut self, qh: &QueueHandle<Self>) {
         if !self.configured {
             return;
-        }
-        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
-            && let Some(app) = &mut self.app
-        {
-            app.desktop_action_finished(result);
-            self.exit |= app.should_close();
-            self.scene_dirty = true;
         }
         if self.exit {
             return;
@@ -857,6 +852,29 @@ impl Runtime {
             }
             self.scene_dirty = true;
             should_render = true;
+        }
+        if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
+            && let Some(app) = &mut self.app
+        {
+            app.desktop_action_finished(result);
+            self.exit |= app.should_close();
+            self.scene_dirty = true;
+            should_render = true;
+        }
+        if self.exit {
+            return;
+        }
+        // Lifecycle requests must progress even when the application is unmapped.
+        self.application_requests(qh);
+        if self.app.as_ref().is_some_and(|app| !app.surface_visible()) {
+            if self.surface_buffer_attached {
+                self.layer.wl_surface().attach(None, 0, 0);
+                self.layer.wl_surface().commit();
+                self.surface_buffer_attached = false;
+                self.frame_pending = false;
+            }
+            self.scene_dirty = false;
+            return;
         }
         let mut desired = self
             .app
@@ -1031,6 +1049,7 @@ impl Runtime {
             .frame(qh, FrameCallbackData(self.layer.wl_surface().clone()));
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(frame);
+        self.surface_buffer_attached = true;
         self.revision = self.revision.wrapping_add(1);
     }
 }

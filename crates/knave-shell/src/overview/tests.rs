@@ -20,6 +20,7 @@ impl TextMeasurer for Metrics {
 fn snapshot() -> DesktopSnapshot {
     DesktopSnapshot {
         generation: 7,
+        overview_visible: true,
         workspaces: (1..=3)
             .map(|i| WorkspaceSummary {
                 workspace: WorkspaceId(i),
@@ -191,7 +192,13 @@ fn browsing_does_not_dispatch_or_close_and_enter_targets_browsed_workspace() {
     ));
     assert!(!app.should_close());
     app.desktop_action_finished(Ok(()));
-    assert!(app.should_close());
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    assert!(!app.should_close());
 }
 #[test]
 fn restore_waits_for_ack_and_failure_keeps_overview_open() {
@@ -229,7 +236,7 @@ fn snapshots_with_same_generation_update_membership_and_preserve_browsing() {
     assert_eq!(app.workspace, Some(WorkspaceId(1)));
 }
 #[test]
-fn search_is_unicode_editable_and_escape_clears_before_closing() {
+fn search_is_unicode_editable_and_escape_hides_overview() {
     let mut app = app();
     app.input(Input::Text("Editor".into()));
     settle(&mut app, [1200.0, 800.0]);
@@ -237,10 +244,13 @@ fn search_is_unicode_editable_and_escape_clears_before_closing() {
     assert_eq!(app.scene.focus(), Some(SEARCH));
     key(&mut app, Key::Escape, true);
     app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
     assert!(!app.should_close());
-    assert_eq!(app.query.text(), "");
-    key(&mut app, Key::Escape, true);
-    assert!(app.should_close());
 }
 #[test]
 fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {
@@ -299,6 +309,74 @@ fn disconnected_overview_cannot_dispatch_stale_window_actions() {
     assert!(app.error.is_none());
 }
 
+#[test]
+fn disconnection_unmaps_and_cancels_unsent_actions_then_reconnects() {
+    let mut app = app();
+    assert!(app.surface_visible());
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    app.desktop_unavailable();
+    assert!(!app.surface_visible());
+    assert!(!app.should_close());
+    assert!(app.take_request().is_none());
+    assert!(!app.pending);
+    app.desktop_action_finished(Ok(()));
+    assert!(app.take_request().is_none());
+    app.desktop_snapshot(&snapshot());
+    assert!(app.surface_visible());
+}
+
+#[test]
+fn completing_activation_while_hidden_does_not_hide_the_next_opening() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.pending);
+    assert!(app.take_request().is_none());
+    app.desktop_snapshot(&snapshot());
+    assert!(app.surface_visible());
+    assert!(app.take_request().is_none());
+}
+
+#[test]
+fn disconnected_inflight_action_is_completed_without_a_stale_hide() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    app.desktop_unavailable();
+    app.desktop_snapshot(&snapshot());
+    assert!(app.pending);
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.pending);
+    assert!(app.take_request().is_none());
+}
+
+#[test]
+fn activation_from_an_earlier_opening_cannot_hide_a_reopened_overview() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    app.desktop_snapshot(&snapshot());
+    app.desktop_action_finished(Ok(()));
+    assert!(app.surface_visible());
+    assert!(app.take_request().is_none());
+    assert!(!app.pending);
+}
+
 /// Draw frames until the worker has delivered everything it owes; fails instead of hanging.
 fn settle(app: &mut Overview, size: [f32; 2]) {
     for _ in 0..5000 {
@@ -321,7 +399,7 @@ fn spawned(app: &mut Overview) -> Option<Vec<String>> {
     }
 }
 #[test]
-fn enter_launches_the_best_application_match_and_closes_after_ack() {
+fn enter_launches_the_best_application_match_and_hides_after_ack() {
     let mut app = app();
     type_query(&mut app, "edit");
     key(&mut app, Key::Enter, true);
@@ -332,7 +410,14 @@ fn enter_launches_the_best_application_match_and_closes_after_ack() {
     );
     assert!(!app.should_close());
     app.desktop_action_finished(Ok(()));
-    assert!(app.should_close());
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    app.desktop_action_finished(Ok(()));
+    assert!(!app.should_close());
 }
 #[test]
 fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
@@ -347,30 +432,37 @@ fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
 }
 #[test]
 fn results_are_applications_only_and_paginate() {
-    let mut app = app();
-    // Window titles and app IDs from the snapshot must not appear as results.
-    type_query(&mut app, "Window");
-    assert!(app.search().is_empty());
-    key(&mut app, Key::Escape, true);
-    app.frame([1200.0, 800.0], &mut Metrics);
-    type_query(&mut app, "tool");
-    assert_eq!(app.search().len(), 12);
-    let size = app.search_page_size();
+    {
+        let mut app = app();
+        // Window titles and app IDs from the snapshot must not appear as results.
+        type_query(&mut app, "Window");
+        assert!(app.search().is_empty());
+    }
+    // Use a fresh instance for a separate query, independently of visibility actions.
+    let mut paginated = app();
+    type_query(&mut paginated, "tool");
+    assert_eq!(paginated.search().len(), 12);
+    let size = paginated.search_page_size();
     assert_eq!(size, 8);
-    let first_page: Vec<_> = app.search()[..size].to_vec();
+    let first_page: Vec<_> = paginated.search()[..size].to_vec();
     assert!(
         first_page
             .iter()
-            .all(|&i| app.scene.bounds(app_element(i)).is_some())
+            .all(|&i| paginated.scene.bounds(app_element(i)).is_some())
     );
-    click(&mut app, ElementId(31));
-    app.frame([1200.0, 800.0], &mut Metrics);
+    click(&mut paginated, ElementId(31));
+    paginated.frame([1200.0, 800.0], &mut Metrics);
     assert!(
         first_page
             .iter()
-            .all(|&i| app.scene.bounds(app_element(i)).is_none())
+            .all(|&i| paginated.scene.bounds(app_element(i)).is_none())
     );
-    assert!(app.scene.bounds(app_element(app.search()[size])).is_some());
+    assert!(
+        paginated
+            .scene
+            .bounds(app_element(paginated.search()[size]))
+            .is_some()
+    );
 }
 #[test]
 fn disconnected_overview_reports_instead_of_launching() {

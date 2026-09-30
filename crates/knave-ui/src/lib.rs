@@ -596,6 +596,7 @@ mod tests {
     fn snapshot_scene_reflects_active_workspace() {
         let snapshot = DesktopSnapshot {
             generation: 4,
+            overview_visible: true,
             workspaces: vec![knave_desktop_api::WorkspaceSummary {
                 workspace: knave_desktop_api::WorkspaceId(2),
                 active: true,
@@ -654,6 +655,7 @@ mod tests {
     fn overview_scene_includes_bounded_workspace_preview() {
         let snapshot = DesktopSnapshot {
             generation: 1,
+            overview_visible: true,
             workspaces: vec![knave_desktop_api::WorkspaceSummary {
                 workspace: WorkspaceId(1),
                 active: true,
@@ -691,6 +693,7 @@ mod tests {
     fn search_results_provide_bounded_actions() {
         let snapshot = DesktopSnapshot {
             generation: 1,
+            overview_visible: true,
             workspaces: vec![knave_desktop_api::WorkspaceSummary {
                 workspace: WorkspaceId(1),
                 active: true,
