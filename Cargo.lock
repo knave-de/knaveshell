@@ -614,7 +614,7 @@ dependencies = [
 [[package]]
 name = "knave-desktop-api"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=9c70c93b8a642a3b4470d60fb6fc30ac1959ceb4#9c70c93b8a642a3b4470d60fb6fc30ac1959ceb4"
+source = "git+https://github.com/knave-de/knave.git?rev=6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a#6b86b3c52d8ac2093d3a2d421735c1f35b06cb9a"
 dependencies = [
  "serde",
  "serde_json",
