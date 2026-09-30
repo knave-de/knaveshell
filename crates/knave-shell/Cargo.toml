@@ -10,6 +10,7 @@ name = "knave-shell"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 knave-apps.workspace = true
 knave-icons.workspace = true
 knave-renderer.workspace = true

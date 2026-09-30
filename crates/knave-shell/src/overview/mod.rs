@@ -64,9 +64,9 @@ pub struct Overview {
     size: [f32; 2],
     dirty: bool,
     pending: bool,
+    hide_after_action: bool,
     request: Option<HostRequest>,
     error: Option<String>,
-    close: bool,
     surface_focused: bool,
     background_pressed: bool,
     pointer: Option<[f32; 2]>,
@@ -100,9 +100,9 @@ impl Overview {
             size: [0.0; 2],
             dirty: true,
             pending: false,
+            hide_after_action: false,
             request: None,
             error: None,
-            close: false,
             surface_focused: true,
             background_pressed: false,
             pointer: None,
@@ -182,6 +182,7 @@ impl Overview {
             self.error = Some("Desktop connection unavailable".into());
             self.dirty = true;
         } else if !self.pending {
+            self.hide_after_action = !matches!(command, DesktopCommand::SetOverviewVisible { .. });
             self.request = Some(HostRequest::Desktop(command));
             self.pending = true;
             self.error = None;
@@ -414,7 +415,11 @@ impl Application for Overview {
         }
         self.pending = false;
         match result {
-            Ok(()) => self.close = true,
+            Ok(()) if self.hide_after_action => {
+                self.hide_after_action = false;
+                self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+            }
+            Ok(()) => {}
             Err(error) => self.error = Some(error),
         }
         self.dirty = true;
@@ -433,7 +438,12 @@ impl Application for Overview {
         self.request.take()
     }
     fn should_close(&self) -> bool {
-        self.close
+        false
+    }
+    fn surface_visible(&self) -> bool {
+        self.snapshot
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.overview_visible)
     }
     fn needs_frame(&self) -> bool {
         self.dirty
@@ -459,7 +469,7 @@ impl Application for Overview {
             Input::PointerUp(p) => {
                 if self.background_pressed && self.scene.hit_test(*p).is_none() {
                     if self.query.text().is_empty() {
-                        self.close = true
+                        self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                     } else {
                         self.clear_query();
                     }
@@ -473,11 +483,7 @@ impl Application for Overview {
                 modifiers,
             } => {
                 if *key == Key::Escape && !repeat {
-                    if self.query.text().is_empty() {
-                        self.close = true
-                    } else {
-                        self.clear_query();
-                    }
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                     return;
                 }
                 if *key == Key::K && modifiers.control {

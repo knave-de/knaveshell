@@ -20,6 +20,7 @@ impl TextMeasurer for Metrics {
 fn snapshot() -> DesktopSnapshot {
     DesktopSnapshot {
         generation: 7,
+        overview_visible: true,
         workspaces: (1..=3)
             .map(|i| WorkspaceSummary {
                 workspace: WorkspaceId(i),
@@ -191,7 +192,13 @@ fn browsing_does_not_dispatch_or_close_and_enter_targets_browsed_workspace() {
     ));
     assert!(!app.should_close());
     app.desktop_action_finished(Ok(()));
-    assert!(app.should_close());
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    assert!(!app.should_close());
 }
 #[test]
 fn restore_waits_for_ack_and_failure_keeps_overview_open() {
@@ -229,7 +236,7 @@ fn snapshots_with_same_generation_update_membership_and_preserve_browsing() {
     assert_eq!(app.workspace, Some(WorkspaceId(1)));
 }
 #[test]
-fn search_is_unicode_editable_and_escape_clears_before_closing() {
+fn search_is_unicode_editable_and_escape_hides_overview() {
     let mut app = app();
     app.input(Input::Text("Editor".into()));
     settle(&mut app, [1200.0, 800.0]);
@@ -237,10 +244,13 @@ fn search_is_unicode_editable_and_escape_clears_before_closing() {
     assert_eq!(app.scene.focus(), Some(SEARCH));
     key(&mut app, Key::Escape, true);
     app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
     assert!(!app.should_close());
-    assert_eq!(app.query.text(), "");
-    key(&mut app, Key::Escape, true);
-    assert!(app.should_close());
 }
 #[test]
 fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {

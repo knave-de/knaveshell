@@ -25,7 +25,7 @@ knave-ui = { path = "crates/knave-ui" }
 base64 = "0.22"
 png = "0.18"
 wgpu = "30.0.1"
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "187dac28dbd746e8764f0ef93c0d05322f144fbb" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "9c70c93b8a642a3b4470d60fb6fc30ac1959ceb4" }
 pollster = "1.0.1"
 thiserror = "2.0.21"
 smithay-client-toolkit = { version = "0.21.1", default-features = false, features = ["calloop", "xkbcommon"] }

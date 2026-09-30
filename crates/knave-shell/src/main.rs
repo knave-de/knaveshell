@@ -1,4 +1,9 @@
-use std::process::ExitCode;
+use std::{
+    fs::{File, OpenOptions},
+    os::fd::AsRawFd,
+    os::unix::fs::OpenOptionsExt,
+    process::ExitCode,
+};
 
 use knave_renderer::WgpuRenderer;
 use knave_ui::UiScene;
@@ -54,6 +59,11 @@ fn run() -> Result<(), String> {
     }
 
     if role == ShellRole::Overview {
+        if std::env::var_os("KNAVE_OVERVIEW_SERVICE").as_deref() != Some(std::ffi::OsStr::new("1"))
+        {
+            return Err("overview is managed by knave-session".into());
+        }
+        let _overview_lock = overview_lock()?;
         knave_wayland::run_application(
             knave_wayland::SurfaceOptions {
                 keyboard: knave_wayland::KeyboardMode::Exclusive,
@@ -66,6 +76,37 @@ fn run() -> Result<(), String> {
         .map_err(|error| error.to_string())
     } else {
         knave_wayland::run(role).map_err(|error| error.to_string())
+    }
+}
+
+fn overview_lock() -> Result<File, String> {
+    let socket = knave_desktop_api::socket_path().map_err(|error| error.to_string())?;
+    let name = socket
+        .file_name()
+        .ok_or_else(|| "desktop socket path has no file name".to_owned())?
+        .to_string_lossy();
+    let path = socket.with_file_name(format!("{name}.overview.lock"));
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(|error| {
+            format!(
+                "could not open overview session lock {}: {error}",
+                path.display()
+            )
+        })?;
+    // `flock` is released by the kernel on process exit, including crashes.
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if result == 0 {
+        Ok(file)
+    } else {
+        let error = std::io::Error::last_os_error();
+        Err(format!(
+            "another overview is active for this Wayland session: {error}"
+        ))
     }
 }
 

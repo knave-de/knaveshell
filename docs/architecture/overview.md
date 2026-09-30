@@ -1,11 +1,15 @@
 # Workspace overview
 
-`knave-shell::overview::Overview` owns the retained UI and its input state. It
-runs as an exclusive full-output layer surface. Villain owns workspace/window
-state and composes application surfaces into at most three overview rectangles.
+`knave-shell::overview::Overview` owns the retained UI and its input state. Knave
+Session starts and supervises exactly one Overview process for the Wayland
+session. It remains alive while hidden and maps its exclusive full-output layer
+surface only when Villain publishes `overview_visible=true`. Villain owns
+workspace/window state and composes application surfaces into at most three
+overview rectangles.
 The shell does not configure, resize, focus, or deliver input to those preview
 surfaces. Its search, card, and minimized-window controls still dispatch normal
-desktop actions and wait for acknowledgement before closing.
+desktop actions and wait for acknowledgement before hiding. Escape hides it;
+Super toggles the same session-owned instance.
 
 The shell computes one selected card and up to two neighboring cards from the
 current logical output size. It sends their interior rectangles and workspace
@@ -18,7 +22,7 @@ Search lists installed applications, not windows. `knave-apps` reads XDG
 `.desktop` entries; entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet
 `TryExec`/`OnlyShowIn` are skipped. Launching sends the existing `Spawn { argv }`
 desktop command, so Villain starts the process with the session environment and
-the overview closes only after it acknowledges. No new desktop API is involved.
+the overview hides only after it acknowledges. Visibility uses desktop API 1.4.
 
 Rows show each application's `Icon`, resolved by `knave-icons` with the icon theme
 spec's size rule. Knave has no icon-theme setting and the shell reads no other
@@ -33,7 +37,7 @@ host through `Application::set_waker`, and `needs_frame` reports delivered
 results, so there is no polling. A scan examines at most 16,384 directory entries
 and keeps at most 4,096 applications; reaching a limit marks the catalog
 incomplete and logs it. Only regular files are opened, so a FIFO cannot block the
-worker. Dropping the overview closes the queue and never waits on the worker. Enter
+worker. The queue closes and the worker is detached when the session ends. Enter
 pressed before the catalog arrives launches the top result when it does.
 Icons rasterize at 64px (SVG through resvg without text or system fonts, PNG
 downscaled if oversized).
@@ -49,10 +53,9 @@ failed connections use capped retry backoff. The legacy preview query remains
 available for older clients, and the non-application overview host still uses
 its existing preview worker.
 
-This needs Knave desktop API 1.3 and a Villain build that supports live panes.
-Deploy Villain before the new shell. Older 1.2 clients work with new Villain;
-a new shell on an older compositor keeps its API 1.2 subscription and reports
-the unavailable live preview command.
-Rollback the shell first. No persistent configuration changes. Direct TTY,
+This needs Knave desktop API 1.4 and a Villain build that supports visibility
+and live panes. Deploy Knave, then Villain, then the shell. Older 1.2 clients
+remain accepted by new Villain; a new session-owned shell requires API 1.4.
+Rollback the shell first. No persistent visibility configuration changes. Direct TTY,
 nested GPU composition, focus restoration, and installed binaries require
 live smoke verification; a Rust build alone cannot establish them.
