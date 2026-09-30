@@ -9,7 +9,13 @@ overview rectangles.
 The shell does not configure, resize, focus, or deliver input to those preview
 surfaces. Its search, card, and minimized-window controls still dispatch normal
 desktop actions and wait for acknowledgement before hiding. Escape hides it;
-Super toggles the same session-owned instance.
+Super toggles the same session-owned instance. Hiding clears the query, focused
+control, browsing/pages, pointer gestures, errors, and any launch waiting on the
+catalog. Reopening selects the current active workspace. The catalog, icon
+cache, loader, desktop snapshot, and in-flight action bookkeeping remain owned
+by the service; ordinary visible snapshot updates preserve the current search.
+Disconnection also resets the view. This is private Shell behavior with no
+protocol or configuration change and no added background activity.
 
 The shell computes one selected card and up to two neighboring cards from the
 current logical output size. It sends their interior rectangles and workspace

@@ -18,7 +18,9 @@ to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
 search installed applications and press Enter to launch the top match, use Tab
 to traverse controls, and Escape to hide overview. Super toggles
 the session-owned Overview process. Activating a workspace, window, or app hides
-it after the desktop service acknowledges success. The overview displays
+it after the desktop service acknowledges success. Each reopening starts with an
+empty search on the active workspace; the service keeps its app catalog and icon
+cache. The overview displays
 compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume Knave's versioned desktop
 contract and keep desktop IPC off the Wayland frame thread.
