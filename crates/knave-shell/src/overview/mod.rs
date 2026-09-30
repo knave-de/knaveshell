@@ -377,6 +377,9 @@ impl Application for Overview {
         }
         self.connected = true;
         self.error = None;
+        if !snapshot.overview_visible {
+            self.hide_after_action = false;
+        }
         let previous = self.workspace;
         self.workspace = previous
             .filter(|id| snapshot.workspaces.iter().any(|w| w.workspace == *id))

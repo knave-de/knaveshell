@@ -360,6 +360,23 @@ fn disconnected_inflight_action_is_completed_without_a_stale_hide() {
     assert!(app.take_request().is_none());
 }
 
+#[test]
+fn activation_from_an_earlier_opening_cannot_hide_a_reopened_overview() {
+    let mut app = app();
+    app.dispatch(DesktopCommand::FocusWorkspace {
+        workspace: WorkspaceId(3),
+    });
+    assert!(app.take_request().is_some());
+    let mut hidden = snapshot();
+    hidden.overview_visible = false;
+    app.desktop_snapshot(&hidden);
+    app.desktop_snapshot(&snapshot());
+    app.desktop_action_finished(Ok(()));
+    assert!(app.surface_visible());
+    assert!(app.take_request().is_none());
+    assert!(!app.pending);
+}
+
 /// Draw frames until the worker has delivered everything it owes; fails instead of hanging.
 fn settle(app: &mut Overview, size: [f32; 2]) {
     for _ in 0..5000 {
