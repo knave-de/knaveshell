@@ -83,3 +83,12 @@ fractional scaling and multiple-output hosting remain future work.
 - knave-renderer: render-list, bounded bitmap-text/image painter, and wgpu boundary;
   and
 - knave-wayland: direct layer-shell client and bounded desktop-state bridge.
+
+### Native portal controls
+
+`knave-shell portal-picker` uses the existing retained UI toolkit and wgpu renderer
+for monitor previews, explicit consent, cancellation and Stop sharing. The backend
+launches it with the bounded version-1 JSON contract in `knave-portal-api`; it is
+not a user-facing general CLI. No source is selected initially. Active sharing
+uses an on-demand keyboard layer instead of grabbing application keyboard focus.
+Deploy Shell and the portal backend together; see Knave ADR 0005.
