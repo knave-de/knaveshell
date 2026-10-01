@@ -208,7 +208,6 @@ impl Application for Picker {
             return;
         }
         let result = self.scene.event(event);
-        self.dirty |= result.redraw;
         if let Some(Action::Activated(id)) = result.action {
             if id == CANCEL {
                 self.respond(Vec::new());
@@ -232,7 +231,7 @@ impl Application for Picker {
         }
     }
     fn needs_frame(&self) -> bool {
-        self.dirty
+        self.dirty || self.scene.needs_frame()
     }
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
@@ -352,6 +351,8 @@ mod tests {
         let point = [rect.x + rect.width / 2.0, rect.y + rect.height / 2.0];
         picker.input(Input::PointerMove(point));
         picker.input(Input::PointerDown(point));
+        // A frame between press and release must retain toolkit pointer capture.
+        picker.frame(picker.size, &mut Metrics);
         picker.input(Input::PointerUp(point));
     }
     #[test]
