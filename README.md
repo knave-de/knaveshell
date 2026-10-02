@@ -91,4 +91,4 @@ for monitor previews, explicit consent, cancellation and Stop sharing. The backe
 launches it with the bounded version-1 JSON contract in `knave-portal-api`; it is
 not a user-facing general CLI. No source is selected initially. Active sharing
 uses an on-demand keyboard layer instead of grabbing application keyboard focus.
-Deploy Shell and the portal backend together; see Knave ADR 0005.
+Deploy Shell and the portal backend together; see Knave ADR 0006.
