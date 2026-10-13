@@ -167,6 +167,8 @@ pub enum WaylandError {
     SurfaceConfiguration,
     #[error("Wayland dispatch failed: {0}")]
     Dispatch(String),
+    #[error("could not signal desktop harness readiness: {0}")]
+    HarnessReadiness(#[source] std::io::Error),
 }
 
 const MAX_PREVIEWS: usize = 3;
@@ -668,6 +670,7 @@ fn run_internal(
                 .as_ref()
                 .map_or(role.namespace(), |options| options.namespace.as_str()),
         ),
+        harness_error: None,
         wake_sender: wake_sender.clone(),
         connection: connection.clone(),
         compositor,
@@ -732,11 +735,15 @@ fn run_internal(
     }
 
     state.cancel_clipboard();
+    if let Some(error) = state.harness_error.take() {
+        return Err(WaylandError::HarnessReadiness(error));
+    }
     Ok(())
 }
 
 struct Runtime {
     harness_ready: harness_ready::ReadySignal,
+    harness_error: Option<std::io::Error>,
     // Keep the wake source alive even when no desktop workers are needed.
     wake_sender: WakeSender,
     connection: Connection,
@@ -1069,7 +1076,7 @@ impl Runtime {
             && self.snapshot.is_some()
             && let Err(error) = self.harness_ready.notify()
         {
-            eprintln!("knave-shell: harness readiness failed: {error}");
+            self.harness_error = Some(error);
             self.exit = true;
         }
     }

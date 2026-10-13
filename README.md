@@ -14,6 +14,7 @@ signal after Wayland/renderer initialization and receipt of desktop state; the b
 also waits for a compositor frame callback. This private test handshake adds no
 watcher and is inactive during normal sessions. Build this Shell revision before
 running the matching harness; older Shell builds fail the harness readiness timeout.
+Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
 
     knave-shell bar
     knave-shell --supports-overview-service
