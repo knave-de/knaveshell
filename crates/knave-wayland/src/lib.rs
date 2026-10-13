@@ -3,6 +3,7 @@
 mod application;
 mod clipboard;
 mod cursor;
+mod harness_ready;
 mod ime;
 mod snapshot;
 pub use application::{
@@ -662,6 +663,11 @@ fn run_internal(
         .ok();
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
     let mut state = Runtime {
+        harness_ready: harness_ready::ReadySignal::from_env(
+            options
+                .as_ref()
+                .map_or(role.namespace(), |options| options.namespace.as_str()),
+        ),
         wake_sender: wake_sender.clone(),
         connection: connection.clone(),
         compositor,
@@ -730,6 +736,7 @@ fn run_internal(
 }
 
 struct Runtime {
+    harness_ready: harness_ready::ReadySignal,
     // Keep the wake source alive even when no desktop workers are needed.
     wake_sender: WakeSender,
     connection: Connection,
@@ -874,6 +881,7 @@ impl Runtime {
                 self.frame_pending = false;
             }
             self.scene_dirty = false;
+            self.notify_harness_ready();
             return;
         }
         let mut desired = self
@@ -1055,6 +1063,17 @@ impl Runtime {
 }
 
 impl Runtime {
+    fn notify_harness_ready(&mut self) {
+        if self.configured
+            && self.painter.is_some()
+            && self.snapshot.is_some()
+            && let Err(error) = self.harness_ready.notify()
+        {
+            eprintln!("knave-shell: harness readiness failed: {error}");
+            self.exit = true;
+        }
+    }
+
     fn handle_key(&mut self, qh: &QueueHandle<Self>, event: KeyEvent) {
         if self.role != ShellRole::Overview {
             return;
@@ -1452,6 +1471,9 @@ impl CompositorHandler for Runtime {
         _surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
+        if self.surface_buffer_attached && _surface == self.layer.wl_surface() {
+            self.notify_harness_ready();
+        }
         self.frame_pending = false;
         self.draw(qh);
     }

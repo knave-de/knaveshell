@@ -8,6 +8,13 @@ backend. The direct Wayland layer-shell path is the runtime target.
 
 ## Runtime
 
+The optional development harness in `../knave/docs/desktop-testing.md` uses
+`KNAVE_HARNESS_READY_DIR` for one-shot readiness markers. Configured shell services
+signal after Wayland/renderer initialization and receipt of desktop state; the bar
+also waits for a compositor frame callback. This private test handshake adds no
+watcher and is inactive during normal sessions. Build this Shell revision before
+running the matching harness; older Shell builds fail the harness readiness timeout.
+
     knave-shell bar
     knave-shell --supports-overview-service
 
