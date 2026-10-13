@@ -109,6 +109,14 @@ long documentation for routine refactors or repeat source code in prose.
 
 ## Verification
 
+For desktop UI/runtime features, follow `../knave/docs/desktop-testing.md` and
+the umbrella Knave desktop-feature verification instructions. Build the affected
+workspace binaries, exercise the feature in the isolated Winit harness, verify
+state/output and screenshots, and record an MP4 demonstration for the user.
+Provide the video link and assertions in the final response. Leave a requested
+interactive handoff running with its VNC/SSH connection details; stop sessions
+used only for automated checks. This does not establish direct-TTY/GPU behavior.
+
 For Rust changes, run:
 
 ```console
