@@ -7,7 +7,8 @@ mod harness_ready;
 mod ime;
 mod snapshot;
 pub use application::{
-    Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker, run_application,
+    Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition, Waker,
+    run_application,
 };
 use knave_ui::toolkit::{Input, KeyModifiers};
 use snapshot::SnapshotWorker;
@@ -592,7 +593,7 @@ fn run_internal(
         layer.set_anchor(if options.size.is_none() {
             Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT
         } else {
-            Anchor::empty()
+            options.position.anchors()
         });
         layer.set_keyboard_interactivity(match options.keyboard {
             KeyboardMode::None => KeyboardInteractivity::None,

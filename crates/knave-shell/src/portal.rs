@@ -1,8 +1,8 @@
 //! Native portal selection and sharing controls on Knave's retained UI toolkit.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, VERSION};
-use knave_ui::{Color, DisplayList, ShapePaint, UiImage, toolkit::*};
-use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions};
+use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, UiImage, toolkit::*};
+use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
 use std::{
     collections::BTreeSet,
     io::{self, Read},
@@ -20,6 +20,10 @@ pub struct Picker {
     size: [f32; 2],
 }
 impl Picker {
+    fn direct_share(&self) -> bool {
+        self.request.operation == Operation::Share && !self.request.multiple
+    }
+
     pub fn new(request: Request) -> Result<Self, String> {
         request.validate()?;
         let images = request
@@ -69,6 +73,9 @@ impl Picker {
         self.closed = true;
     }
     fn compose(&self) -> Element {
+        if self.request.operation == Operation::Sharing {
+            return self.sharing_control();
+        }
         let mut root = Element::new(0, Widget::Panel).layout(Layout {
             padding: 24.0,
             gap: 16.0,
@@ -156,6 +163,19 @@ impl Picker {
                         ..Default::default()
                     }),
                 );
+                if self.direct_share() {
+                    card.children.push(
+                        Element::new(
+                            3000 + index as u64,
+                            Widget::Text("Share this screen".into()),
+                        )
+                        .layout(Layout {
+                            height: Length::Px(24.0),
+                            ..Default::default()
+                        }),
+                    );
+                    card.layout.height = Length::Px(224.0);
+                }
                 grid.children.push(card);
             }
             root.children
@@ -184,8 +204,47 @@ impl Picker {
             ),
         );
         confirm.enabled = self.request.operation == Operation::Sharing || !self.selected.is_empty();
-        buttons.children.push(confirm);
+        if self.direct_share() {
+            buttons.children[0].layout.width = Length::Px(120.0);
+            buttons.children.push(Element::new(
+                9,
+                Widget::Text("Click a screen to start sharing".into()),
+            ));
+        } else {
+            buttons.children.push(confirm);
+        }
         root.children.push(buttons);
+        root
+    }
+
+    fn sharing_control(&self) -> Element {
+        let mut root = Element::new(0, Widget::Panel).layout(Layout {
+            flow: Flow::Row,
+            padding: 6.0,
+            gap: 6.0,
+            ..Default::default()
+        });
+        root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
+        let app = if self.request.app_id.is_empty() {
+            "Application"
+        } else {
+            &self.request.app_id
+        };
+        let mut label = Element::new(4, Widget::Text(format!("Sharing · {app}"))).layout(Layout {
+            height: Length::Fill,
+            ..Default::default()
+        });
+        label.style.text.wrap = TextWrap::None;
+        label.style.text.color = Color::rgba(137, 207, 240, 255);
+        root.children.push(label);
+        root.children.push(
+            Element::new(CONFIRM.0, Widget::Button("Stop sharing".into())).layout(Layout {
+                width: Length::Px(104.0),
+                height: Length::Fill,
+                padding: 3.0,
+                ..Default::default()
+            }),
+        );
         root
     }
 }
@@ -220,6 +279,10 @@ impl Application for Picker {
                     .and_then(|i| self.request.sources.get(i as usize))
             {
                 let source_id = source.id;
+                if self.direct_share() {
+                    self.respond(vec![source_id]);
+                    return;
+                }
                 if !self.selected.remove(&source_id) {
                     if !self.request.multiple {
                         self.selected.clear();
@@ -238,7 +301,8 @@ impl Application for Picker {
             let focus = self.scene.focus();
             if let Ok(mut scene) = Scene::new(self.compose()) {
                 scene.layout(size, text);
-                let _ = scene.set_focus(focus.or(Some(CANCEL)));
+                let initial = (self.request.operation != Operation::Sharing).then_some(CANCEL);
+                let _ = scene.set_focus(focus.or(initial));
                 self.scene = scene;
             }
             self.size = size;
@@ -250,6 +314,29 @@ impl Application for Picker {
         self.closed
     }
 }
+fn surface_options(sharing: bool) -> SurfaceOptions {
+    SurfaceOptions {
+        size: Some(if sharing { [350, 36] } else { [820, 640] }),
+        position: if sharing {
+            SurfacePosition::TopRight
+        } else {
+            SurfacePosition::Center
+        },
+        keyboard: if sharing {
+            KeyboardMode::None
+        } else {
+            KeyboardMode::Exclusive
+        },
+        layer: SurfaceLayer::Overlay,
+        namespace: if sharing {
+            "knave-portal-sharing"
+        } else {
+            "knave-portal-picker"
+        }
+        .into(),
+    }
+}
+
 pub fn run() -> Result<(), String> {
     let mut bytes = Vec::new();
     io::stdin()
@@ -261,25 +348,8 @@ pub fn run() -> Result<(), String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let sharing = request.operation == Operation::Sharing;
-    knave_wayland::run_application(
-        SurfaceOptions {
-            size: Some(if sharing { [520, 220] } else { [820, 640] }),
-            keyboard: if sharing {
-                KeyboardMode::OnDemand
-            } else {
-                KeyboardMode::Exclusive
-            },
-            layer: SurfaceLayer::Overlay,
-            namespace: if sharing {
-                "knave-portal-sharing"
-            } else {
-                "knave-portal-picker"
-            }
-            .into(),
-        },
-        Picker::new(request)?,
-    )
-    .map_err(|e| e.to_string())
+    knave_wayland::run_application(surface_options(sharing), Picker::new(request)?)
+        .map_err(|e| e.to_string())
 }
 #[cfg(test)]
 mod tests {
@@ -303,7 +373,9 @@ mod tests {
     }
     #[test]
     fn share_starts_disabled_and_requires_explicit_selection() {
-        let mut picker = Picker::new(request()).unwrap();
+        let mut req = request();
+        req.multiple = true;
+        let mut picker = Picker::new(req).unwrap();
         assert!(picker.selected.is_empty());
         let root = picker.compose();
         assert!(
@@ -357,7 +429,9 @@ mod tests {
     }
     #[test]
     fn actual_pointer_selection_toggles_and_confirmation_closes() {
-        let mut picker = Picker::new(request()).unwrap();
+        let mut req = request();
+        req.multiple = true;
+        let mut picker = Picker::new(req).unwrap();
         picker.frame([820.0, 640.0], &mut Metrics);
         click(&mut picker, ElementId(SOURCE));
         assert_eq!(picker.selected.iter().copied().collect::<Vec<_>>(), vec![3]);
@@ -375,9 +449,41 @@ mod tests {
         let mut req = request();
         req.operation = Operation::Sharing;
         let mut picker = Picker::new(req).unwrap();
-        picker.frame([520.0, 220.0], &mut Metrics);
+        picker.frame([350.0, 36.0], &mut Metrics);
         click(&mut picker, CONFIRM);
         assert!(picker.should_close());
+    }
+    #[test]
+    fn single_share_requires_one_explicit_source_activation() {
+        let mut picker = Picker::new(request()).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+        assert!(picker.selected.is_empty());
+        assert!(!picker.should_close());
+        assert!(picker.scene.bounds(CONFIRM).is_none());
+        click(&mut picker, ElementId(SOURCE));
+        assert!(picker.should_close());
+    }
+
+    #[test]
+    fn screenshot_keeps_selection_and_confirmation() {
+        let mut req = request();
+        req.operation = Operation::Screenshot;
+        let mut picker = Picker::new(req).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, ElementId(SOURCE));
+        assert!(!picker.should_close());
+        assert!(picker.selected.contains(&3));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, CONFIRM);
+        assert!(picker.should_close());
+    }
+
+    #[test]
+    fn sharing_control_is_small_and_never_requests_keyboard_focus() {
+        let options = surface_options(true);
+        assert_eq!(options.size, Some([350, 36]));
+        assert_eq!(options.position, SurfacePosition::TopRight);
+        assert_eq!(options.keyboard, KeyboardMode::None);
     }
     #[test]
     fn escape_cancels() {

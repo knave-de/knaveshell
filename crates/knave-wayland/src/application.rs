@@ -34,16 +34,35 @@ impl SurfaceLayer {
 
 #[derive(Clone, Debug)]
 pub struct SurfaceOptions {
-    /// None fills the output. A size creates a centered surface in logical pixels.
+    /// None fills the output. A size uses `position` in logical pixels.
     pub size: Option<[u32; 2]>,
+    pub position: SurfacePosition,
     pub keyboard: KeyboardMode,
     pub layer: SurfaceLayer,
     pub namespace: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SurfacePosition {
+    #[default]
+    Center,
+    TopRight,
+}
+
+impl SurfacePosition {
+    pub(super) fn anchors(self) -> smithay_client_toolkit::shell::wlr_layer::Anchor {
+        use smithay_client_toolkit::shell::wlr_layer::Anchor;
+        match self {
+            Self::Center => Anchor::empty(),
+            Self::TopRight => Anchor::TOP | Anchor::RIGHT,
+        }
+    }
 }
 impl Default for SurfaceOptions {
     fn default() -> Self {
         Self {
             size: None,
+            position: SurfacePosition::Center,
             keyboard: KeyboardMode::OnDemand,
             layer: SurfaceLayer::Top,
             namespace: "knave-ui".into(),

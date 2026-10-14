@@ -97,6 +97,10 @@ fractional scaling and multiple-output hosting remain future work.
 `knave-shell portal-picker` uses the existing retained UI toolkit and wgpu renderer
 for monitor previews, explicit consent, cancellation and Stop sharing. The backend
 launches it with the bounded version-1 JSON contract in `knave-portal-api`; it is
-not a user-facing general CLI. No source is selected initially. Active sharing
-uses an on-demand keyboard layer instead of grabbing application keyboard focus.
+not a user-facing general CLI. No source is selected initially. For a single-screen
+share, clicking a card labeled “Share this screen” selects and approves that screen
+in one action. Multi-screen sharing and screenshots retain selection plus confirmation.
+Active sharing uses a compact 350×36 control at the top-right edge of the bar,
+with an app label and one-click Stop sharing. It never requests keyboard focus
+and disappears when the portal session ends; it adds no watcher or timer.
 Deploy Shell and the portal backend together; see Knave ADR 0006.
