@@ -575,6 +575,10 @@ fn run_internal(
     let layer_shell = LayerShell::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::LayerShell(error.to_string()))?;
 
+    // Bind seats before configuring the layer: capabilities must be dispatched
+    // before configure can map the first buffer under an already-present pointer.
+    let seat_state = SeatState::new(&globals, &queue_handle);
+
     let surface = compositor.create_surface(&queue_handle);
     let layer = layer_shell.create_layer_surface(
         &queue_handle,
@@ -682,7 +686,7 @@ fn run_internal(
         loop_handle: event_loop.handle(),
         registry_state: RegistryState::new(&globals),
         output_state: OutputState::new(&globals, &queue_handle),
-        seat_state: SeatState::new(&globals, &queue_handle),
+        seat_state,
         active_seat: None,
         keyboard: None,
         pointer: None,
