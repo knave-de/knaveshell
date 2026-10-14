@@ -1,6 +1,8 @@
 //! Native portal selection and sharing controls on Knave's retained UI toolkit.
 use base64::{Engine, engine::general_purpose::STANDARD};
-use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, VERSION};
+#[cfg(test)]
+use knave_portal_api::VERSION;
+use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, SourceKind};
 use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, UiImage, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
 use std::{
@@ -10,7 +12,26 @@ use std::{
 const CANCEL: ElementId = ElementId(2);
 const CONFIRM: ElementId = ElementId(3);
 const SOURCE: u64 = 100;
+const TAB: u64 = 20;
+#[derive(Clone, Copy, PartialEq)]
+enum Mode {
+    Screen,
+    Window,
+    Workspaces,
+}
+impl Mode {
+    fn matches(self, kind: SourceKind) -> bool {
+        matches!(
+            (self, kind),
+            (Self::Screen, SourceKind::Monitor)
+                | (Self::Window, SourceKind::Window)
+                | (Self::Workspaces, SourceKind::Workspace { .. })
+        )
+    }
+}
 pub struct Picker {
+    workspace_frozen: bool,
+    mode: Mode,
     request: Request,
     selected: BTreeSet<u32>,
     images: Vec<Option<UiImage>>,
@@ -21,7 +42,9 @@ pub struct Picker {
 }
 impl Picker {
     fn direct_share(&self) -> bool {
-        self.request.operation == Operation::Share && !self.request.multiple
+        self.request.operation == Operation::Share
+            && !self.request.multiple
+            && self.mode != Mode::Workspaces
     }
 
     pub fn new(request: Request) -> Result<Self, String> {
@@ -49,6 +72,22 @@ impl Picker {
             })
             .collect();
         Ok(Self {
+            workspace_frozen: false,
+            mode: if request
+                .sources
+                .iter()
+                .any(|source| source.kind.is_monitor())
+            {
+                Mode::Screen
+            } else if request
+                .sources
+                .iter()
+                .any(|source| source.kind == SourceKind::Window)
+            {
+                Mode::Window
+            } else {
+                Mode::Workspaces
+            },
             request,
             images,
             selected: BTreeSet::new(),
@@ -63,7 +102,7 @@ impl Picker {
             return;
         }
         let reply = Reply {
-            version: VERSION,
+            version: self.request.version,
             request_id: self.request.request_id.clone(),
             selected,
         };
@@ -83,7 +122,7 @@ impl Picker {
         });
         root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
         let title = match self.request.operation {
-            Operation::Share => "Choose a screen to share",
+            Operation::Share => "Choose what to share",
             Operation::Screenshot => "Choose a screen to capture",
             Operation::Sharing => "Screen sharing is active",
         };
@@ -114,15 +153,71 @@ impl Picker {
                 ..Default::default()
             }),
         );
+        if self.request.operation == Operation::Share {
+            let mut tabs = Element::new(10, Widget::Panel).layout(Layout {
+                flow: Flow::Row,
+                height: Length::Px(38.0),
+                gap: 8.0,
+                ..Default::default()
+            });
+            for (index, (mode, label)) in [
+                (Mode::Screen, "Screen"),
+                (Mode::Window, "Window"),
+                (Mode::Workspaces, "Workspaces"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let mut button = Element::new(TAB + index as u64, Widget::Button(label.into()));
+                button.enabled = self
+                    .request
+                    .sources
+                    .iter()
+                    .any(|source| mode.matches(source.kind));
+                if self.mode == mode {
+                    button.style.background = Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                }
+                tabs.children.push(button);
+            }
+            root.children.push(tabs);
+            if self.mode == Mode::Workspaces {
+                root.children.push(Element::new(11, Widget::Text("Share selected workspaces. Switching elsewhere freezes the last shared frame.".into())).layout(Layout { height: Length::Px(44.0), ..Default::default() }));
+            }
+        }
         if self.request.operation != Operation::Sharing {
             let mut grid = Element::new(6, Widget::Panel).layout(Layout {
-                flow: Flow::Grid { columns: 2 },
+                flow: Flow::Grid {
+                    columns: if self.mode == Mode::Workspaces { 5 } else { 2 },
+                },
                 gap: 12.0,
                 height: Length::Auto,
                 ..Default::default()
             });
             for (index, source) in self.request.sources.iter().enumerate() {
+                if !self.mode.matches(source.kind) {
+                    continue;
+                }
                 let selected = self.selected.contains(&source.id);
+                if let SourceKind::Workspace { workspace } = source.kind {
+                    let mut checkbox = Element::new(
+                        SOURCE + index as u64,
+                        Widget::Button(format!(
+                            "{}Workspace {workspace}",
+                            if selected { "✓ " } else { "" }
+                        )),
+                    )
+                    .layout(Layout {
+                        height: Length::Px(72.0),
+                        padding: 8.0,
+                        ..Default::default()
+                    });
+                    if selected {
+                        checkbox.style.background =
+                            Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                    }
+                    grid.children.push(checkbox);
+                    continue;
+                }
                 let mut card = Element::new(SOURCE + index as u64, Widget::Button(String::new()))
                     .layout(Layout {
                         height: Length::Px(190.0),
@@ -167,7 +262,14 @@ impl Picker {
                     card.children.push(
                         Element::new(
                             3000 + index as u64,
-                            Widget::Text("Share this screen".into()),
+                            Widget::Text(
+                                if source.kind == SourceKind::Window {
+                                    "Share this window"
+                                } else {
+                                    "Share this screen"
+                                }
+                                .into(),
+                            ),
                         )
                         .layout(Layout {
                             height: Length::Px(24.0),
@@ -178,8 +280,14 @@ impl Picker {
                 }
                 grid.children.push(card);
             }
-            root.children
-                .push(Element::new(7, Widget::Scroll).children(vec![grid]));
+            root.children.push(
+                Element::new(7, Widget::Scroll)
+                    .layout(Layout {
+                        height: Length::Fill,
+                        ..Default::default()
+                    })
+                    .children(vec![grid]),
+            );
         }
         let mut buttons = Element::new(8, Widget::Panel).layout(Layout {
             flow: Flow::Row,
@@ -196,7 +304,13 @@ impl Picker {
             CONFIRM.0,
             Widget::Button(
                 match self.request.operation {
-                    Operation::Share => "Share",
+                    Operation::Share => {
+                        if self.mode == Mode::Workspaces {
+                            "Share selected workspaces"
+                        } else {
+                            "Share"
+                        }
+                    }
                     Operation::Screenshot => "Capture",
                     Operation::Sharing => "Stop sharing",
                 }
@@ -208,7 +322,14 @@ impl Picker {
             buttons.children[0].layout.width = Length::Px(120.0);
             buttons.children.push(Element::new(
                 9,
-                Widget::Text("Click a screen to start sharing".into()),
+                Widget::Text(
+                    if self.mode == Mode::Window {
+                        "Click a window to start sharing"
+                    } else {
+                        "Click the screen to start sharing"
+                    }
+                    .into(),
+                ),
             ));
         } else {
             buttons.children.push(confirm);
@@ -230,12 +351,47 @@ impl Picker {
         } else {
             &self.request.app_id
         };
-        let mut label = Element::new(4, Widget::Text(format!("Sharing · {app}"))).layout(Layout {
+        let workspace_numbers: Vec<_> = self
+            .request
+            .sources
+            .iter()
+            .filter_map(|source| {
+                if let SourceKind::Workspace { workspace } = source.kind {
+                    Some(workspace.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let text = if !workspace_numbers.is_empty() {
+            format!(
+                "{} · {}",
+                if self.workspace_frozen {
+                    "Frozen"
+                } else {
+                    "Sharing"
+                },
+                workspace_numbers.join(", ")
+            )
+        } else {
+            format!(
+                "Sharing · {}",
+                self.request
+                    .sources
+                    .first()
+                    .map_or(app, |source| source.name.as_str())
+            )
+        };
+        let mut label = Element::new(4, Widget::Text(text)).layout(Layout {
             height: Length::Fill,
             ..Default::default()
         });
         label.style.text.wrap = TextWrap::None;
-        label.style.text.color = Color::rgba(137, 207, 240, 255);
+        label.style.text.color = if self.workspace_frozen {
+            Color::rgba(240, 190, 100, 255)
+        } else {
+            Color::rgba(137, 207, 240, 255)
+        };
         root.children.push(label);
         root.children.push(
             Element::new(CONFIRM.0, Widget::Button("Stop sharing".into())).layout(Layout {
@@ -249,6 +405,29 @@ impl Picker {
     }
 }
 impl Application for Picker {
+    fn uses_desktop(&self) -> bool {
+        self.request.operation == Operation::Sharing
+            && self
+                .request
+                .sources
+                .iter()
+                .any(|source| matches!(source.kind, SourceKind::Workspace { .. }))
+    }
+    fn desktop_snapshot(&mut self, snapshot: &knave_desktop_api::DesktopSnapshot) {
+        if !self.uses_desktop() {
+            return;
+        }
+        let active = snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.active)
+            .map(|workspace| workspace.workspace.0);
+        let frozen = !self.request.sources.iter().any(|source| matches!(source.kind, SourceKind::Workspace { workspace } if Some(workspace) == active));
+        if frozen != self.workspace_frozen {
+            self.workspace_frozen = frozen;
+            self.dirty = true;
+        }
+    }
     fn cursor(&self) -> CursorShape {
         self.scene.cursor()
     }
@@ -268,7 +447,11 @@ impl Application for Picker {
         }
         let result = self.scene.event(event);
         if let Some(Action::Activated(id)) = result.action {
-            if id == CANCEL {
+            if let Some(index) = id.0.checked_sub(TAB).filter(|index| *index < 3) {
+                self.mode = [Mode::Screen, Mode::Window, Mode::Workspaces][index as usize];
+                self.selected.clear();
+                self.dirty = true;
+            } else if id == CANCEL {
                 self.respond(Vec::new());
             } else if id == CONFIRM {
                 if self.request.operation == Operation::Sharing || !self.selected.is_empty() {
@@ -284,7 +467,7 @@ impl Application for Picker {
                     return;
                 }
                 if !self.selected.remove(&source_id) {
-                    if !self.request.multiple {
+                    if !self.request.multiple && self.mode != Mode::Workspaces {
                         self.selected.clear();
                     }
                     self.selected.insert(source_id);
@@ -368,6 +551,7 @@ mod tests {
                 width: 1920,
                 height: 1080,
                 preview_png: None,
+                kind: SourceKind::Monitor,
             }],
         }
     }
@@ -461,6 +645,74 @@ mod tests {
         assert!(!picker.should_close());
         assert!(picker.scene.bounds(CONFIRM).is_none());
         click(&mut picker, ElementId(SOURCE));
+        assert!(picker.should_close());
+    }
+
+    #[test]
+    fn arbitrary_workspace_set_requires_confirmation_and_mode_switch_clears_it() {
+        let mut req = request();
+        for workspace in [1, 2, 3, 9] {
+            let mut source = req.sources[0].clone();
+            source.id = 100 + workspace;
+            source.kind = SourceKind::Workspace { workspace };
+            source.name = format!("Workspace {workspace}");
+            req.sources.push(source);
+        }
+        let mut picker = Picker::new(req).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, ElementId(TAB + 2));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        for index in 1..=4 {
+            click(&mut picker, ElementId(SOURCE + index));
+            picker.frame([820.0, 640.0], &mut Metrics);
+        }
+        assert_eq!(picker.selected, BTreeSet::from([101, 102, 103, 109]));
+        assert!(!picker.should_close());
+        click(&mut picker, ElementId(TAB));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        assert!(picker.selected.is_empty());
+        click(&mut picker, ElementId(TAB + 2));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, ElementId(SOURCE + 4));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, CONFIRM);
+        assert!(picker.should_close());
+    }
+
+    #[test]
+    fn window_card_is_one_explicit_activation_without_selecting_a_screen() {
+        let mut req = request();
+        let mut source = req.sources[0].clone();
+        source.id = 7;
+        source.kind = SourceKind::Window;
+        req.sources.push(source);
+        let mut picker = Picker::new(req).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+        click(&mut picker, ElementId(TAB + 1));
+        picker.frame([820.0, 640.0], &mut Metrics);
+        assert!(picker.scene.bounds(ElementId(SOURCE)).is_none());
+        click(&mut picker, ElementId(SOURCE + 1));
+        assert!(picker.should_close());
+    }
+
+    #[test]
+    fn many_windows_keep_cancel_visible_and_scroll_sources() {
+        let mut req = request();
+        req.sources = (1..=20)
+            .map(|id| {
+                let mut source = req.sources[0].clone();
+                source.id = id;
+                source.kind = SourceKind::Window;
+                source
+            })
+            .collect();
+        let mut picker = Picker::new(req).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+        let cancel = picker.scene.bounds(CANCEL).unwrap();
+        let scroll = picker.scene.bounds(ElementId(7)).unwrap();
+        assert!(cancel.y + cancel.height <= 640.0);
+        assert!(scroll.y + scroll.height <= cancel.y);
+        click(&mut picker, CANCEL);
         assert!(picker.should_close());
     }
 

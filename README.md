@@ -95,12 +95,14 @@ fractional scaling and multiple-output hosting remain future work.
 ### Native portal controls
 
 `knave-shell portal-picker` uses the existing retained UI toolkit and wgpu renderer
-for monitor previews, explicit consent, cancellation and Stop sharing. The backend
-launches it with the bounded version-1 JSON contract in `knave-portal-api`; it is
+for source previews, explicit consent, cancellation and Stop sharing. The backend
+launches it with the bounded version-2 JSON contract (monitor-only v1 remains accepted) in `knave-portal-api`; it is
 not a user-facing general CLI. No source is selected initially. For a single-screen
 share, clicking a card labeled “Share this screen” selects and approves that screen
-in one action. Multi-screen sharing and screenshots retain selection plus confirmation.
+in one action. Workspace sets and screenshots retain selection plus confirmation. Screen, Window
+and Workspaces tabs show choices permitted by the requesting application. Workspace
+sets can be noncontiguous; the compact control says Frozen on excluded workspaces.
 Active sharing uses a compact 350×36 control at the top-right edge of the bar,
 with an app label and one-click Stop sharing. It never requests keyboard focus
 and disappears when the portal session ends; it adds no watcher or timer.
-Deploy Shell and the portal backend together; see Knave ADR 0006.
+Deploy matching Villain, Shell and portal binaries; see Knave ADR 0007.
