@@ -2,3 +2,5 @@
 pub mod overview;
 
 pub mod portal;
+
+pub mod wallpaper;

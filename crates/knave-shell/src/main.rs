@@ -39,6 +39,15 @@ fn check(role: ShellRole) {
 }
 
 fn run() -> Result<(), String> {
+    if std::env::args().nth(1).as_deref() == Some("wallpaper") {
+        let args: Vec<_> = std::env::args().skip(2).collect();
+        if args.len() != 2 {
+            return Err(
+                "usage: knave-shell wallpaper ABSOLUTE_PNG_PATH cover|contain|stretch".into(),
+            );
+        }
+        return knave_shell::wallpaper::run(&args[0], &args[1]);
+    }
     if std::env::args().skip(1).eq(["portal-picker"]) {
         return knave_shell::portal::run();
     }

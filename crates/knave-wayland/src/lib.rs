@@ -1078,7 +1078,7 @@ impl Runtime {
     fn notify_harness_ready(&mut self) {
         if self.configured
             && self.painter.is_some()
-            && self.snapshot.is_some()
+            && (self.snapshot.is_some() || self.app.as_ref().is_some_and(|app| !app.uses_desktop()))
             && let Err(error) = self.harness_ready.notify()
         {
             self.harness_error = Some(error);

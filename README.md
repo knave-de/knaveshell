@@ -106,3 +106,8 @@ Active sharing uses a compact 350×36 control at the top-right edge of the bar,
 with an app label and one-click Stop sharing. It never requests keyboard focus
 and disappears when the portal session ends; it adds no watcher or timer.
 Deploy matching Villain, Shell and portal binaries; see Knave ADR 0007.
+
+Static wallpaper is configured through Knave's `[shell.wallpaper]` settings:
+`image` is an absolute PNG path and `fit` is `cover`, `contain`, or `stretch`.
+Knave Session starts the background role automatically; restart the session to
+apply changes. Remove `image` for the black compositor background.
