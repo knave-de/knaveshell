@@ -66,7 +66,7 @@ impl Overview {
             gap: 0.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 128)));
+        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         let pad = (width * 0.045).clamp(12.0, 64.0);
         let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
         let search_rect = Rect::new(
@@ -270,7 +270,7 @@ impl Overview {
         let id = 0x100_0000_0000 + u64::from(ws.0) * 32;
         let mut card = placed(Element::new(id, Widget::Button(String::new())), rect);
         card.style.background = Some(paint(
-            PANEL,
+            Color::rgba(0, 0, 0, 0),
             24.0,
             Some(if selected {
                 BLUE
@@ -278,8 +278,8 @@ impl Overview {
                 Color::rgba(77, 94, 115, 255)
             }),
         ));
-        card.style.hover = PANEL;
-        card.style.pressed = PANEL;
+        card.style.hover = Color::rgba(0, 0, 0, 0);
+        card.style.pressed = Color::rgba(0, 0, 0, 0);
         card.style.focus = BLUE;
         card.layout.clip = ClipMode::Bounds;
         self.targets.insert(
@@ -290,40 +290,21 @@ impl Overview {
                 Target::Workspace(ws)
             },
         );
-        let strip_h = 88.0f32.min(rect.height * 0.35);
-        let top = 20.0;
-        let bottom = if selected { strip_h + 20.0 } else { 20.0 };
-        let pane_height = (rect.height - top - bottom).max(0.0);
-        if pane_height >= 1.0
-            && rect.width > 40.0
+        // The compositor fills the card; shell borders and controls remain above it.
+        if rect.height > 4.0
+            && rect.width > 4.0
             && rect.x + rect.width > 0.0
             && rect.x < self.size[0]
         {
             self.panes.push(OverviewPane {
                 workspace: ws,
-                x: (rect.x + 20.0).round() as i32,
-                y: (rect.y + top).round() as i32,
-                width: (rect.width - 40.0).round() as u32,
-                height: pane_height.round() as u32,
+                x: (rect.x + 2.0).round() as i32,
+                y: (rect.y + 2.0).round() as i32,
+                width: (rect.width - 4.0).round() as u32,
+                height: (rect.height - 4.0).round() as u32,
             });
         }
-        if self.snapshot.as_ref().is_some_and(|snapshot| {
-            !snapshot
-                .windows
-                .iter()
-                .any(|window| window.workspace == ws && !window.minimized)
-        }) {
-            let mut label = text(
-                id + 2,
-                "No visible windows",
-                Rect::new(16.0, rect.height * 0.35, (rect.width - 32.0).max(0.0), 50.0),
-                18.0,
-                MUTED,
-            );
-            label.style.text.align = TextAlign::Center;
-            card.children.push(label);
-        }
-        if selected {
+        if selected && !self.minimized(ws).is_empty() {
             let min: Vec<_> = self.minimized(ws).into_iter().cloned().collect();
             let capacity = (((rect.width - 112.0) / 170.0).floor() as usize).clamp(1, PAGE_SIZE);
             self.page = self.page.min(min.len().saturating_sub(1) / capacity);

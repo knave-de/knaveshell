@@ -760,5 +760,19 @@ fn overview_backdrop_preserves_wallpaper_visibility() {
             _ => None,
         })
         .expect("full output backdrop");
-    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 128)));
+    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 0)));
+}
+
+#[test]
+fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    for pane in &app.panes {
+        let id = ElementId(0x100_0000_0000 + u64::from(pane.workspace.0) * 32);
+        let card = app.scene.bounds(id).unwrap();
+        assert_eq!(pane.width, (card.width - 4.0).round() as u32);
+        assert_eq!(pane.height, (card.height - 4.0).round() as u32);
+        assert_eq!(pane.x, (card.x + 2.0).round() as i32);
+        assert_eq!(pane.y, (card.y + 2.0).round() as i32);
+    }
 }

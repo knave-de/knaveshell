@@ -100,7 +100,9 @@ Decode errors are logged and fall back to black. There is no watcher or redraw
 timer. Configuration changes apply on session restart; the canonical settings
 and lifecycle decision are documented in Knave ADR 0008.
 
-Overview uses a transparent clear color and a 50% black backdrop over the
-wallpaper. The host selects premultiplied surface alpha when supported, matching
+Overview uses a transparent clear color; Villain places a 50% black dimmer behind
+the full-card previews and shell controls. The host selects premultiplied surface alpha when supported, matching
 its blended render output. Villain includes the existing wallpaper texture in
-workspace panes and suppresses full-size desktop windows behind Overview.
+workspace panes with centered cover scaling and rounded masks, and suppresses
+full-size desktop windows and the bar behind Overview. Empty workspaces omit the
+minimized shelf; when needed, its controls render above the wallpaper.
