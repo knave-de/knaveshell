@@ -30,8 +30,8 @@ it after the desktop service acknowledges success. Each reopening starts with an
 empty search on the active workspace; the service keeps its app catalog and icon
 cache. The overview displays
 compositor-rendered workspace surfaces inside the cards;
-the surfaces are visual only and card controls retain input. Both roles consume Knave's versioned desktop
-contract and keep desktop IPC off the Wayland frame thread.
+the surfaces are visual only and card controls retain input. Both roles consume
+Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
 
@@ -48,7 +48,7 @@ knave-desktop-api:
     $XDG_RUNTIME_DIR/knave/desktop-$WAYLAND_DISPLAY.sock
 
 KNAVE_SOCKET overrides the derived path for isolated tests. The client uses one
-dedicated API 1.3 subscription worker and a one-entry snapshot mailbox. Villain
+dedicated subscription worker and a one-entry snapshot mailbox. Villain
 pushes changed state; a healthy idle connection makes no periodic requests.
 Only failed connections use reconnect backoff, capped at five seconds. It never
 blocks the Wayland frame callback on desktop IPC. The Wayland loop blocks when
@@ -96,7 +96,7 @@ fractional scaling and multiple-output hosting remain future work.
 
 `knave-shell portal-picker` uses the existing retained UI toolkit and wgpu renderer
 for source previews, explicit consent, cancellation and Stop sharing. The backend
-launches it with the bounded version-2 JSON contract (monitor-only v1 remains accepted) in `knave-portal-api`; it is
+launches it with the bounded JSON contract in `knave-portal-api`; it is
 not a user-facing general CLI. No source is selected initially. For a single-screen
 share, clicking a card labeled “Share this screen” selects and approves that screen
 in one action. Workspace sets and screenshots retain selection plus confirmation. Screen, Window

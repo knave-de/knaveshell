@@ -1,7 +1,5 @@
 //! Native portal selection and sharing controls on Knave's retained UI toolkit.
 use base64::{Engine, engine::general_purpose::STANDARD};
-#[cfg(test)]
-use knave_portal_api::VERSION;
 use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, SourceKind};
 use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, UiImage, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
@@ -76,7 +74,7 @@ impl Picker {
             mode: if request
                 .sources
                 .iter()
-                .any(|source| source.kind.is_monitor())
+                .any(|source| source.kind == SourceKind::Monitor)
             {
                 Mode::Screen
             } else if request
@@ -102,7 +100,6 @@ impl Picker {
             return;
         }
         let reply = Reply {
-            version: self.request.version,
             request_id: self.request.request_id.clone(),
             selected,
         };
@@ -539,7 +536,6 @@ mod tests {
     use super::*;
     fn request() -> Request {
         Request {
-            version: VERSION,
             request_id: "test".into(),
             app_id: "app".into(),
             operation: Operation::Share,

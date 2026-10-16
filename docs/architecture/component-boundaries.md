@@ -6,13 +6,13 @@ Wayland, and the shell binary.
 
 The shell:
 
-- consumes typed settings projections and versioned desktop contracts from
+- consumes typed settings projections and desktop contracts from
   Knave;
-- uses an explicit Wayland client and the versioned Knave desktop API;
+- uses an explicit Wayland client and the Knave desktop API;
 - owns presentation and interaction state; and
 - reports lifecycle failures to the session owner.
 
 It does not own compositor layout, focus, window-management, or input policy.
 It does not write the canonical user configuration or reach through a public
-contract into Villain internals. A shell change that alters a protocol or
-lifecycle assumption must update both sides and document compatibility.
+contract into Villain internals. A shared contract change updates both sides in
+the same coordinated package change.

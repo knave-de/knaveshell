@@ -35,9 +35,9 @@ action queue. The compositor renders window textures in those rectangles during
 its ordinary output frame and paces inactive pane window frame callbacks at the
 output refresh interval. Search and minimized controls remain in the shell.
 
-The old PNG preview query and the non-application overview host remain for
-compatibility, but the retained overview no longer stores or decodes preview
-bitmaps. The renderer still bounds text, display-list, and other image
+The non-application overview host still uses the PNG preview query. The retained
+overview no longer stores or decodes preview bitmaps. The renderer still bounds
+text, display-list, and other image
 resources. This change has not been measured in a live session: CPU, resident
 memory, threads, file descriptors, wakeups, output latency, and GPU time are
 unknown. The previous PNG path took roughly 35 ms at 1080p, 80 ms at 1440p,
