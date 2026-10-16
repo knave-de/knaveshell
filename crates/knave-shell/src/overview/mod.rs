@@ -45,6 +45,7 @@ pub struct Overview {
     panes: Vec<OverviewPane>,
     workspace: Option<WorkspaceId>,
     scene: Scene,
+    display: DisplayList,
     targets: HashMap<ElementId, Target>,
     window_ids: HashMap<WindowId, ElementId>,
     next_id: u64,
@@ -79,6 +80,7 @@ impl Default for Overview {
 impl Overview {
     pub fn new() -> Self {
         Self {
+            display: DisplayList::default(),
             snapshot: None,
             panes: Vec::new(),
             workspace: None,
@@ -582,7 +584,9 @@ impl Application for Overview {
         if self.dirty {
             self.rebuild(text);
         }
-        self.scene.display_list(size, text)
+        self.display = self.scene.display_list(size, text).clone();
+        self.display.clear_color = knave_ui::Color::rgba(0, 0, 0, 0);
+        &self.display
     }
 }
 

@@ -99,3 +99,8 @@ and no keyboard interactivity, loads one bounded PNG and keeps black behind it.
 Decode errors are logged and fall back to black. There is no watcher or redraw
 timer. Configuration changes apply on session restart; the canonical settings
 and lifecycle decision are documented in Knave ADR 0008.
+
+Overview uses a transparent clear color and a 50% black backdrop over the
+wallpaper. The host selects premultiplied surface alpha when supported, matching
+its blended render output. Villain includes the existing wallpaper texture in
+workspace panes and suppresses full-size desktop windows behind Overview.

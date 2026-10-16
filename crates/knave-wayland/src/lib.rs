@@ -820,6 +820,14 @@ impl Runtime {
             return None;
         };
         config.format = format;
+        if self
+            .surface
+            .get_capabilities(&self.adapter)
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
+            config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+        }
         Some(config)
     }
 

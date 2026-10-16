@@ -66,7 +66,7 @@ impl Overview {
             gap: 0.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(INK));
+        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 128)));
         let pad = (width * 0.045).clamp(12.0, 64.0);
         let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
         let search_rect = Rect::new(

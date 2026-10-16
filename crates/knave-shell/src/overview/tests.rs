@@ -742,3 +742,23 @@ fn live_snapshots_preserve_the_query_until_the_view_is_hidden() {
     app.frame([1200.0, 800.0], &mut Metrics);
     assert!(app.query.text().is_empty());
 }
+
+#[test]
+fn overview_backdrop_preserves_wallpaper_visibility() {
+    let mut app = app();
+    let list = app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(list.clear_color, knave_ui::Color::rgba(0, 0, 0, 0));
+    let backdrop = list
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                if bounds.width == 1200.0 && bounds.height == 800.0 =>
+            {
+                Some(paint)
+            }
+            _ => None,
+        })
+        .expect("full output backdrop");
+    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 128)));
+}
