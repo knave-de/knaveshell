@@ -2,11 +2,11 @@
 
 This repository documents the shell-side consequences of the Knave desktop
 architecture. Knave remains the authoritative owner of cross-repository
-configuration, versioning, build, and compatibility policy.
+configuration, package revisions, build, and change-impact policy.
 
 - [Component boundaries](component-boundaries.md)
 - [Configuration](configuration.md)
-- [Versioning and compatibility](versioning.md)
+- [Package versions](versioning.md)
 - [Build and packaging](build-and-packaging.md)
 - [Performance and resource usage](performance.md)
 - [Change impact](change-impact.md)

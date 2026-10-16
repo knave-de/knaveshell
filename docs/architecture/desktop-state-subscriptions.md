@@ -1,6 +1,6 @@
 # Desktop state subscriptions
 
-The desktop host consumes Knave API 1.2 via one dedicated `DesktopSubscription`.
+The desktop host consumes snapshots via one dedicated `DesktopSubscription`.
 The first frame initializes state; every later frame replaces it. There is no
 healthy-connection timer or query loop. The existing one-entry UI mailbox and
 Wayland wake channel coalesce updates. Commands and preview requests use their
@@ -13,11 +13,11 @@ invalidates previews, including when the new compositor reuses generation IDs.
 A connection in its initial handshake can take up to the existing two-second
 transport timeout to cancel. The old 500 ms polling fallback is removed.
 
-This requires Villain with desktop API 1.2. Older servers report an error, not
-fabricated empty state or a silent polling fallback. Roll out Knave API, Villain,
-then shell; roll back shell first. Existing Application callbacks and user
-configuration are unchanged. The API pin also includes the upstream API 1.1
-maximized summary field. No frame pacing or pixel-damage streaming is added.
+Knave, Villain, and Shell must use the same desktop request and snapshot shapes.
+Update the three packages together. Disconnections report an explicit error,
+not fabricated empty state or a polling fallback. Existing Application callbacks
+and user configuration are unchanged. No frame pacing or pixel-damage streaming
+is added.
 
 ## Measurement
 

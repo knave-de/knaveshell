@@ -40,8 +40,9 @@ Treat these as contracts:
 - workspace/window model fields;
 - configuration and runtime environment variables.
 
-Changing any of them requires consumer search, version/migration analysis,
-tests, and documentation updates where user behavior changes.
+Changing any of them requires consumer search, package-set analysis, tests, and
+documentation updates where user behavior changes. The shared desktop contract
+has no separate API version; update its consumers together.
 
 ## Build policy
 
