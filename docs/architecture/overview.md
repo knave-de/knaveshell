@@ -19,10 +19,8 @@ protocol or configuration change and no added background activity.
 
 The shell computes one selected card and up to two neighboring cards from the
 current logical output size. It sends their interior rectangles and workspace
-IDs using `set_overview_panes`. The selected pane leaves room
-for the minimized shelf, which remains shell-drawn. Pane
-contents preserve the output aspect ratio and are clipped to the supplied
-rectangle. Browsing and resizing replace the entire set; search clears it.
+IDs using `set_overview_panes`. Pane contents cover the full rounded card;
+minimized controls, when present, render above them. Browsing and resizing replace the entire set; search clears it.
 Villain also clears it when the overview layer surface unmaps or is destroyed.
 Search lists installed applications, not windows. `knave-apps` reads XDG
 `.desktop` entries; entries with `NoDisplay`, `Hidden`, `Terminal=true`, or unmet
@@ -47,7 +45,7 @@ worker. The queue closes and the worker is detached when the session ends. Enter
 pressed before the catalog arrives launches the top result when it does.
 Icons rasterize at 64px (SVG through resvg without text or system fonts, PNG
 downscaled if oversized).
-Only window textures are composed: there is no screenshot readback, PNG
+Window and wallpaper textures are composed: there is no screenshot readback, PNG
 transport, decoded image cache, or window input remapping in this path.
 
 One bounded pane worker keeps IPC off the Wayland frame callback. It has a
@@ -69,3 +67,11 @@ before launching the service. On desktop disconnection,
 Overview unmaps locally and keeps its process for reconnection. Pending
 activation completions do not queue a hide for an already-hidden surface,
 and the host processes requests while hidden.
+
+The pane worker acknowledges the staged layout before the host submits its
+matching UI buffer. Villain activates the layout on that surface commit, and
+backdrop visibility follows mapping. Layout can be registered before the first
+buffer; normal opening no longer triggers the unavailable-response backoff.
+The one-slot request and acknowledgement channels coalesce work and wake the host;
+no polling or additional thread is introduced. Matching Shell and Villain builds
+are required; the request payload is unchanged. Rollback restores both binaries.
