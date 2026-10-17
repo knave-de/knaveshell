@@ -21,6 +21,7 @@ impl ReadySignal {
     fn new(directory: Option<PathBuf>, namespace: &str) -> Self {
         let role = match namespace {
             "knave-shell-bar" => "bar",
+            "knave-shell-wallpaper" => "wallpaper",
             "knave-shell-overview" => "overview",
             _ => return Self::default(),
         };

@@ -742,3 +742,37 @@ fn live_snapshots_preserve_the_query_until_the_view_is_hidden() {
     app.frame([1200.0, 800.0], &mut Metrics);
     assert!(app.query.text().is_empty());
 }
+
+#[test]
+fn overview_backdrop_preserves_wallpaper_visibility() {
+    let mut app = app();
+    let list = app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(list.clear_color, knave_ui::Color::rgba(0, 0, 0, 0));
+    let backdrop = list
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                if bounds.width == 1200.0 && bounds.height == 800.0 =>
+            {
+                Some(paint)
+            }
+            _ => None,
+        })
+        .expect("full output backdrop");
+    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 0)));
+}
+
+#[test]
+fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    for pane in &app.panes {
+        let id = ElementId(0x100_0000_0000 + u64::from(pane.workspace.0) * 32);
+        let card = app.scene.bounds(id).unwrap();
+        assert_eq!(pane.width, (card.width - 4.0).round() as u32);
+        assert_eq!(pane.height, (card.height - 4.0).round() as u32);
+        assert_eq!(pane.x, (card.x + 2.0).round() as i32);
+        assert_eq!(pane.y, (card.y + 2.0).round() as i32);
+    }
+}

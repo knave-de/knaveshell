@@ -90,3 +90,19 @@ Hyprland trace confirmed pointer entry followed by native arrow/hand requests.
 The cursor-image fallback and scaled-output appearance have not been live
 verified. The brief run settled at three threads and 67 FDs, matching the prior
 host baseline; this does not establish long-run resource behavior.
+
+## Static wallpaper consumer
+
+`knave-shell wallpaper ABSOLUTE_PNG_PATH cover|contain|stretch` is supervised by
+Knave Session when `[shell.wallpaper].image` is set. It uses the background layer
+and no keyboard interactivity, loads one bounded PNG and keeps black behind it.
+Decode errors are logged and fall back to black. There is no watcher or redraw
+timer. Configuration changes apply on session restart; the canonical settings
+and lifecycle decision are documented in Knave ADR 0008.
+
+Overview uses a transparent clear color; Villain places a 50% black dimmer behind
+the full-card previews and shell controls. The host selects premultiplied surface alpha when supported, matching
+its blended render output. Villain includes the existing wallpaper texture in
+workspace panes with centered cover scaling and rounded masks, and suppresses
+full-size desktop windows and the bar behind Overview. Empty workspaces omit the
+minimized shelf; when needed, its controls render above the wallpaper.

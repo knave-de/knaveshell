@@ -382,12 +382,14 @@ fn decode_preview(preview: WorkspacePreview, size: [u32; 2]) -> Option<Workspace
 struct PaneWorker {
     commands: Option<SyncSender<Vec<OverviewPane>>>,
     errors: Receiver<String>,
+    acknowledgements: Receiver<Vec<OverviewPane>>,
     thread: Option<JoinHandle<()>>,
 }
 impl PaneWorker {
     fn start(wake: WakeSender) -> Self {
         let (commands, receiver) = mpsc::sync_channel::<Vec<OverviewPane>>(1);
         let (errors_tx, errors) = mpsc::sync_channel(1);
+        let (ack_tx, acknowledgements) = mpsc::sync_channel(1);
         let thread = thread::spawn(move || {
             const INITIAL_BACKOFF: Duration = Duration::from_millis(250);
             const MAX_BACKOFF: Duration = Duration::from_secs(5);
@@ -411,7 +413,10 @@ impl PaneWorker {
                         )
                     })();
                     let retry = match result {
-                        Ok(DesktopResponse::Ok) => false,
+                        Ok(DesktopResponse::Ok) => {
+                            let _ = ack_tx.try_send(panes.clone());
+                            false
+                        }
                         Ok(_) => {
                             let _ =
                                 errors_tx.try_send("Unexpected overview pane response".to_owned());
@@ -449,6 +454,7 @@ impl PaneWorker {
         Self {
             commands: Some(commands),
             errors,
+            acknowledgements,
             thread: Some(thread),
         }
     }
@@ -456,6 +462,9 @@ impl PaneWorker {
         self.commands
             .as_ref()
             .is_some_and(|sender| sender.try_send(panes).is_ok())
+    }
+    fn latest_ack(&self) -> Option<Vec<OverviewPane>> {
+        self.acknowledgements.try_iter().last()
     }
     fn latest_error(&self) -> Option<String> {
         self.errors.try_iter().last()
@@ -712,6 +721,7 @@ fn run_internal(
         pane_worker: (desktop_role && application_overview)
             .then(|| PaneWorker::start(wake_sender.clone())),
         pane_requested: Vec::new(),
+        pane_acknowledged: None,
         snapshot: None,
         previews: Vec::new(),
         preview_generation: 0,
@@ -781,6 +791,7 @@ struct Runtime {
     preview_worker: Option<PreviewWorker>,
     pane_worker: Option<PaneWorker>,
     pane_requested: Vec<OverviewPane>,
+    pane_acknowledged: Option<Vec<OverviewPane>>,
     snapshot: Option<DesktopSnapshot>,
     previews: Vec<WorkspacePreviewImage>,
     preview_generation: u64,
@@ -820,6 +831,14 @@ impl Runtime {
             return None;
         };
         config.format = format;
+        if self
+            .surface
+            .get_capabilities(&self.adapter)
+            .alpha_modes
+            .contains(&wgpu::CompositeAlphaMode::PreMultiplied)
+        {
+            config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+        }
         Some(config)
     }
 
@@ -840,6 +859,11 @@ impl Runtime {
             && let Some(app) = &mut self.app
         {
             app.host_error(&format!("Live workspace preview unavailable: {error}"));
+            self.pane_acknowledged = Some(self.pane_requested.clone());
+            self.scene_dirty = true;
+        }
+        if let Some(ack) = self.pane_worker.as_ref().and_then(PaneWorker::latest_ack) {
+            self.pane_acknowledged = Some(ack);
             self.scene_dirty = true;
         }
         let mut should_render =
@@ -858,12 +882,14 @@ impl Runtime {
                     // compositor may reuse identical metadata with different pixels.
                     self.preview_refresh = true;
                     self.pane_requested.clear();
+                    self.pane_acknowledged = None;
                     self.snapshot = Some(snapshot);
                 }
                 Err(_) => {
                     self.snapshot = None;
                     self.preview_refresh = true;
                     self.pane_requested.clear();
+                    self.pane_acknowledged = None;
                     if let Some(app) = &mut self.app {
                         app.desktop_unavailable();
                     }
@@ -977,11 +1003,17 @@ impl Runtime {
             self.scene_dirty = false;
         }
         if let Some(panes) = self.app.as_ref().and_then(|app| app.overview_panes())
-            && panes != self.pane_requested
             && let Some(worker) = &self.pane_worker
-            && worker.update(panes.clone())
         {
-            self.pane_requested = panes;
+            if (panes != self.pane_requested || self.pane_acknowledged.as_ref() != Some(&panes))
+                && worker.update(panes.clone())
+            {
+                self.pane_requested = panes.clone();
+            }
+            // The compositor stages geometry; publish its matching shell frame only after acknowledgement.
+            if self.pane_acknowledged.as_ref() != Some(&panes) {
+                return;
+            }
         }
         self.sync_ime();
         self.sync_cursor();
@@ -1078,7 +1110,7 @@ impl Runtime {
     fn notify_harness_ready(&mut self) {
         if self.configured
             && self.painter.is_some()
-            && self.snapshot.is_some()
+            && (self.snapshot.is_some() || self.app.as_ref().is_some_and(|app| !app.uses_desktop()))
             && let Err(error) = self.harness_ready.notify()
         {
             self.harness_error = Some(error);
