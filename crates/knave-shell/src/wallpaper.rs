@@ -1,20 +1,13 @@
-//! Static wallpaper surface. Decodes once, with no watcher or redraw timer.
+//! Static wallpaper surface. Decodes once at startup and swaps images only
+//! on desktop reload events, with no watcher or redraw timer.
+use crate::wallpaper_reload::{AppliedWallpaper, ReloadUpdate, ReloadWorker};
 use knave_ui::toolkit::{Input, TextMeasurer};
 use knave_ui::{Color, DisplayList, DisplayListBuilder, ImageFit, ImageStyle, Rect, UiImage};
-use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions};
-use std::{
-    fs::File,
-    io::{Cursor, Read},
-    path::Path,
-};
+use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker};
+use std::{fs::File, io::Cursor, io::Read as _, path::Path};
 
 pub fn run(path: &str, fit: &str) -> Result<(), String> {
-    let fit = match fit {
-        "cover" => ImageFit::Cover,
-        "contain" => ImageFit::Contain,
-        "stretch" => ImageFit::Stretch,
-        _ => return Err("wallpaper fit must be cover, contain, or stretch".into()),
-    };
+    let fit = image_fit(fit)?;
     let image = match load(Path::new(path)) {
         Ok(image) => Some(image),
         Err(error) => {
@@ -30,14 +23,24 @@ pub fn run(path: &str, fit: &str) -> Result<(), String> {
             ..Default::default()
         },
         Wallpaper {
+            path: Some(path.to_owned()),
             image,
             fit,
             list: DisplayList::new(0, Color::rgba(0, 0, 0, 255)),
+            worker: None,
         },
     )
     .map_err(|e| e.to_string())
 }
-fn load(path: &Path) -> Result<UiImage, String> {
+fn image_fit(fit: &str) -> Result<ImageFit, String> {
+    match fit {
+        "cover" => Ok(ImageFit::Cover),
+        "contain" => Ok(ImageFit::Contain),
+        "stretch" => Ok(ImageFit::Stretch),
+        _ => Err("wallpaper fit must be cover, contain, or stretch".into()),
+    }
+}
+pub(crate) fn load(path: &Path) -> Result<UiImage, String> {
     const MAX_BYTES: u64 = 64 * 1024 * 1024;
     if !path.is_absolute() || !path.is_file() {
         return Err("expected an absolute path to a regular PNG file".into());
@@ -85,16 +88,37 @@ fn load(path: &Path) -> Result<UiImage, String> {
     UiImage::from_rgba(w, h, pixels).ok_or_else(|| "invalid decoded image".into())
 }
 struct Wallpaper {
+    path: Option<String>,
     image: Option<UiImage>,
     fit: ImageFit,
     list: DisplayList,
+    worker: Option<ReloadWorker>,
 }
 impl Application for Wallpaper {
+    fn set_waker(&mut self, waker: Waker) {
+        // The reload thread's lifetime matches this application's.
+        self.worker = Some(ReloadWorker::start(
+            waker,
+            AppliedWallpaper {
+                path: self.path.clone(),
+                fit: self.fit,
+            },
+            load,
+        ));
+    }
     fn input(&mut self, _: Input) {}
     fn needs_frame(&self) -> bool {
-        false
+        self.worker.as_ref().is_some_and(ReloadWorker::pending)
     }
     fn frame(&mut self, size: [f32; 2], _: &mut dyn TextMeasurer) -> &DisplayList {
+        match self.worker.as_ref().and_then(ReloadWorker::take_update) {
+            Some(ReloadUpdate::Image { fit, image }) => {
+                self.fit = fit;
+                self.image = image;
+            }
+            Some(ReloadUpdate::FitChange { fit }) => self.fit = fit,
+            None => {}
+        }
         let mut builder = DisplayListBuilder::new(
             self.list.revision.wrapping_add(1),
             Color::rgba(0, 0, 0, 255),

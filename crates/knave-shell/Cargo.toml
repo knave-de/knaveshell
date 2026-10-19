@@ -21,6 +21,8 @@ knave-renderer.workspace = true
 knave-wayland.workspace = true
 knave-ui.workspace = true
 knave-desktop-api.workspace = true
+knave-config.workspace = true
 
 [dev-dependencies]
 png.workspace = true
+tempfile = "3"
