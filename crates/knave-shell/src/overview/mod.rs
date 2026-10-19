@@ -13,6 +13,10 @@ use loader::{Done, Job, Loader};
 use std::collections::HashMap;
 
 const SEARCH: ElementId = ElementId(2);
+/// The desktop bar surface is not visible behind the overview, which fills the
+/// output. The overview therefore projects the same bar component itself; this
+/// is the bar's layer-exclusive-zone height (ShellRole::Bar).
+const STATUS_BAR_HEIGHT: f32 = 36.0;
 const MAX_WINDOWS: usize = 1024;
 const MAX_WORKSPACES: usize = 128;
 const PAGE_SIZE: usize = 5;
@@ -22,6 +26,10 @@ const MAX_RESULTS: usize = 64;
 enum Target {
     Workspace(WorkspaceId),
     EnterWorkspace(WorkspaceId),
+    /// Bar-chip semantics carried over from the desktop bar: switch to the
+    /// workspace immediately. Kept separate from EnterWorkspace so the
+    /// keyboard fallback keeps resolving to the browsed workspace card.
+    FocusWorkspace(WorkspaceId),
     Window(WindowId),
     App(usize),
     Page(bool),
@@ -200,6 +208,9 @@ impl Overview {
             Some(Target::EnterWorkspace(ws)) => {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
+            Some(Target::FocusWorkspace(ws)) => {
+                self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
+            }
             Some(Target::Window(id)) => {
                 if let Some(window) = self.window(id) {
                     self.dispatch(if window.minimized {
@@ -259,6 +270,7 @@ impl Overview {
     }
     fn search_page_size(&self) -> usize {
         (((self.size[1]
+            - STATUS_BAR_HEIGHT
             - 28.0f32.min(self.size[1] * 0.04)
             - 54.0f32.min(self.size[1] * 0.15)
             - 80.0)

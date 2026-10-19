@@ -1,6 +1,6 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
-use knave_ui::{TextSpan, TextStyle};
+use knave_ui::{Color, Rect, TextSpan, TextStyle, UiNode, UiScene};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
@@ -775,4 +775,126 @@ fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
         assert_eq!(pane.x, (card.x + 2.0).round() as i32);
         assert_eq!(pane.y, (card.y + 2.0).round() as i32);
     }
+}
+
+/// Projected bar nodes live under one reserved element-id base; workspace
+/// chips reuse the bar component's node-id scheme, which starts at 10.
+fn bar_element(node_id: u64) -> ElementId {
+    ElementId(0x800_0000_0000 + node_id)
+}
+fn status_title(app: &Overview) -> Option<String> {
+    match app.scene.widget(bar_element(2)) {
+        Some(Widget::Text(title)) => Some(title.clone()),
+        _ => None,
+    }
+}
+
+#[test]
+fn the_overview_projects_the_desktop_status_bar_component() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    // The bar component renders the active workspace, exactly as outside overview.
+    assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
+    for (index, bounds) in [
+        Rect::new(150.0, 5.0, 32.0, 26.0),
+        Rect::new(188.0, 5.0, 32.0, 26.0),
+        Rect::new(226.0, 5.0, 32.0, 26.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            app.scene.bounds(bar_element(10 + index as u64)),
+            Some(bounds)
+        );
+    }
+    // A chip click switches that workspace directly, like the desktop bar.
+    click(&mut app, bar_element(12));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
+            workspace: WorkspaceId(3)
+        }))
+    ));
+    app.desktop_action_finished(Ok(()));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+}
+
+#[test]
+fn the_projected_bar_title_ignores_overview_browsing() {
+    let mut app = app();
+    app.browse(WorkspaceId(3));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
+    // The bar, including its chips, stays visible while searching.
+    type_query(&mut app, "edit");
+    assert!(app.scene.bounds(bar_element(12)).is_some());
+    let search = app.scene.bounds(SEARCH).unwrap();
+    assert!(search.y >= 36.0, "search overlaps the status bar");
+}
+
+#[test]
+fn projected_bar_text_matches_the_desktop_bar_display_list() {
+    let mut app = app();
+    let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+    let bar = UiScene::bar_with_snapshot(0, 1200.0, 36.0, Some(app.snapshot().unwrap()));
+    for node in bar.nodes().iter() {
+        let (bounds, color, text) = match node {
+            UiNode::Label {
+                bounds,
+                color,
+                text,
+                ..
+            } => (*bounds, *color, text.clone()),
+            _ => continue,
+        };
+        let projected = list.commands.iter().find_map(|command| match command {
+            knave_ui::DisplayCommand::Text {
+                bounds,
+                text: candidate,
+                style,
+                ..
+            } if candidate == &text => Some((*bounds, style.color)),
+            _ => None,
+        });
+        assert_eq!(projected, Some((bounds, color)), "label {text:?}");
+    }
+}
+
+#[test]
+fn the_projected_bar_strip_paints_only_the_bar_component_shapes() {
+    let mut app = app();
+    let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+    // Within the strip the only shapes are the transparent grouping container
+    // and the bar component's panel; Button chrome would appear here too.
+    let strip: Vec<_> = list
+        .commands
+        .iter()
+        .filter_map(|command| match command {
+            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                if bounds.y == 0.0 && bounds.height <= 36.0 && bounds.width >= 1100.0 =>
+            {
+                Some(paint.fill)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        strip,
+        vec![Some(Color::rgba(0, 0, 0, 0)), Some(Color::BACKGROUND)],
+        "strip shapes"
+    );
+}
+
+#[test]
+fn without_a_snapshot_the_projected_bar_shows_the_session_title() {
+    let mut app = Overview::new();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert_eq!(status_title(&app).as_deref(), Some("Knave"));
+    assert!(app.scene.bounds(bar_element(10)).is_none());
 }
