@@ -10,7 +10,7 @@ name = "knave-shell"
 path = "src/main.rs"
 
 [dependencies]
-knave-portal-api = { git = "https://github.com/knave-de/knave.git", rev = "73f6548b026d2ecfffdc0bc9234ae0ab30d8bacc" }
+knave-portal-api = { git = "https://github.com/knave-de/knave.git", rev = "a382584758b6d03bc00fbd46b7748ad21bdb398c" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"
@@ -21,6 +21,8 @@ knave-renderer.workspace = true
 knave-wayland.workspace = true
 knave-ui.workspace = true
 knave-desktop-api.workspace = true
+knave-config.workspace = true
 
 [dev-dependencies]
 png.workspace = true
+tempfile = "3"
