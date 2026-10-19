@@ -1,7 +1,7 @@
 use super::*;
 use knave_ui::{
     Border, Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap,
-    UiImage,
+    UiImage, UiNode, UiScene,
 };
 
 const INK: Color = Color::rgba(17, 23, 33, 255);
@@ -55,6 +55,38 @@ fn short(value: &str, limit: usize) -> String {
     }
     s
 }
+
+/// One reserved element-id base keeps projected bar nodes apart from the
+/// overview's own elements regardless of what the bar component produces.
+const BAR_ELEMENT_ID_BASE: u64 = 0x800_0000_0000;
+/// Workspace chips start at this node id inside the bar component and index
+/// the snapshot's workspace list in order.
+const BAR_CHIP_NODE_ID_BASE: u64 = 10;
+
+/// Renders a bar node with renderer-default text style; identity with the
+/// desktop bar depends on not restyling the projected component.
+fn bar_label(id: u64, value: impl Into<String>, r: Rect, color: Color) -> Element {
+    let mut e = placed(Element::new(id, Widget::Text(value.into())), r);
+    e.style.text.color = color;
+    e
+}
+
+/// Same projection for a workspace chip, wrapped so the label is activatable;
+/// all interaction colors stay transparent to leave the projected pixels untouched.
+fn bar_chip(id: u64, value: impl Into<String>, r: Rect, color: Color) -> Element {
+    let mut e = placed(Element::new(id, Widget::Button(value.into())), r);
+    // Buttons that leave their background unset get an implicit control fill;
+    // a transparent fill keeps the projected chip pixels background-less like
+    // the plain label nodes of the bar component.
+    e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+    e.layout.padding_edges = Some(Insets::symmetric(0.0, 0.0));
+    e.style.hover = Color::rgba(0, 0, 0, 0);
+    e.style.pressed = Color::rgba(0, 0, 0, 0);
+    e.style.selected = Color::rgba(0, 0, 0, 0);
+    e.style.focus = Color::rgba(0, 0, 0, 0);
+    e.style.text.color = color;
+    e
+}
 impl Overview {
     pub(super) fn compose(&mut self) -> Element {
         self.targets.clear();
@@ -71,7 +103,7 @@ impl Overview {
         let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
         let search_rect = Rect::new(
             (width - search_width) / 2.0,
-            28.0f32.min(height * 0.04),
+            STATUS_BAR_HEIGHT + 28.0f32.min(height * 0.04),
             search_width,
             54.0f32.min(height * 0.15),
         );
@@ -264,7 +296,73 @@ impl Overview {
             status.style.text.align = TextAlign::Center;
             root.children.push(status);
         }
+        // Drawn last so the status bar strip stays on top of overview content.
+        root.children.push(self.status_bar(width));
         root
+    }
+    /// The status bar of the regular desktop, reused instead of a parallel
+    /// composition: `UiScene::bar_with_snapshot` is the scene the bar role
+    /// renders outside the overview, and its nodes are projected verbatim into
+    /// this toolkit scene with renderer-default styles. Chips keep the
+    /// component's hit semantics (switch workspace) via their node ids.
+    fn status_bar(&mut self, width: f32) -> Element {
+        let bar_scene =
+            UiScene::bar_with_snapshot(0, width, STATUS_BAR_HEIGHT, self.snapshot.as_ref());
+        let mut bar = Element::new(BAR_ELEMENT_ID_BASE, Widget::Panel).layout(Layout {
+            width: Length::Px(width.max(0.0)),
+            height: Length::Px(STATUS_BAR_HEIGHT),
+            flow: Flow::Overlay,
+            ..Default::default()
+        });
+        // The component's own panel node paints the strip; the container only groups.
+        bar.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        for node in bar_scene.nodes() {
+            match node {
+                UiNode::Panel { id, bounds, color } => {
+                    let mut e = placed(
+                        Element::new(BAR_ELEMENT_ID_BASE + id.0, Widget::Panel),
+                        *bounds,
+                    );
+                    e.style.background = Some(ShapePaint::fill(*color));
+                    bar.children.push(e);
+                }
+                UiNode::Label {
+                    id,
+                    bounds,
+                    color,
+                    text,
+                } => {
+                    let chip_workspace = (id.0 >= BAR_CHIP_NODE_ID_BASE)
+                        .then(|| (id.0 - BAR_CHIP_NODE_ID_BASE) as usize)
+                        .and_then(|index| {
+                            self.snapshot
+                                .as_ref()
+                                .and_then(|s| s.workspaces.get(index))
+                                .map(|w| w.workspace)
+                        });
+                    match chip_workspace {
+                        Some(ws) => {
+                            self.targets.insert(
+                                ElementId(BAR_ELEMENT_ID_BASE + id.0),
+                                Target::FocusWorkspace(ws),
+                            );
+                            let mut e = bar_chip(BAR_ELEMENT_ID_BASE + id.0, text, *bounds, *color);
+                            e.enabled = !self.pending;
+                            bar.children.push(e);
+                        }
+                        None => bar.children.push(bar_label(
+                            BAR_ELEMENT_ID_BASE + id.0,
+                            text,
+                            *bounds,
+                            *color,
+                        )),
+                    }
+                }
+                // The bar component contains no image nodes today.
+                UiNode::Image { .. } => {}
+            }
+        }
+        bar
     }
     fn workspace_card(&mut self, ws: WorkspaceId, rect: Rect, selected: bool) -> Element {
         let id = 0x100_0000_0000 + u64::from(ws.0) * 32;
