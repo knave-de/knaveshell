@@ -256,6 +256,38 @@ impl Scene {
         self.adopt(next);
         Ok(())
     }
+    /// Replace a declarative tree while retaining scroll, focus and active presses for stable IDs.
+    pub fn replace(&mut self, root: Element) -> Result<(), UiError> {
+        let next = Self::new(root)?;
+        self.adopt(next);
+        if self.focus.is_some_and(|id| !self.indices.contains_key(&id)) {
+            self.focus = None;
+        }
+        if self.hover.is_some_and(|id| !self.indices.contains_key(&id)) {
+            self.hover = None;
+        }
+        if self
+            .capture
+            .is_some_and(|c| !self.indices.contains_key(&c.id))
+        {
+            self.capture = None;
+        }
+        if self
+            .key_pressed
+            .is_some_and(|id| !self.indices.contains_key(&id))
+        {
+            self.key_pressed = None;
+        }
+        if self
+            .menu
+            .as_ref()
+            .is_some_and(|m| !self.indices.contains_key(&m.owner))
+        {
+            self.menu = None;
+        }
+        self.scopes.retain(|(id, _)| self.indices.contains_key(id));
+        Ok(())
+    }
     fn export_tree(
         &self,
         i: usize,

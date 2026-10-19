@@ -93,6 +93,17 @@ impl Waker {
 }
 
 pub trait Application {
+    /// Drain completed background work before visibility and rendering are evaluated.
+    fn update(&mut self) {}
+    /// Dynamic input regions in logical surface coordinates; None uses the whole surface.
+    fn input_region(&self) -> Option<Vec<knave_ui::Rect>> {
+        None
+    }
+    /// Override keyboard interaction when a passive surface opens an interactive panel.
+    fn keyboard_mode(&self) -> Option<KeyboardMode> {
+        None
+    }
+
     /// Called once before the first frame. Applications that run background work
     /// keep the waker, and report finished results through `needs_frame`.
     fn set_waker(&mut self, _waker: Waker) {}

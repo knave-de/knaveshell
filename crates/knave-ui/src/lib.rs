@@ -70,6 +70,7 @@ pub struct NodeId(pub u64);
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiAction {
     CloseOverview,
+    ToggleNotifications,
     FocusWorkspace(WorkspaceId),
     FocusWindow(WindowId),
     RestoreWindow(WindowId),
@@ -355,6 +356,9 @@ impl UiScene {
         }
         if let Some(snapshot) = snapshot {
             for (index, workspace) in snapshot.workspaces.iter().enumerate() {
+                if 150.0 + index as f32 * 38.0 + 32.0 > width - 68.0 {
+                    break;
+                }
                 let bounds = Rect::new(150.0 + index as f32 * 38.0, 5.0, 32.0, height - 10.0);
                 scene.push(UiNode::Label {
                     id: NodeId(10 + index as u64),
@@ -369,6 +373,10 @@ impl UiScene {
                 scene.target(bounds, UiAction::FocusWorkspace(workspace.workspace));
             }
         }
+        scene.target(
+            Rect::new((width - 60.0).max(0.0), 0.0, width.min(60.0), height),
+            UiAction::ToggleNotifications,
+        );
         scene
     }
 

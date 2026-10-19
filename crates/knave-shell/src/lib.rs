@@ -4,3 +4,5 @@ pub mod overview;
 pub mod portal;
 
 pub mod wallpaper;
+
+pub mod notifications;
