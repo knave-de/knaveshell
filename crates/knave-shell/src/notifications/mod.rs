@@ -49,6 +49,7 @@ pub struct Notifications {
     pressed: bool,
     pending_state: Option<NotificationSnapshot>,
     focus_on_open: bool,
+    keyboard_focus_visible: bool,
 }
 impl Default for Notifications {
     fn default() -> Self {
@@ -77,6 +78,7 @@ impl Notifications {
             pressed: false,
             pending_state: None,
             focus_on_open: false,
+            keyboard_focus_visible: false,
         }
     }
     fn send(&mut self, command: NotificationCommand) {
@@ -90,6 +92,7 @@ impl Notifications {
     fn apply(&mut self, state: NotificationSnapshot) {
         if !self.state.center_open && state.center_open {
             self.focus_on_open = true;
+            self.keyboard_focus_visible = false;
             self.page = 0;
             self.seen.clear();
         }
@@ -240,6 +243,17 @@ impl Application for Notifications {
         self.scene.cursor()
     }
     fn input(&mut self, event: Input) {
+        let keyboard_focus = match &event {
+            Input::Key { pressed: true, .. } => Some(true),
+            Input::PointerDown(_) => Some(false),
+            _ => None,
+        };
+        if let Some(visible) = keyboard_focus
+            && self.keyboard_focus_visible != visible
+        {
+            self.keyboard_focus_visible = visible;
+            self.dirty = true;
+        }
         if matches!(
             event,
             Input::Key {

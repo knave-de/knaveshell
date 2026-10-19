@@ -1,5 +1,5 @@
 use super::*;
-use knave_ui::{Border, CornerRadii, ShapePaint, TextWrap};
+use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
 
 pub(super) fn card_id(id: u64) -> u64 {
     1000 + id * 32
@@ -61,6 +61,27 @@ impl Palette {
         let mut e = Element::new(id, Widget::Text(value));
         self.style(&mut e);
         e.style.text.color = if muted { self.muted } else { self.text };
+        e
+    }
+    fn close_button(&self, id: u64, keyboard_focus: bool) -> Element {
+        let mut e = Element::new(id, Widget::Button("×".into())).layout(Layout {
+            width: Length::Px(32.0),
+            height: Length::Px(32.0),
+            ..Default::default()
+        });
+        self.style(&mut e);
+        e.style.text.align = TextAlign::Center;
+        e.style.hover = self.border;
+        e.style.pressed = self.surface;
+        e.style.focus = if keyboard_focus {
+            self.muted
+        } else {
+            Color::rgba(0, 0, 0, 0)
+        };
+        e.style.background = Some(ShapePaint {
+            radii: CornerRadii::uniform(6.0),
+            ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
+        });
         e
     }
     fn button(&self, id: u64, value: &str) -> Element {
@@ -137,8 +158,7 @@ impl Notifications {
             title.layout.height = Length::Fill;
             title.style.text.weight = 600;
             heading.children.push(title);
-            let mut close = p.button(CLOSE, "×");
-            close.layout.width = Length::Px(36.0);
+            let mut close = p.close_button(CLOSE, self.keyboard_focus_visible);
             close.tooltip = Some("Close notification center".into());
             heading.children.push(close);
             panel.children.push(heading);
@@ -151,6 +171,7 @@ impl Notifications {
                 },
             );
             dnd.enabled = self.state.owned;
+            dnd.tooltip = Some("Hide popups from all apps. Notifications remain in history; turning this off does not replay them.".into());
             panel.children.push(dnd);
             let mut controls = p.panel(12).layout(Layout {
                 flow: if panel_width < 290.0 {
@@ -331,8 +352,7 @@ impl Notifications {
             ),
             true,
         ));
-        let mut dismiss = p.button(id + 4, "×");
-        dismiss.layout.width = Length::Px(32.0);
+        let mut dismiss = p.close_button(id + 4, self.keyboard_focus_visible);
         dismiss.tooltip = Some("Dismiss notification".into());
         self.targets.insert(dismiss.id, Target::Dismiss(n.id));
         head.children.push(dismiss);
@@ -393,14 +413,15 @@ impl Notifications {
         }
         if !banner && !n.app_id.is_empty() && self.state.owned {
             let enabled = *self.state.app_banners.get(&n.app_id).unwrap_or(&true);
-            let button = p.button(
+            let mut button = p.button(
                 id + 21,
                 if enabled {
-                    "Mute banners from this app"
+                    "Hide this app’s popups"
                 } else {
-                    "Allow banners from this app"
+                    "Show this app’s popups"
                 },
             );
+            button.tooltip = Some("Controls popups from this app only. Notifications remain in history and the unread count; missed popups are not replayed.".into());
             self.targets
                 .insert(button.id, Target::AppBanners(n.app_id.clone(), !enabled));
             card.children.push(button);

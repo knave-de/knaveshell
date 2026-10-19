@@ -233,3 +233,27 @@ fn progress_tracks_card_content_width_at_every_percentage_and_surface_size() {
         }
     }
 }
+
+#[test]
+fn close_buttons_are_compact_and_focus_follows_input_method() {
+    let mut app = app(1);
+    app.frame([400.0, 800.0], &mut Metrics);
+    for id in [CLOSE, view::card_id(1) + 4] {
+        let bounds = app.scene.bounds(ElementId(id)).unwrap();
+        assert_eq!([bounds.width, bounds.height], [32.0, 32.0]);
+    }
+    assert!(!app.keyboard_focus_visible);
+    app.input(Input::Key {
+        key: Key::Tab,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    });
+    app.frame(app.size, &mut Metrics);
+    assert!(app.keyboard_focus_visible);
+    let bounds = app.scene.bounds(ElementId(CLOSE)).unwrap();
+    app.input(Input::PointerDown([bounds.x + 16.0, bounds.y + 16.0]));
+    app.frame(app.size, &mut Metrics);
+    assert!(!app.keyboard_focus_visible);
+    assert_eq!(app.scene.capture(), Some(ElementId(CLOSE)));
+}
