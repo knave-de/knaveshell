@@ -79,7 +79,7 @@ impl Palette {
             Color::rgba(0, 0, 0, 0)
         };
         e.style.background = Some(ShapePaint {
-            radii: CornerRadii::uniform(6.0),
+            radii: CornerRadii::uniform(0.0),
             ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
         });
         e
@@ -95,7 +95,7 @@ impl Palette {
                 color: self.border,
                 width: 1.0,
             }),
-            radii: CornerRadii::uniform(6.0),
+            radii: CornerRadii::uniform(0.0),
             ..ShapePaint::fill(self.card)
         });
         e
@@ -141,7 +141,7 @@ impl Notifications {
                     color: p.border,
                     width: 1.0,
                 }),
-                radii: CornerRadii::uniform(10.0),
+                radii: CornerRadii::uniform(0.0),
                 ..ShapePaint::fill(p.surface)
             });
             let mut heading = p.panel(10).layout(Layout {
@@ -307,7 +307,7 @@ impl Notifications {
                 },
                 width: if n.unread || n.urgency == 2 { 2.0 } else { 1.0 },
             }),
-            radii: CornerRadii::uniform(8.0),
+            radii: CornerRadii::uniform(0.0),
             ..ShapePaint::fill(p.card)
         });
         let mut head = p.panel(id + 1).layout(Layout {
