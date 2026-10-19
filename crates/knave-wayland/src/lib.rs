@@ -707,8 +707,9 @@ fn run_internal(
         role,
         app,
         options,
-        notification_client: notification_bar
-            .then(|| notifications::NotificationClient::start(Waker::new(wake_sender.clone()))),
+        notification_client: notification_bar.then(|| {
+            notifications::NotificationClient::start_summary(Waker::new(wake_sender.clone()))
+        }),
         notification_snapshot: None,
         app_input_region: None,
         app_keyboard_mode: None,

@@ -34,6 +34,7 @@ pub struct Notifications {
     client: Option<NotificationClient>,
     loader: Option<Loader>,
     icons: Icons,
+    previews: HashMap<u64, (NotificationImage, knave_ui::UiImage)>,
     scene: Scene,
     display: DisplayList,
     targets: HashMap<ElementId, Target>,
@@ -63,6 +64,7 @@ impl Notifications {
             client: None,
             loader: None,
             icons: Icons::default(),
+            previews: HashMap::new(),
             scene: Scene::new(Element::new(0, Widget::Panel)).unwrap(),
             display: DisplayList::default(),
             targets: HashMap::new(),
@@ -96,6 +98,12 @@ impl Notifications {
             self.page = 0;
             self.seen.clear();
         }
+        self.previews.retain(|id, (source, _)| {
+            state
+                .notifications
+                .iter()
+                .any(|n| n.id == *id && n.image.as_ref() == Some(source))
+        });
         self.expanded
             .retain(|id| state.notifications.iter().any(|n| n.id == *id));
         self.seen

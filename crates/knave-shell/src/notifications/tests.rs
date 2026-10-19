@@ -324,3 +324,68 @@ fn missing_notification_icon_uses_app_identity_without_recoloring() {
         }
     }
 }
+
+#[test]
+fn image_previews_fit_cards_preserve_pixels_and_release_on_replace_or_dismiss() {
+    for size in [[320.0, 240.0], [320.0, 568.0], [1280.0, 800.0]] {
+        for banner in [false, true] {
+            for light in [false, true] {
+                for (width, height) in [(320, 160), (80, 320), (320, 1), (1, 320)] {
+                    let mut app = app(1);
+                    app.state.light = light;
+                    app.state.center_open = !banner;
+                    app.state.notifications[0].banner = banner;
+                    let pixels = [88, 101, 242, 128].repeat((width * height) as usize);
+                    app.state.notifications[0].image =
+                        NotificationImage::new(width, height, pixels.clone());
+                    let list = app.frame(size, &mut Metrics).clone();
+                    let id = view::card_id(1) + 11;
+                    let bounds = app.scene.bounds(ElementId(id)).unwrap();
+                    assert!(bounds.x >= 0.0 && bounds.x + bounds.width <= size[0]);
+                    assert!(bounds.height <= if banner { 180.0 } else { 220.0 });
+                    let Widget::Image(image, style) = app.scene.widget(ElementId(id)).unwrap()
+                    else {
+                        panic!("preview widget missing")
+                    };
+                    for command in &list.commands {
+                        if let DisplayCommand::Image {
+                            clip: Some(clip), ..
+                        } = command
+                        {
+                            assert!(clip.x >= 0.0 && clip.y >= 0.0);
+                            assert!(clip.x + clip.width <= size[0]);
+                            assert!(clip.y + clip.height <= size[1]);
+                        }
+                    }
+                    assert_eq!(image.pixels(), pixels);
+                    assert_eq!(style.fit, knave_ui::ImageFit::Contain);
+                    assert_eq!(style.corner_radius, 0.0);
+                    assert_eq!(app.previews.len(), 1);
+                    let previous = image.cache_key();
+                    let mut state = app.state.clone();
+                    state.notifications[0].summary = "Updated text".into();
+                    app.apply(state.clone());
+                    app.frame(size, &mut Metrics);
+                    assert_eq!(app.previews[&1].1.cache_key(), previous);
+                    state.notifications[0].image = NotificationImage::new(1, 1, vec![255; 4]);
+                    app.apply(state.clone());
+                    app.frame(size, &mut Metrics);
+                    assert_eq!(app.previews[&1].1.pixels(), [255; 4]);
+                    state.notifications[0].image = None;
+                    app.apply(state);
+                    app.frame(size, &mut Metrics);
+                    assert!(app.previews.is_empty());
+                    assert!(app.scene.bounds(ElementId(id)).is_none());
+                }
+            }
+        }
+    }
+    let mut app = app(1);
+    app.state.notifications[0].image = NotificationImage::new(1, 1, vec![255; 4]);
+    app.frame([400.0, 800.0], &mut Metrics);
+    let mut state = app.state.clone();
+    state.notifications.clear();
+    app.apply(state);
+    app.frame([400.0, 800.0], &mut Metrics);
+    assert!(app.previews.is_empty());
+}

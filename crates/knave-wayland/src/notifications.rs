@@ -1,6 +1,6 @@
 //! One cancellable D-Bus subscriber and bounded command queue per presentation host.
 use crate::Waker;
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use knave_desktop_api::notifications::*;
 use std::{
     sync::{Arc, Mutex},
@@ -18,6 +18,12 @@ pub struct NotificationClient {
 }
 impl NotificationClient {
     pub fn start(waker: Waker) -> Self {
+        Self::start_inner(waker, false)
+    }
+    pub fn start_summary(waker: Waker) -> Self {
+        Self::start_inner(waker, true)
+    }
+    fn start_inner(waker: Waker, summary: bool) -> Self {
         let (commands, mut jobs) = mpsc::channel::<NotificationCommand>(16);
         let updates = Arc::new(Mutex::new(None));
         let output = updates.clone();
@@ -44,18 +50,19 @@ impl NotificationClient {
                         let proxy=zbus::Proxy::new(&connection,BUS_NAME,OBJECT_PATH,INTERFACE).await?;
                         let mut changes=proxy.receive_signal("Changed").await?;
                         let mut owners=proxy.receive_owner_changed().await?;
-                        async fn snapshot(proxy:&zbus::Proxy<'_>)->Result<NotificationSnapshot,String> {
-                            let json:String=proxy.call("Snapshot",&()).await.map_err(|e|e.to_string())?;
-                            if json.len()>4*1024*1024 {return Err("notification snapshot exceeds budget".into())}
+                        async fn snapshot(proxy:&zbus::Proxy<'_>, summary:bool)->Result<NotificationSnapshot,String> {
+                            let json:String=proxy.call(if summary { "Summary" } else { "Snapshot" },&()).await.map_err(|e|e.to_string())?;
+                            if json.len()>MAX_SNAPSHOT_BYTES {return Err("notification snapshot exceeds budget".into())}
                             serde_json::from_str(&json).map_err(|e|e.to_string())
                         }
-                        let initial=snapshot(&proxy).await.map_err(zbus::Error::Failure)?;
+                        let initial=snapshot(&proxy, summary).await.map_err(zbus::Error::Failure)?;
                         *output.lock().unwrap()=Some(Ok(initial));waker.wake();backoff=Duration::from_millis(250);
                         loop {
                             tokio::select!{
                                 signal=changes.next()=>{
                                     if signal.is_none(){return Err(zbus::Error::Failure("notification service disconnected".into()))}
-                                    let state=snapshot(&proxy).await.map_err(zbus::Error::Failure)?;
+                                    while matches!(changes.next().now_or_never(), Some(Some(_))) {}
+                                    let state=snapshot(&proxy, summary).await.map_err(zbus::Error::Failure)?;
                                     *output.lock().unwrap()=Some(Ok(state));waker.wake();
                                 },
                                 owner=owners.next()=>{if owner.is_none_or(|o|o.is_none()){return Err(zbus::Error::Failure("notification service stopped".into()))}},

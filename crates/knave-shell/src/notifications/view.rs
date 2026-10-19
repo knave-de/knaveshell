@@ -388,6 +388,39 @@ impl Notifications {
         if !body.is_empty() {
             card.children.push(p.text(id + 6, body, false));
         }
+        if let Some(source) = &n.image {
+            if !self.previews.contains_key(&n.id)
+                && let Some(image) = knave_ui::UiImage::from_rgba(
+                    source.width(),
+                    source.height(),
+                    source.pixels().to_vec(),
+                )
+            {
+                self.previews.insert(n.id, (source.clone(), image));
+            }
+            if let Some((_, image)) = self.previews.get(&n.id) {
+                let (_, panel_width) = panel_geometry(self.size[0]);
+                let available = (panel_width - if banner { 24.0 } else { 48.0 }).max(1.0);
+                let height = (available * source.height() as f32 / source.width() as f32)
+                    .min(if banner { 180.0 } else { 220.0 });
+                card.children.push(
+                    Element::new(
+                        id + 11,
+                        Widget::Image(
+                            image.clone(),
+                            knave_ui::ImageStyle {
+                                fit: knave_ui::ImageFit::Contain,
+                                ..Default::default()
+                            },
+                        ),
+                    )
+                    .layout(Layout {
+                        height: Length::Px(height),
+                        ..Default::default()
+                    }),
+                );
+            }
+        }
         if !banner && n.body.chars().count() > 360 {
             let more = p.button(id + 7, if expanded { "Show less" } else { "Show more" });
             self.targets.insert(more.id, Target::Expand(n.id));
