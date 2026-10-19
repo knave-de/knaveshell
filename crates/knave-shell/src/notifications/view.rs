@@ -51,6 +51,7 @@ impl Palette {
         e.style.hover = self.surface;
         e.style.pressed = self.card;
         e.style.focus = self.accent;
+        e.style.radii = Some(CornerRadii::uniform(0.0));
     }
     fn panel(&self, id: u64) -> Element {
         let mut e = Element::new(id, Widget::Panel);
@@ -82,6 +83,14 @@ impl Palette {
             radii: CornerRadii::uniform(0.0),
             ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
         });
+        e
+    }
+    fn page_button(&self, id: u64, value: &str) -> Element {
+        let mut e = self.button(id, value);
+        e.layout.width = Length::Px(36.0);
+        e.layout.height = Length::Px(36.0);
+        e.layout.padding = 0.0;
+        e.style.text.align = TextAlign::Center;
         e
     }
     fn button(&self, id: u64, value: &str) -> Element {
@@ -242,13 +251,12 @@ impl Notifications {
                 gap: 6.0,
                 ..Default::default()
             });
-            let mut previous = p.button(PREVIOUS, "‹");
-            previous.layout.width = Length::Px(36.0);
+            let mut previous = p.page_button(PREVIOUS, "‹");
             previous.enabled = self.page > 0;
             previous.tooltip = Some("Previous notifications".into());
             footer.children.push(previous);
             let pages = self.state.history().count().div_ceil(PAGE).max(1);
-            footer.children.push(p.text(
+            let mut page_label = p.text(
                 19,
                 format!(
                     "{} / {} · {} days",
@@ -257,9 +265,10 @@ impl Notifications {
                     self.state.history_days
                 ),
                 true,
-            ));
-            let mut next = p.button(NEXT, "›");
-            next.layout.width = Length::Px(36.0);
+            );
+            page_label.layout.height = Length::Fill;
+            footer.children.push(page_label);
+            let mut next = p.page_button(NEXT, "›");
             next.enabled = self.page + 1 < pages;
             next.tooltip = Some("Older notifications".into());
             footer.children.push(next);

@@ -99,6 +99,39 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                         "{size:?} {id} {r:?}"
                     );
                 }
+                for (id, label) in [(PREVIOUS, "‹"), (NEXT, "›")] {
+                    let bounds = app.scene.bounds(ElementId(id)).unwrap();
+                    assert_eq!([bounds.width, bounds.height], [36.0, 36.0]);
+                    let (text_bounds, style) = list
+                        .commands
+                        .iter()
+                        .find_map(|command| match command {
+                            DisplayCommand::Text {
+                                bounds,
+                                text,
+                                style,
+                                ..
+                            } if text == label => Some((bounds, style)),
+                            _ => None,
+                        })
+                        .unwrap();
+                    assert_eq!(style.align, knave_ui::TextAlign::Center);
+                    assert!(
+                        (text_bounds.x + text_bounds.width / 2.0 - bounds.x - bounds.width / 2.0)
+                            .abs()
+                            < 0.1
+                    );
+                    assert!(
+                        (text_bounds.y + text_bounds.height / 2.0 - bounds.y - bounds.height / 2.0)
+                            .abs()
+                            < 0.1
+                    );
+                }
+                for command in &list.commands {
+                    if let DisplayCommand::Shape { paint, .. } = command {
+                        assert_eq!(paint.radii, knave_ui::CornerRadii::uniform(0.0));
+                    }
+                }
                 let scroll = app.scene.bounds(ElementId(SCROLL)).unwrap();
                 let footer = app.scene.bounds(ElementId(NEXT)).unwrap();
                 assert!(scroll.y + scroll.height <= footer.y + 0.1);
