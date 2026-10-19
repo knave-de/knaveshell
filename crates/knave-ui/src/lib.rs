@@ -243,6 +243,11 @@ impl UiScene {
             .map(|target| target.action)
     }
 
+    /// A disabled notification service must not leave an invisible clickable target.
+    pub fn disable_notifications(&mut self) {
+        self.targets
+            .retain(|target| target.action != UiAction::ToggleNotifications);
+    }
     pub fn search_action(&self, index: usize) -> Option<UiAction> {
         self.search_actions.get(index).copied()
     }

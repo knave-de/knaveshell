@@ -163,9 +163,16 @@ impl Notifications {
             })
             .map(|n| n.id)
             .collect();
-        if !ids.is_empty() {
-            self.seen.extend(&ids);
-            self.send(NotificationCommand::Seen { ids });
+        if !ids.is_empty()
+            && let Some(client) = &self.client
+        {
+            match client.command(NotificationCommand::Seen { ids: ids.clone() }) {
+                Ok(()) => self.seen.extend(ids),
+                Err(error) => {
+                    self.error = Some(error);
+                    self.dirty = true;
+                }
+            }
         }
     }
 }

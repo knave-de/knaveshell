@@ -679,7 +679,10 @@ fn run_internal(
         )
         .ok();
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
-    let notification_bar = options.is_none() && role == ShellRole::Bar;
+    let notification_bar = options.is_none()
+        && role == ShellRole::Bar
+        && std::env::var_os("KNAVE_NOTIFICATIONS_ENABLED").as_deref()
+            != Some(std::ffi::OsStr::new("0"));
     let mut state = Runtime {
         harness_ready: harness_ready::ReadySignal::from_env(
             options
@@ -999,8 +1002,11 @@ impl Runtime {
                     previews: &self.previews,
                 },
             );
+            if self.role == ShellRole::Bar && self.notification_client.is_none() {
+                self.scene.disable_notifications();
+            }
             self.render_list = self.renderer.prepare(&self.scene);
-            if self.role == ShellRole::Bar {
+            if self.notification_client.is_some() {
                 notifications::append_bell(
                     &mut self.render_list,
                     self.width as f32,
