@@ -290,3 +290,37 @@ fn close_buttons_are_compact_and_focus_follows_input_method() {
     assert!(!app.keyboard_focus_visible);
     assert_eq!(app.scene.capture(), Some(ElementId(CLOSE)));
 }
+
+#[test]
+fn missing_notification_icon_uses_app_identity_without_recoloring() {
+    let colors = vec![88, 101, 242, 255, 255, 255, 255, 255];
+    for (icon, app_id, name, expected) in [
+        ("", "discord", "discord", "discord"),
+        ("", "discord.desktop", "discord", "discord"),
+        ("", "", "discord", "discord"),
+        ("sender-icon", "discord", "discord", "sender-icon"),
+        ("", "", "", crate::overview::icons::FALLBACK),
+    ] {
+        for light in [false, true] {
+            let mut app = app(1);
+            app.state.light = light;
+            app.state.notifications[0].icon = icon.into();
+            app.state.notifications[0].app_id = app_id.into();
+            app.state.notifications[0].app = name.into();
+            app.icons.finish(
+                expected.into(),
+                knave_ui::UiImage::from_rgba(2, 1, colors.clone()),
+            );
+            let list = app.frame([400.0, 800.0], &mut Metrics);
+            let image = list
+                .commands
+                .iter()
+                .find_map(|command| match command {
+                    DisplayCommand::Image { image, .. } => Some(image),
+                    _ => None,
+                })
+                .expect("notification uses its app icon");
+            assert_eq!(image.pixels(), colors);
+        }
+    }
+}

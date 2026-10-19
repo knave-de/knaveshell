@@ -324,10 +324,14 @@ impl Notifications {
             gap: 8.0,
             ..Default::default()
         });
-        let icon = if n.icon.is_empty() {
-            "application-x-executable"
+        let icon = if !n.icon.is_empty() {
+            n.icon.as_str()
+        } else if !n.app_id.is_empty() {
+            n.app_id.strip_suffix(".desktop").unwrap_or(&n.app_id)
+        } else if !n.app.is_empty() {
+            n.app.as_str()
         } else {
-            &n.icon
+            crate::overview::icons::FALLBACK
         };
         if self.icons.needs_request(icon)
             && let Some(loader) = &self.loader
