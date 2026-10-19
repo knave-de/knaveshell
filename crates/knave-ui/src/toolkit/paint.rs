@@ -28,12 +28,20 @@ impl Scene {
             let node = &self.nodes[self.indices[&id]];
             if let Some(label) = &node.element.tooltip {
                 let w = 280.0f32.min(self.viewport.width);
+                let mut tooltip_style = node.element.style.text.clone();
+                tooltip_style.color = Color::TEXT;
+                tooltip_style.wrap = TextWrap::WordOrGlyph;
+                let h = (text
+                    .measure(label, &tooltip_style, (w - 16.0).max(1.0))
+                    .size[1]
+                    + 16.0)
+                    .min(self.viewport.height);
                 let b = Rect::new(
                     node.bounds.x.clamp(0.0, (self.viewport.width - w).max(0.0)),
                     (node.bounds.y + node.bounds.height + 6.0)
-                        .min((self.viewport.height - 52.0).max(0.0)),
+                        .min((self.viewport.height - h).max(0.0)),
                     w,
-                    52.0,
+                    h,
                 );
                 shape(
                     &mut self.list,
@@ -46,7 +54,7 @@ impl Scene {
                     inset(b, 8.0),
                     Some(b),
                     label.clone(),
-                    node.element.style.text.clone(),
+                    tooltip_style,
                 );
             }
         }

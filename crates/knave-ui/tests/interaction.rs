@@ -777,3 +777,30 @@ fn text_submission_and_clipboard_shortcuts_ignore_repeats() {
         Some(Action::TextChanged(ElementId(1), "az".into()))
     );
 }
+
+#[test]
+fn tooltip_uses_readable_text_and_stays_inside_the_viewport() {
+    let mut button = leaf(1, Widget::Button("Light theme button".into()));
+    button.style.text.color = knave_ui::Color::rgba(18, 28, 43, 255);
+    button.tooltip = Some("Explanation".into());
+    let mut s = scene(vec![button]);
+    s.event(Input::PointerMove([20.0, 20.0]));
+    let tooltip = s
+        .display_list([400.0, 400.0], &mut Metrics)
+        .commands
+        .iter()
+        .find_map(|c| match c {
+            knave_ui::DisplayCommand::Text {
+                text,
+                style,
+                bounds,
+                ..
+            } if text == "Explanation" => Some((style.color, *bounds)),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(tooltip.0, knave_ui::Color::TEXT);
+    assert!(tooltip.1.x >= 0.0 && tooltip.1.y >= 0.0);
+    assert!(tooltip.1.x + tooltip.1.width <= 400.0);
+    assert!(tooltip.1.y + tooltip.1.height <= 400.0);
+}
