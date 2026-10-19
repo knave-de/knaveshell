@@ -19,8 +19,11 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
     knave-shell bar
     knave-shell --supports-overview-service
 
-The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output
-with a workspace carousel, search, and a minimized-window shelf for the browsed
+The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output,
+so it projects the same bar component itself (`UiScene::bar_with_snapshot`):
+identical pixels, with its workspace chips switching workspaces on click.
+Overview also shows a
+workspace carousel, search, and a minimized-window shelf for the browsed
 workspace. Left/Right browse workspaces; click the center preview or press Enter
 to activate it. Click a minimized card to restore it. Type or press Ctrl+K to
 search installed applications and press Enter to launch the top match, use Tab

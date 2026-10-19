@@ -6,3 +6,4 @@ pub mod portal;
 pub mod wallpaper;
 
 pub mod notifications;
+pub mod wallpaper_reload;
