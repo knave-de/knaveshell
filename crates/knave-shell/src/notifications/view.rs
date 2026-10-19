@@ -71,8 +71,8 @@ impl Palette {
         });
         self.style(&mut e);
         e.style.text.align = TextAlign::Center;
-        e.style.hover = self.border;
-        e.style.pressed = self.surface;
+        e.style.hover = Color::rgba(128, 128, 128, 40);
+        e.style.pressed = Color::rgba(128, 128, 128, 70);
         e.style.focus = if keyboard_focus {
             self.muted
         } else {
