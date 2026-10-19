@@ -754,7 +754,7 @@ dependencies = [
 [[package]]
 name = "knave-config"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=a382584758b6d03bc00fbd46b7748ad21bdb398c#a382584758b6d03bc00fbd46b7748ad21bdb398c"
+source = "git+https://github.com/knave-de/knave.git?rev=28ba486fdb3c819b4f43ee41e5c149f5a9e46077#28ba486fdb3c819b4f43ee41e5c149f5a9e46077"
 dependencies = [
  "serde",
  "thiserror",
@@ -765,8 +765,9 @@ dependencies = [
 [[package]]
 name = "knave-desktop-api"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=a382584758b6d03bc00fbd46b7748ad21bdb398c#a382584758b6d03bc00fbd46b7748ad21bdb398c"
+source = "git+https://github.com/knave-de/knave.git?rev=28ba486fdb3c819b4f43ee41e5c149f5a9e46077#28ba486fdb3c819b4f43ee41e5c149f5a9e46077"
 dependencies = [
+ "base64",
  "serde",
  "serde_json",
  "thiserror",
@@ -784,7 +785,7 @@ dependencies = [
 [[package]]
 name = "knave-portal-api"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=a382584758b6d03bc00fbd46b7748ad21bdb398c#a382584758b6d03bc00fbd46b7748ad21bdb398c"
+source = "git+https://github.com/knave-de/knave.git?rev=28ba486fdb3c819b4f43ee41e5c149f5a9e46077#28ba486fdb3c819b4f43ee41e5c149f5a9e46077"
 dependencies = [
  "serde",
  "serde_json",
