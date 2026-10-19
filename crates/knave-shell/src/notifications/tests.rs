@@ -211,3 +211,25 @@ fn reopening_hidden_center_resets_keyboard_focus_to_close() {
     app.frame(app.size, &mut Metrics);
     assert_eq!(app.scene.focus(), Some(ElementId(CLOSE)));
 }
+
+#[test]
+fn progress_tracks_card_content_width_at_every_percentage_and_surface_size() {
+    for width in [320.0, 400.0, 1280.0] {
+        for banner in [false, true] {
+            for value in [0, 1, 25, 50, 99, 100] {
+                let mut app = app(1);
+                app.state.center_open = !banner;
+                app.state.notifications[0].banner = banner;
+                app.state.notifications[0].progress = Some(value);
+                app.frame([width, 800.0], &mut Metrics);
+                let id = view::card_id(1);
+                let track = app.scene.bounds(ElementId(id + 9)).unwrap();
+                let fill = app.scene.bounds(ElementId(id + 10)).unwrap();
+                assert!(
+                    (fill.width - track.width * f32::from(value) / 100.0).abs() < 0.1,
+                    "{width} {banner} {value}: {fill:?} {track:?}"
+                );
+            }
+        }
+    }
+}

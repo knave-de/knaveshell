@@ -87,14 +87,17 @@ fn short(s: &str, max: usize) -> String {
     }
     result
 }
+fn panel_geometry(width: f32) -> (f32, f32) {
+    let gap = if width < 360.0 { 6.0 } else { 12.0 };
+    (gap, (width - gap * 2.0).clamp(1.0, 400.0))
+}
 impl Notifications {
     pub(super) fn compose(&mut self) -> Element {
         let p = Palette::new(self.state.light, self.state.high_contrast);
         self.targets.clear();
         let width = self.size[0].max(1.0);
         let height = self.size[1].max(1.0);
-        let gap = if width < 360.0 { 6.0 } else { 12.0 };
-        let panel_width = (width - gap * 2.0).clamp(1.0, 400.0);
+        let (gap, panel_width) = panel_geometry(width);
         let top = if height > 160.0 { 44.0 } else { 0.0 };
         let mut root = p.panel(0);
         root.layout.flow = Flow::Overlay;
@@ -367,7 +370,8 @@ impl Notifications {
             });
             track.style.background = Some(ShapePaint::fill(p.border));
             // Percentage is also printed, so it remains clear without relying on color.
-            let available = (self.size[0] - 48.0).clamp(1.0, 352.0);
+            let (_, panel_width) = panel_geometry(self.size[0]);
+            let available = (panel_width - if banner { 24.0 } else { 48.0 }).max(0.0);
             let mut fill = p.panel(id + 10).layout(Layout {
                 width: Length::Px(available * f32::from(value) / 100.0),
                 height: Length::Fill,
