@@ -48,6 +48,7 @@ pub struct Notifications {
     pointer_down_outside: bool,
     pressed: bool,
     pending_state: Option<NotificationSnapshot>,
+    focus_on_open: bool,
 }
 impl Default for Notifications {
     fn default() -> Self {
@@ -75,6 +76,7 @@ impl Notifications {
             pointer_down_outside: false,
             pressed: false,
             pending_state: None,
+            focus_on_open: false,
         }
     }
     fn send(&mut self, command: NotificationCommand) {
@@ -87,6 +89,7 @@ impl Notifications {
     }
     fn apply(&mut self, state: NotificationSnapshot) {
         if !self.state.center_open && state.center_open {
+            self.focus_on_open = true;
             self.page = 0;
             self.seen.clear();
         }
@@ -278,8 +281,8 @@ impl Application for Notifications {
     }
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
-            let newly_open =
-                self.state.center_open && self.scene.bounds(ElementId(CLOSE)).is_none();
+            let newly_open = self.focus_on_open;
+            self.focus_on_open = false;
             self.size = size;
             let tree = self.compose();
             if let Err(error) = self.scene.replace(tree) {

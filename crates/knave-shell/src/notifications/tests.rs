@@ -197,3 +197,17 @@ fn transient_is_not_in_center_or_badge() {
     assert_eq!(app.state.unread(), 0);
     assert!(app.scene.bounds(ElementId(view::card_id(1))).is_none());
 }
+
+#[test]
+fn reopening_hidden_center_resets_keyboard_focus_to_close() {
+    let mut app = app(2);
+    app.frame([400.0, 800.0], &mut Metrics);
+    app.scene.set_focus(Some(ElementId(DND))).unwrap();
+    let mut state = app.state.clone();
+    state.center_open = false;
+    app.apply(state.clone());
+    state.center_open = true;
+    app.apply(state);
+    app.frame(app.size, &mut Metrics);
+    assert_eq!(app.scene.focus(), Some(ElementId(CLOSE)));
+}
