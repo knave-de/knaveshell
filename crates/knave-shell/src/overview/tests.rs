@@ -884,7 +884,7 @@ fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
         .iter()
         .filter_map(|command| match command {
             knave_ui::DisplayCommand::Shape { bounds, paint, .. }
-                if bounds.y == 0.0 && bounds.height <= 36.0 && bounds.width >= 1100.0 =>
+                if bounds.y <= 0.0 && bounds.height <= 40.0 && bounds.width >= 1100.0 =>
             {
                 Some(paint.fill)
             }

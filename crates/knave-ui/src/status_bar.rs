@@ -23,6 +23,14 @@ impl StatusBar {
             scene.disable_notifications();
         }
         let mut display = DisplayList::from_scene(&scene);
+        // Keep the strip opaque at surface edges even when the host clears to
+        // transparent: clip an oversized fill rather than antialiasing its edge.
+        if let Some(crate::DisplayCommand::Shape { bounds, clip, .. }) =
+            display.commands.first_mut()
+        {
+            *bounds = crate::Rect::new(-2.0, -2.0, width + 4.0, height + 4.0);
+            *clip = Some(crate::Rect::new(0.0, 0.0, width, height));
+        }
         if notifications_enabled {
             append_bell(&mut display, width, notifications);
         }
