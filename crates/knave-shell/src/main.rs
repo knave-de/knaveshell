@@ -22,7 +22,7 @@ fn check(role: ShellRole) {
         return;
     }
     let scene = match role {
-        ShellRole::Bar => UiScene::bar(1, 1920.0, 36.0),
+        ShellRole::Bar => UiScene::bar(1, 1920.0, knave_ui::status_bar::STATUS_BAR_HEIGHT),
         ShellRole::Overview => UiScene::overview(1, 1920.0, 1080.0),
     };
     let renderer = WgpuRenderer::new();

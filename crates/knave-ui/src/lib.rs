@@ -3,6 +3,7 @@
 mod display_list;
 mod geometry;
 mod paint;
+pub mod status_bar;
 pub mod toolkit;
 
 use std::sync::Arc;
@@ -230,6 +231,13 @@ impl UiScene {
         self.nodes.push(node);
     }
 
+    /// Interaction regions in paint order, shared by retained and immediate hosts.
+    pub fn hit_targets(&self) -> impl Iterator<Item = (Rect, UiAction)> + '_ {
+        self.targets
+            .iter()
+            .map(|target| (target.bounds, target.action))
+    }
+
     pub fn hit_test(&self, x: f32, y: f32) -> Option<UiAction> {
         self.targets
             .iter()
@@ -404,7 +412,12 @@ impl UiScene {
     }
 
     fn append_status_bar(&mut self, width: f32, snapshot: Option<&DesktopSnapshot>) {
-        let mut status_bar = Self::bar_with_snapshot(self.revision, width, 36.0, snapshot);
+        let mut status_bar = Self::bar_with_snapshot(
+            self.revision,
+            width,
+            status_bar::STATUS_BAR_HEIGHT,
+            snapshot,
+        );
         for node in &mut status_bar.nodes {
             match node {
                 UiNode::Panel { id, .. } | UiNode::Label { id, .. } | UiNode::Image { id, .. } => {
