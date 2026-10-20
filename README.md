@@ -20,8 +20,9 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
     knave-shell --supports-overview-service
 
 The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output,
-so it projects the same bar component itself (`UiScene::bar_with_snapshot`):
-identical pixels, with its workspace chips switching workspaces on click.
+so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
+component, including the notification bell, unread count and DND state. Overview
+routes the component's shared hit targets for workspace switching and notifications.
 Overview also shows a
 workspace carousel, search, and a minimized-window shelf for the browsed
 workspace. Left/Right, arrows, side previews, dots, and bar chips switch the
@@ -85,7 +86,7 @@ packaging. The installer also writes the README below the selected prefix.
 ## Implementation status
 
 The supported runtime is Rust/wgpu over Wayland layer-shell. Overview uses the
-retained UI toolkit; the bar retains its existing scene projection. Individually interactive
+retained UI toolkit; both hosts render the shared status bar display list. Individually interactive
 window previews, fullscreen-hidden grouping, application launching/icons,
 fractional scaling and multiple-output hosting remain future work.
 

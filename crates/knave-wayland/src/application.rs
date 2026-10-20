@@ -74,6 +74,7 @@ impl Default for SurfaceOptions {
 /// Input is delivered in order. Painting is coalesced behind one frame callback.
 #[derive(Clone, Debug)]
 pub enum HostRequest {
+    ToggleNotifications,
     Copy(String),
     Paste(knave_ui::toolkit::ElementId),
     Desktop(knave_desktop_api::DesktopCommand),
@@ -107,6 +108,16 @@ pub trait Application {
     /// Called once before the first frame. Applications that run background work
     /// keep the waker, and report finished results through `needs_frame`.
     fn set_waker(&mut self, _waker: Waker) {}
+    /// Opt into one host-owned summary subscriber, stopped with the surface.
+    fn uses_status_bar(&self) -> bool {
+        false
+    }
+    fn notification_snapshot(
+        &mut self,
+        _snapshot: Option<&knave_desktop_api::notifications::NotificationSnapshot>,
+    ) {
+    }
+    fn notifications_enabled(&mut self, _enabled: bool) {}
     /// Opt into the host's bounded desktop snapshot, preview and action workers.
     fn uses_desktop(&self) -> bool {
         false
@@ -207,6 +218,9 @@ pub(super) fn key(raw: u32) -> knave_ui::toolkit::Key {
 impl super::Runtime {
     pub(super) fn application_requests(&mut self, qh: &wayland_client::QueueHandle<Self>) {
         match self.app.as_mut().and_then(|app| app.take_request()) {
+            Some(HostRequest::ToggleNotifications) => {
+                self.dispatch_ui_action(knave_ui::UiAction::ToggleNotifications)
+            }
             Some(HostRequest::Copy(text)) => self.copy_text(text, qh),
             Some(HostRequest::Paste(target)) => self.request_paste(target, qh),
             Some(HostRequest::Desktop(command)) => {

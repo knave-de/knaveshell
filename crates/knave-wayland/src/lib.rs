@@ -104,7 +104,7 @@ impl ShellRole {
 
     fn requested_size(self) -> (u32, u32) {
         match self {
-            Self::Bar => (0, 36),
+            Self::Bar => (0, knave_ui::status_bar::STATUS_BAR_HEIGHT as u32),
             Self::Overview => (0, 0),
         }
     }
@@ -118,7 +118,7 @@ impl ShellRole {
 
     fn exclusive_zone(self) -> i32 {
         match self {
-            Self::Bar => 36,
+            Self::Bar => knave_ui::status_bar::STATUS_BAR_HEIGHT as i32,
             Self::Overview => -1,
         }
     }
@@ -564,7 +564,7 @@ fn run_internal(
     role: ShellRole,
     application: Option<(SurfaceOptions, Box<dyn Application>)>,
 ) -> Result<(), WaylandError> {
-    let (options, app) = match application {
+    let (options, mut app) = match application {
         Some((options, app)) => (Some(options), Some(app)),
         None => (None, None),
     };
@@ -679,10 +679,13 @@ fn run_internal(
         )
         .ok();
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
-    let notification_bar = options.is_none()
-        && role == ShellRole::Bar
+    let notification_bar = ((options.is_none() && role == ShellRole::Bar)
+        || app.as_ref().is_some_and(|app| app.uses_status_bar()))
         && std::env::var_os("KNAVE_NOTIFICATIONS_ENABLED").as_deref()
             != Some(std::ffi::OsStr::new("0"));
+    if let Some(app) = &mut app {
+        app.notifications_enabled(notification_bar);
+    }
     let mut state = Runtime {
         harness_ready: harness_ready::ReadySignal::from_env(
             options
@@ -890,6 +893,9 @@ impl Runtime {
             .and_then(notifications::NotificationClient::latest)
         {
             self.notification_snapshot = update.ok();
+            if let Some(app) = &mut self.app {
+                app.notification_snapshot(self.notification_snapshot.as_ref());
+            }
             self.scene_dirty = true;
         }
         let mut should_render =
@@ -992,27 +998,30 @@ impl Runtime {
             should_render = true;
         }
         if self.app.is_none() && self.scene_dirty {
-            self.scene = self.role.scene(
-                self.revision,
-                self.width as f32,
-                self.height as f32,
-                SceneInput {
-                    snapshot: self.snapshot.as_ref(),
-                    query: &self.search_query,
-                    selected: self.search_index,
-                    previews: &self.previews,
-                },
-            );
-            if self.role == ShellRole::Bar && self.notification_client.is_none() {
-                self.scene.disable_notifications();
-            }
-            self.render_list = self.renderer.prepare(&self.scene);
-            if self.notification_client.is_some() {
-                notifications::append_bell(
-                    &mut self.render_list,
+            if self.role == ShellRole::Bar {
+                let bar = knave_ui::status_bar::StatusBar::new(
+                    self.revision,
                     self.width as f32,
+                    self.height as f32,
+                    self.snapshot.as_ref(),
+                    self.notification_client.is_some(),
                     self.notification_snapshot.as_ref(),
                 );
+                self.scene = bar.scene;
+                self.render_list = bar.display;
+            } else {
+                self.scene = self.role.scene(
+                    self.revision,
+                    self.width as f32,
+                    self.height as f32,
+                    SceneInput {
+                        snapshot: self.snapshot.as_ref(),
+                        query: &self.search_query,
+                        selected: self.search_index,
+                        previews: &self.previews,
+                    },
+                );
+                self.render_list = self.renderer.prepare(&self.scene);
             }
             self.scene_dirty = false;
         }

@@ -13,10 +13,7 @@ use loader::{Done, Job, Loader};
 use std::collections::HashMap;
 
 const SEARCH: ElementId = ElementId(2);
-/// The desktop bar surface is not visible behind the overview, which fills the
-/// output. The overview therefore projects the same bar component itself; this
-/// is the bar's layer-exclusive-zone height (ShellRole::Bar).
-const STATUS_BAR_HEIGHT: f32 = 36.0;
+use knave_ui::status_bar::{STATUS_BAR_HEIGHT, StatusBar};
 const MAX_WINDOWS: usize = 1024;
 const MAX_WORKSPACES: usize = 128;
 const PAGE_SIZE: usize = 5;
@@ -26,6 +23,7 @@ const MAX_RESULTS: usize = 64;
 enum Target {
     Workspace(WorkspaceId),
     EnterWorkspace(WorkspaceId),
+    StatusBar(knave_ui::UiAction),
     Window(WindowId),
     App(usize),
     Page(bool),
@@ -46,6 +44,9 @@ fn app_element(index: usize) -> ElementId {
 
 pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
+    notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
+    notifications_enabled: bool,
+    notifications_after_hide: bool,
     panes: Vec<OverviewPane>,
     workspace: Option<WorkspaceId>,
     scene: Scene,
@@ -82,10 +83,23 @@ impl Default for Overview {
     }
 }
 impl Overview {
+    fn status_bar_component(&self, width: f32) -> StatusBar {
+        StatusBar::new(
+            0,
+            width,
+            STATUS_BAR_HEIGHT,
+            self.snapshot.as_ref(),
+            self.notifications_enabled,
+            self.notifications.as_ref(),
+        )
+    }
     pub fn new() -> Self {
         Self {
             display: DisplayList::default(),
             snapshot: None,
+            notifications: None,
+            notifications_enabled: true,
+            notifications_after_hide: false,
             panes: Vec::new(),
             workspace: None,
             scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
@@ -204,6 +218,14 @@ impl Overview {
             Some(Target::EnterWorkspace(ws)) => {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
+            Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
+            Some(Target::StatusBar(knave_ui::UiAction::ToggleNotifications)) => {
+                if self.connected {
+                    self.notifications_after_hide = true;
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+                }
+            }
+            Some(Target::StatusBar(_)) => {}
             Some(Target::Window(id)) => {
                 if let Some(window) = self.window(id) {
                     self.dispatch(if window.minimized {
@@ -382,6 +404,20 @@ impl Overview {
     }
 }
 impl Application for Overview {
+    fn uses_status_bar(&self) -> bool {
+        true
+    }
+    fn notifications_enabled(&mut self, enabled: bool) {
+        self.notifications_enabled = enabled;
+        self.dirty = true;
+    }
+    fn notification_snapshot(
+        &mut self,
+        snapshot: Option<&knave_desktop_api::notifications::NotificationSnapshot>,
+    ) {
+        self.notifications = snapshot.cloned();
+        self.dirty = true;
+    }
     fn uses_desktop(&self) -> bool {
         true
     }
@@ -430,6 +466,7 @@ impl Application for Overview {
         self.dirty = true;
     }
     fn desktop_unavailable(&mut self) {
+        self.notifications_after_hide = false;
         self.reset_view();
         self.connected = false;
         if self.request.take().is_some() {
@@ -446,7 +483,11 @@ impl Application for Overview {
             return;
         }
         self.pending = false;
+        let notifications_after_hide = std::mem::take(&mut self.notifications_after_hide);
         match result {
+            Ok(()) if notifications_after_hide => {
+                self.request = Some(HostRequest::ToggleNotifications);
+            }
             Ok(()) if self.hide_after_action && self.surface_visible() => {
                 self.hide_after_action = false;
                 self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
@@ -587,6 +628,9 @@ impl Application for Overview {
             self.rebuild(text);
         }
         self.display = self.scene.display_list(size, text).clone();
+        self.display
+            .commands
+            .extend(self.status_bar_component(size[0]).display.commands);
         self.display.clear_color = knave_ui::Color::rgba(0, 0, 0, 0);
         &self.display
     }
