@@ -114,3 +114,22 @@ Static wallpaper is configured through Knave's `[shell.wallpaper]` settings:
 `image` is an absolute PNG path and `fit` is `cover`, `contain`, or `stretch`.
 Knave Session starts the background role automatically; restart the session to
 apply changes. Remove `image` for the black compositor background.
+
+### Notifications
+
+Knave Session starts `knave-shell notifications` alongside the bar. The bar bell
+has a top-right unread badge, capped at 99+, and a DND marker. Click it for
+scrollable, application-grouped history, actions, per-app banner muting, Do not
+disturb and clear/read controls. Escape or an outside click closes the center.
+Passive banners never request keyboard focus and leave the desktop outside their
+cards clickable. History is paged in groups of 20 to bound retained UI size.
+Long titles, bodies and action labels wrap; lengthy bodies have Show more/less.
+Light/dark and high-contrast colors use Knave's appearance settings.
+
+The session service owns persistence and delivery. Expired banners remain in
+history; restored history has no stale actions. Transient notifications do not
+enter history or the count. If another daemon acquired notification delivery
+first, the bell indicates external delivery and shows saved Knave history only.
+Disconnected state is explicit. Match this Shell with the Knave revision supplying
+[ADR 0012](../knave/docs/architecture/decisions/0012-notifications.md); the session
+checks `--supports-notifications-service` before starting the role.

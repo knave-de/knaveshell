@@ -5,6 +5,7 @@ mod clipboard;
 mod cursor;
 mod harness_ready;
 mod ime;
+pub mod notifications;
 mod snapshot;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition, Waker,
@@ -678,6 +679,10 @@ fn run_internal(
         )
         .ok();
     let ime_manager=globals.bind::<wayland_protocols::wp::text_input::zv3::client::zwp_text_input_manager_v3::ZwpTextInputManagerV3,_,_>(&queue_handle,1..=1,()).ok();
+    let notification_bar = options.is_none()
+        && role == ShellRole::Bar
+        && std::env::var_os("KNAVE_NOTIFICATIONS_ENABLED").as_deref()
+            != Some(std::ffi::OsStr::new("0"));
     let mut state = Runtime {
         harness_ready: harness_ready::ReadySignal::from_env(
             options
@@ -702,6 +707,12 @@ fn run_internal(
         role,
         app,
         options,
+        notification_client: notification_bar.then(|| {
+            notifications::NotificationClient::start_summary(Waker::new(wake_sender.clone()))
+        }),
+        notification_snapshot: None,
+        app_input_region: None,
+        app_keyboard_mode: None,
         scale: 1,
         modifiers: KeyModifiers::default(),
         layer,
@@ -777,6 +788,10 @@ struct Runtime {
     role: ShellRole,
     app: Option<Box<dyn Application>>,
     options: Option<SurfaceOptions>,
+    notification_client: Option<notifications::NotificationClient>,
+    notification_snapshot: Option<knave_desktop_api::notifications::NotificationSnapshot>,
+    app_input_region: Option<Vec<knave_ui::Rect>>,
+    app_keyboard_mode: Option<KeyboardMode>,
     scale: u32,
     modifiers: KeyModifiers,
     layer: LayerSurface,
@@ -864,6 +879,17 @@ impl Runtime {
         }
         if let Some(ack) = self.pane_worker.as_ref().and_then(PaneWorker::latest_ack) {
             self.pane_acknowledged = Some(ack);
+            self.scene_dirty = true;
+        }
+        if let Some(app) = &mut self.app {
+            app.update();
+        }
+        if let Some(update) = self
+            .notification_client
+            .as_ref()
+            .and_then(notifications::NotificationClient::latest)
+        {
+            self.notification_snapshot = update.ok();
             self.scene_dirty = true;
         }
         let mut should_render =
@@ -977,7 +1003,17 @@ impl Runtime {
                     previews: &self.previews,
                 },
             );
+            if self.role == ShellRole::Bar && self.notification_client.is_none() {
+                self.scene.disable_notifications();
+            }
             self.render_list = self.renderer.prepare(&self.scene);
+            if self.notification_client.is_some() {
+                notifications::append_bell(
+                    &mut self.render_list,
+                    self.width as f32,
+                    self.notification_snapshot.as_ref(),
+                );
+            }
             self.scene_dirty = false;
         }
         if !should_render {
@@ -1013,6 +1049,47 @@ impl Runtime {
             // The compositor stages geometry; publish its matching shell frame only after acknowledgement.
             if self.pane_acknowledged.as_ref() != Some(&panes) {
                 return;
+            }
+        }
+        if let Some(app) = &self.app {
+            let mode = app.keyboard_mode();
+            if mode != self.app_keyboard_mode {
+                if let Some(mode) = mode {
+                    self.layer.set_keyboard_interactivity(match mode {
+                        KeyboardMode::None => KeyboardInteractivity::None,
+                        KeyboardMode::OnDemand => KeyboardInteractivity::OnDemand,
+                        KeyboardMode::Exclusive => KeyboardInteractivity::Exclusive,
+                    });
+                }
+                self.app_keyboard_mode = mode;
+            }
+            let input = app.input_region();
+            if input != self.app_input_region {
+                if let Some(rects) = &input {
+                    match smithay_client_toolkit::compositor::Region::new(&self.compositor) {
+                        Ok(region) => {
+                            for r in rects {
+                                region.add(
+                                    r.x.floor() as i32,
+                                    r.y.floor() as i32,
+                                    r.width.ceil() as i32,
+                                    r.height.ceil() as i32,
+                                );
+                            }
+                            self.layer
+                                .wl_surface()
+                                .set_input_region(Some(region.wl_region()));
+                        }
+                        Err(error) => {
+                            eprintln!("knave-shell: input region unavailable: {error}");
+                            self.exit = true;
+                            return;
+                        }
+                    }
+                } else {
+                    self.layer.wl_surface().set_input_region(None);
+                }
+                self.app_input_region = input;
             }
         }
         self.sync_ime();
@@ -1190,6 +1267,16 @@ impl Runtime {
 impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
         let command = match action {
+            UiAction::ToggleNotifications => {
+                if let Some(client) = &self.notification_client
+                    && let Err(error) = client.command(
+                        knave_desktop_api::notifications::NotificationCommand::ToggleCenter,
+                    )
+                {
+                    eprintln!("knave-shell: {error}");
+                }
+                return;
+            }
             UiAction::CloseOverview => {
                 self.exit = true;
                 return;

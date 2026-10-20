@@ -19,17 +19,17 @@ use std::{
 
 const QUEUE: usize = 32;
 
-pub(super) enum Job {
+pub(crate) enum Job {
     Catalog(Environment),
     Icon(String),
 }
-pub(super) enum Done {
+pub(crate) enum Done {
     Catalog(Result<Catalog, CatalogError>),
     /// `None` means no icon, not even the fallback, could be produced.
     Icon(String, Option<UiImage>),
 }
 
-pub(super) struct Loader {
+pub(crate) struct Loader {
     jobs: Option<SyncSender<Job>>,
     done: Arc<Mutex<VecDeque<Done>>>,
     thread: Option<JoinHandle<()>>,

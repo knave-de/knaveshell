@@ -23,6 +23,7 @@ impl ReadySignal {
             "knave-shell-bar" => "bar",
             "knave-shell-wallpaper" => "wallpaper",
             "knave-shell-overview" => "overview",
+            "knave-shell-notifications" => "notifications",
             _ => return Self::default(),
         };
         Self(directory.map(|path| path.join(format!("{role}.ready"))))

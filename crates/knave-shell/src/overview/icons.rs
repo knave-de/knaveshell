@@ -3,12 +3,12 @@ use knave_ui::UiImage;
 use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Rasterized at twice the 32px row icon so it stays sharp at scale 2.
-pub(super) const RASTER_PX: u32 = 64;
+pub(crate) const RASTER_PX: u32 = 64;
 const MAX_CACHED: usize = 128;
-pub(super) const FALLBACK: &str = "application-x-executable";
+pub(crate) const FALLBACK: &str = "application-x-executable";
 
 #[derive(Default)]
-pub(super) struct Icons {
+pub(crate) struct Icons {
     /// `None` records a name with no usable icon so it is not requested again.
     cache: HashMap<String, Option<UiImage>>,
     order: VecDeque<String>,

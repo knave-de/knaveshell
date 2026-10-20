@@ -10,7 +10,7 @@ name = "knave-shell"
 path = "src/main.rs"
 
 [dependencies]
-knave-portal-api = { git = "https://github.com/knave-de/knave.git", rev = "a382584758b6d03bc00fbd46b7748ad21bdb398c" }
+knave-portal-api = { git = "https://github.com/knave-de/knave.git", rev = "28ba486fdb3c819b4f43ee41e5c149f5a9e46077" }
 serde_json = "1"
 base64 = "0.22"
 png = "0.18"

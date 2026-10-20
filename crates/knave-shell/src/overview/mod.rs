@@ -1,6 +1,6 @@
 //! Workspace-first overview with a separate minimized-window shelf.
-mod icons;
-mod loader;
+pub(crate) mod icons;
+pub(crate) mod loader;
 mod view;
 use knave_apps::{Catalog, Environment};
 use knave_desktop_api::{
