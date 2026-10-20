@@ -777,20 +777,27 @@ fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
     }
 }
 
-/// Projected bar nodes live under one reserved element-id base; workspace
-/// chips reuse the bar component's node-id scheme, which starts at 10.
+/// Retained controls follow the shared bar's hit-target order.
 fn bar_element(node_id: u64) -> ElementId {
     ElementId(0x800_0000_0000 + node_id)
 }
 fn status_title(app: &Overview) -> Option<String> {
-    match app.scene.widget(bar_element(2)) {
-        Some(Widget::Text(title)) => Some(title.clone()),
-        _ => None,
-    }
+    app.display
+        .commands
+        .iter()
+        .rev()
+        .find_map(|command| match command {
+            knave_ui::DisplayCommand::Text { text, bounds, .. }
+                if bounds.x == 16.0 && bounds.y == 0.0 =>
+            {
+                Some(text.clone())
+            }
+            _ => None,
+        })
 }
 
 #[test]
-fn the_overview_projects_the_desktop_status_bar_component() {
+fn the_overview_routes_the_desktop_status_bar_targets() {
     let mut app = app();
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
@@ -826,7 +833,7 @@ fn the_overview_projects_the_desktop_status_bar_component() {
 }
 
 #[test]
-fn the_projected_bar_title_ignores_overview_browsing() {
+fn the_shared_bar_title_ignores_overview_browsing() {
     let mut app = app();
     app.browse(WorkspaceId(3));
     app.frame([1200.0, 800.0], &mut Metrics);
@@ -839,7 +846,7 @@ fn the_projected_bar_title_ignores_overview_browsing() {
 }
 
 #[test]
-fn projected_bar_text_matches_the_desktop_bar_display_list() {
+fn shared_bar_text_matches_the_desktop_bar_display_list() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
     let bar = UiScene::bar_with_snapshot(0, 1200.0, 36.0, Some(app.snapshot().unwrap()));
@@ -867,7 +874,7 @@ fn projected_bar_text_matches_the_desktop_bar_display_list() {
 }
 
 #[test]
-fn the_projected_bar_strip_paints_only_the_bar_component_shapes() {
+fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
     // Within the strip the only shapes are the transparent grouping container
@@ -892,9 +899,73 @@ fn the_projected_bar_strip_paints_only_the_bar_component_shapes() {
 }
 
 #[test]
-fn without_a_snapshot_the_projected_bar_shows_the_session_title() {
+fn without_a_snapshot_the_shared_bar_shows_the_session_title() {
     let mut app = Overview::new();
     app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(status_title(&app).as_deref(), Some("Knave"));
-    assert!(app.scene.bounds(bar_element(10)).is_none());
+    assert!(!app.targets.values().any(|target| matches!(
+        target,
+        Target::StatusBar(knave_ui::UiAction::FocusWorkspace(_))
+    )));
+}
+
+#[test]
+fn overview_renders_the_complete_shared_bar_and_routes_its_bell() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let shared = app.status_bar_component(1200.0);
+    assert!(app.display.commands.ends_with(&shared.display.commands));
+    let (index, _) = shared
+        .scene
+        .hit_targets()
+        .enumerate()
+        .find(|(_, (_, action))| *action == knave_ui::UiAction::ToggleNotifications)
+        .unwrap();
+    click(&mut app, bar_element(10 + index as u64));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::ToggleNotifications)
+    ));
+    app.notifications_enabled(false);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(
+        !app.status_bar_component(1200.0)
+            .scene
+            .hit_targets()
+            .any(|(_, action)| action == knave_ui::UiAction::ToggleNotifications)
+    );
+    assert!(app.scene.bounds(bar_element(10 + index as u64)).is_none());
+}
+
+#[test]
+fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
+    use knave_desktop_api::notifications::{Notification, NotificationSnapshot};
+    let mut app = app();
+    let mut state = NotificationSnapshot {
+        owned: true,
+        dnd: true,
+        ..Default::default()
+    };
+    state.notifications = vec![
+        Notification {
+            unread: true,
+            ..Default::default()
+        };
+        100
+    ];
+    app.notification_snapshot(Some(&state));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let shared =
+        knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, Some(&state));
+    assert!(app.display.commands.ends_with(&shared.display.commands));
+    for expected in ["99+", "z"] {
+        assert!(app.display.commands.iter().any(|command| matches!(command,
+            knave_ui::DisplayCommand::Text {text, ..} if text == expected)));
+    }
+    app.notification_snapshot(None);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let shared = knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, None);
+    assert!(app.display.commands.ends_with(&shared.display.commands));
+    assert!(!app.display.commands.iter().any(|command| matches!(command,
+        knave_ui::DisplayCommand::Text {text, ..} if text == "99+" || text == "z")));
 }
