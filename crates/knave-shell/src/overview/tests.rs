@@ -924,6 +924,13 @@ fn overview_renders_the_complete_shared_bar_and_routes_its_bell() {
     click(&mut app, bar_element(10 + index as u64));
     assert!(matches!(
         app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    app.desktop_action_finished(Ok(()));
+    assert!(matches!(
+        app.take_request(),
         Some(HostRequest::ToggleNotifications)
     ));
     app.notifications_enabled(false);
@@ -968,4 +975,26 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     assert!(app.display.commands.ends_with(&shared.display.commands));
     assert!(!app.display.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text {text, ..} if text == "99+" || text == "z")));
+}
+
+#[test]
+fn failed_overview_hide_does_not_open_notifications_behind_it() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let bell = app
+        .targets
+        .iter()
+        .find_map(|(id, target)| {
+            matches!(
+                target,
+                Target::StatusBar(knave_ui::UiAction::ToggleNotifications)
+            )
+            .then_some(*id)
+        })
+        .unwrap();
+    click(&mut app, bell);
+    app.take_request();
+    app.desktop_action_finished(Err("hide failed".into()));
+    assert!(app.take_request().is_none());
+    assert_eq!(app.error.as_deref(), Some("hide failed"));
 }

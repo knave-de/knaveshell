@@ -46,6 +46,7 @@ pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     notifications_enabled: bool,
+    notifications_after_hide: bool,
     panes: Vec<OverviewPane>,
     workspace: Option<WorkspaceId>,
     scene: Scene,
@@ -98,6 +99,7 @@ impl Overview {
             snapshot: None,
             notifications: None,
             notifications_enabled: true,
+            notifications_after_hide: false,
             panes: Vec::new(),
             workspace: None,
             scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
@@ -220,7 +222,10 @@ impl Overview {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
             Some(Target::StatusBar(knave_ui::UiAction::ToggleNotifications)) => {
-                self.request = Some(HostRequest::ToggleNotifications);
+                if self.connected {
+                    self.notifications_after_hide = true;
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+                }
             }
             Some(Target::StatusBar(_)) => {}
             Some(Target::Window(id)) => {
@@ -466,6 +471,7 @@ impl Application for Overview {
         self.dirty = true;
     }
     fn desktop_unavailable(&mut self) {
+        self.notifications_after_hide = false;
         self.reset_view();
         self.connected = false;
         if self.request.take().is_some() {
@@ -482,7 +488,11 @@ impl Application for Overview {
             return;
         }
         self.pending = false;
+        let notifications_after_hide = std::mem::take(&mut self.notifications_after_hide);
         match result {
+            Ok(()) if notifications_after_hide => {
+                self.request = Some(HostRequest::ToggleNotifications);
+            }
             Ok(()) if self.hide_after_action && self.surface_visible() => {
                 self.hide_after_action = false;
                 self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
