@@ -8,7 +8,9 @@ workspace/window state and composes application surfaces into at most three
 overview rectangles.
 The shell does not configure, resize, focus, or deliver input to those preview
 surfaces. Its search, card, and minimized-window controls still dispatch normal
-desktop actions and wait for acknowledgement before hiding. Escape hides it;
+desktop actions. Workspace navigation keeps Overview open; entering the center
+card, restoring a window, and launching an app wait for acknowledgement before
+hiding. Escape hides it;
 Super toggles the same session-owned instance. Hiding clears the query, focused
 control, browsing/pages, pointer gestures, errors, and any launch waiting on the
 catalog. Reopening selects the current active workspace. The catalog, icon
@@ -18,7 +20,12 @@ Disconnection also resets the view. This is private Shell behavior with no
 protocol or configuration change and no added background activity.
 
 The shell computes one selected card and up to two neighboring cards from the
-current logical output size. It sends their interior rectangles and workspace
+current logical output size and the active workspace in each desktop snapshot.
+Arrows, side cards, dots, and bar chips dispatch `FocusWorkspace` without hiding;
+the subscription updates the selected card, minimized shelf, and projected bar
+together. A failed switch leaves the last confirmed workspace selected. The
+existing single in-flight action bounds repeated navigation requests. No new
+worker, timer, or subscription is added. It sends their interior rectangles and workspace
 IDs using `set_overview_panes`. Pane contents cover the full rounded card;
 minimized controls, when present, render above them. Browsing and resizing replace the entire set; search clears it.
 Villain also clears it when the overview layer surface unmaps or is destroyed.

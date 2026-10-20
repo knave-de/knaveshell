@@ -344,7 +344,7 @@ impl Overview {
                         Some(ws) => {
                             self.targets.insert(
                                 ElementId(BAR_ELEMENT_ID_BASE + id.0),
-                                Target::FocusWorkspace(ws),
+                                Target::Workspace(ws),
                             );
                             let mut e = bar_chip(BAR_ELEMENT_ID_BASE + id.0, text, *bounds, *color);
                             e.enabled = !self.pending;

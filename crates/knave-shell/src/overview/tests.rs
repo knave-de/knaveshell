@@ -163,6 +163,14 @@ fn click(app: &mut Overview, id: ElementId) {
     app.input(Input::PointerDown(p));
     app.input(Input::PointerUp(p));
 }
+fn publish_workspace(app: &mut Overview, workspace: WorkspaceId) {
+    let mut next = app.snapshot().unwrap().clone();
+    for w in &mut next.workspaces {
+        w.active = w.workspace == workspace;
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+}
 #[test]
 fn minimized_shelf_is_workspace_scoped_and_paginated() {
     let mut app = app();
@@ -175,13 +183,24 @@ fn minimized_shelf_is_workspace_scoped_and_paginated() {
     assert!(app.scene.bounds(app.window_ids[&WindowId(7)]).is_some());
 }
 #[test]
-fn browsing_does_not_dispatch_or_close_and_enter_targets_browsed_workspace() {
+fn navigation_switches_workspace_without_hiding_and_enter_returns_to_it() {
     let mut app = app();
     key(&mut app, Key::Right, true);
-    app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(app.workspace, Some(WorkspaceId(3)));
+    assert_eq!(app.workspace, Some(WorkspaceId(2)));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
+            workspace: WorkspaceId(3)
+        }))
+    ));
+    // A snapshot can precede the command acknowledgement.
+    publish_workspace(&mut app, WorkspaceId(3));
+    app.desktop_action_finished(Ok(()));
     assert!(app.take_request().is_none());
-    assert!(!app.should_close());
+    assert!(app.surface_visible());
+    assert_eq!(app.workspace, Some(WorkspaceId(3)));
+    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+    assert!(app.scene.bounds(app.window_ids[&WindowId(14)]).is_some());
     key(&mut app, Key::Enter, true);
     key(&mut app, Key::Enter, false);
     assert!(matches!(
@@ -190,7 +209,6 @@ fn browsing_does_not_dispatch_or_close_and_enter_targets_browsed_workspace() {
             workspace: WorkspaceId(3)
         }))
     ));
-    assert!(!app.should_close());
     app.desktop_action_finished(Ok(()));
     assert!(matches!(
         app.take_request(),
@@ -198,7 +216,62 @@ fn browsing_does_not_dispatch_or_close_and_enter_targets_browsed_workspace() {
             visible: false
         }))
     ));
-    assert!(!app.should_close());
+}
+#[test]
+fn failed_navigation_and_repeated_input_preserve_confirmed_workspace() {
+    let mut app = app();
+    key(&mut app, Key::Right, true);
+    let request = app.take_request();
+    assert!(matches!(
+        request,
+        Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace { .. }))
+    ));
+    key(&mut app, Key::Left, true);
+    assert!(app.take_request().is_none());
+    assert!(!app.hide_after_action);
+    app.desktop_action_finished(Err("Workspace unavailable".into()));
+    assert_eq!(app.workspace, Some(WorkspaceId(2)));
+    assert_eq!(app.error.as_deref(), Some("Workspace unavailable"));
+    assert!(app.take_request().is_none());
+    assert!(app.surface_visible());
+    key(&mut app, Key::Left, true);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
+            workspace: WorkspaceId(1)
+        }))
+    ));
+    // The acknowledgement can also precede the pushed snapshot.
+    app.desktop_action_finished(Ok(()));
+    assert!(app.take_request().is_none());
+    publish_workspace(&mut app, WorkspaceId(1));
+    assert_eq!(app.workspace, Some(WorkspaceId(1)));
+    assert!(app.surface_visible());
+}
+#[test]
+fn workspace_controls_switch_without_hiding() {
+    for id in [
+        ElementId(21),
+        ElementId(0x200_0000_0000 + 3),
+        ElementId(0x100_0000_0000 + 3 * 32),
+        bar_element(12),
+    ] {
+        let mut app = app();
+        // A side card may be clipped; activating its target exercises the same action.
+        app.activate(id);
+        assert!(matches!(
+            app.take_request(),
+            Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
+                workspace: WorkspaceId(3)
+            }))
+        ));
+        app.desktop_action_finished(Ok(()));
+        assert!(app.take_request().is_none());
+        publish_workspace(&mut app, WorkspaceId(3));
+        assert_eq!(app.workspace, Some(WorkspaceId(3)));
+        assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+        assert!(app.surface_visible());
+    }
 }
 #[test]
 fn restore_waits_for_ack_and_failure_keeps_overview_open() {
@@ -220,16 +293,17 @@ fn restore_waits_for_ack_and_failure_keeps_overview_open() {
     assert!(app.error.is_some());
 }
 #[test]
-fn snapshots_with_same_generation_update_membership_and_preserve_browsing() {
+fn snapshots_with_same_generation_sync_active_workspace_and_membership() {
     let mut app = app();
-    app.browse(WorkspaceId(3));
+    publish_workspace(&mut app, WorkspaceId(3));
     let mut next = snapshot();
     next.windows.retain(|w| w.id != WindowId(2));
     next.workspaces[0].active = true;
     next.workspaces[1].active = false;
     app.desktop_snapshot(&next);
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(app.workspace, Some(WorkspaceId(3)));
+    assert_eq!(app.workspace, Some(WorkspaceId(1)));
+    assert_eq!(status_title(&app).as_deref(), Some("Workspace 1"));
     assert!(!app.window_ids.contains_key(&WindowId(2)));
     next.workspaces.pop();
     app.desktop_snapshot(&next);
@@ -266,7 +340,7 @@ fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {
         vec![WorkspaceId(1), WorkspaceId(3), WorkspaceId(2)]
     );
     assert!(panes.iter().all(|pane| pane.width > 0 && pane.height > 0));
-    app.browse(WorkspaceId(3));
+    publish_workspace(&mut app, WorkspaceId(3));
     app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(
         app.overview_panes()
@@ -677,7 +751,7 @@ fn launching_then_reopening_resets_the_search_without_reloading_apps() {
 #[test]
 fn external_hide_resets_browsing_pages_selection_and_errors() {
     let mut app = app();
-    app.browse(WorkspaceId(3));
+    publish_workspace(&mut app, WorkspaceId(3));
     type_query(&mut app, "tool");
     app.page = 2;
     app.result_page = 1;
@@ -817,20 +891,16 @@ fn the_overview_projects_the_desktop_status_bar_component() {
         }))
     ));
     app.desktop_action_finished(Ok(()));
-    assert!(matches!(
-        app.take_request(),
-        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
-            visible: false
-        }))
-    ));
+    assert!(app.take_request().is_none());
+    assert!(app.surface_visible());
 }
 
 #[test]
-fn the_projected_bar_title_ignores_overview_browsing() {
+fn the_projected_bar_title_tracks_the_selected_workspace() {
     let mut app = app();
-    app.browse(WorkspaceId(3));
+    publish_workspace(&mut app, WorkspaceId(3));
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
+    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
     // The bar, including its chips, stays visible while searching.
     type_query(&mut app, "edit");
     assert!(app.scene.bounds(bar_element(12)).is_some());
