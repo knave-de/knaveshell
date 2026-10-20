@@ -167,18 +167,18 @@ impl Overview {
         })
     }
     fn browse(&mut self, ws: WorkspaceId) {
-        if self.workspace != Some(ws)
+        if !self.pending
+            && self.workspace != Some(ws)
             && self
                 .snapshot
                 .as_ref()
                 .is_some_and(|s| s.workspaces.iter().any(|w| w.workspace == ws))
         {
-            self.workspace = Some(ws);
-            let _ = self.scene.set_focus(None);
-            self.page = 0;
-            self.dirty = true;
+            self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws });
+            self.hide_after_action = false;
         }
     }
+
     fn adjacent(&mut self, next: bool) {
         let Some(s) = &self.snapshot else { return };
         let Some(index) = s
@@ -218,9 +218,7 @@ impl Overview {
             Some(Target::EnterWorkspace(ws)) => {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
-            Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => {
-                self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
-            }
+            Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
             Some(Target::StatusBar(knave_ui::UiAction::ToggleNotifications)) => {
                 if self.connected {
                     self.notifications_after_hide = true;
@@ -446,18 +444,15 @@ impl Application for Overview {
             self.hide_after_action = false;
         }
         let previous = self.workspace;
-        self.workspace = previous
-            .filter(|id| snapshot.workspaces.iter().any(|w| w.workspace == *id))
-            .or_else(|| {
-                snapshot
-                    .workspaces
-                    .iter()
-                    .find(|w| w.active)
-                    .or(snapshot.workspaces.first())
-                    .map(|w| w.workspace)
-            });
+        self.workspace = snapshot
+            .workspaces
+            .iter()
+            .find(|w| w.active)
+            .or(snapshot.workspaces.first())
+            .map(|w| w.workspace);
         if self.workspace != previous {
             self.page = 0;
+            let _ = self.scene.set_focus(None);
         }
         self.window_ids
             .retain(|id, _| snapshot.windows.iter().any(|w| w.id == *id));
