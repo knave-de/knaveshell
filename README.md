@@ -164,6 +164,9 @@ disturb remains in Notifications. Missing hardware/services are shown explicitly
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need kernel/firmware support and, when root-owned, pkexec plus a running
-desktop authentication agent. There is no dependency on hyprsunset. Deploy matching
+thresholds need kernel/firmware support and, when root-owned, pkexec. Knave reuses
+or starts an installed polkit agent for authentication and releases the panel's
+input while the prompt is active. Power lives in the main header and confirms in
+a modal popup; subpages contain no Power footer or Refresh button. Brightness
+supports 1–100%. There is no dependency on hyprsunset. Deploy matching
 Knave and Villain revisions; see Knave ADR 0013.

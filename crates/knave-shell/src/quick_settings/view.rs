@@ -1,5 +1,5 @@
 use super::*;
-use knave_ui::{Border, CornerRadii, ShapePaint, TextWrap};
+use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
 struct Palette {
     surface: Color,
     card: Color,
@@ -67,6 +67,15 @@ impl Palette {
             radii: CornerRadii::uniform(0.0),
             ..ShapePaint::fill(self.card)
         });
+        e
+    }
+    fn header_button(&self, id: u64, label: &str, width: f32) -> Element {
+        let mut e = self.button(id, label, true);
+        e.layout.width = Length::Px(width);
+        e.layout.height = Length::Px(32.0);
+        e.layout.padding = 0.0;
+        e.layout.padding_edges = Some(Insets::all(0.0));
+        e.style.text.align = TextAlign::Center;
         e
     }
     fn slider(&self, id: u64, min: f64, max: f64, value: f64, step: f64, enabled: bool) -> Element {
@@ -197,10 +206,7 @@ impl QuickSettings {
         });
         let mut header = self.row(&p);
         if self.page != Page::Main {
-            let mut b = p.button(BACK, "‹", true);
-            b.layout.width = Length::Px(32.0);
-            b.layout.height = Length::Px(32.0);
-            header.children.push(b)
+            header.children.push(p.header_button(BACK, "‹", 32.0));
         }
         let title = match self.page {
             Page::Main => "Quick settings",
@@ -208,13 +214,24 @@ impl QuickSettings {
 
             Page::Night => "Night Light",
             Page::Battery => "Battery charging",
-            Page::Power => "Power",
         };
-        header.children.push(self.label(&p, title, false));
-        let mut close = p.button(CLOSE, "×", true);
-        close.layout.width = Length::Px(32.0);
-        close.layout.height = Length::Px(32.0);
-        header.children.push(close);
+        let mut title = self.label(&p, title, false);
+        title.layout.height = Length::Px(32.0);
+        title.layout.padding_edges = Some(Insets::symmetric(6.0, 0.0));
+        header.children.push(title);
+        if self.page == Page::Main {
+            let mut power = p.header_button(POWER, "Power", 72.0);
+            power.widget = Widget::Menu {
+                label: "Power".into(),
+                items: vec![
+                    MenuItem::option(1, "Suspend"),
+                    MenuItem::option(2, "Restart…"),
+                    MenuItem::option(3, "Shut down…"),
+                ],
+            };
+            header.children.push(power);
+        }
+        header.children.push(p.header_button(CLOSE, "×", 32.0));
         panel.children.push(header);
         let mut scroll = p.element(20, Widget::Scroll).layout(Layout {
             height: Length::Fill,
@@ -288,9 +305,9 @@ impl QuickSettings {
                 ));
                 brightness.children.push(p.slider(
                     BRIGHTNESS,
-                    5.0,
+                    1.0,
                     100.0,
-                    self.state.brightness.map_or(5.0, f64::from),
+                    self.state.brightness.map_or(1.0, f64::from),
                     1.0,
                     self.state.brightness.is_some(),
                 ));
@@ -489,33 +506,8 @@ impl QuickSettings {
                     }
                 }
             }
-            Page::Power => {
-                if let Some(c) = self.confirmation.clone() {
-                    content
-                        .children
-                        .push(self.label(&p, "Confirm this session action?", false));
-                    content
-                        .children
-                        .push(self.button(&p, "Confirm", Target::Command(c), true));
-                    content.children.push(self.button(
-                        &p,
-                        "Cancel",
-                        Target::Page(Page::Power),
-                        true,
-                    ))
-                } else {
-                    for (label, c) in [
-                        ("Suspend", QuickSettingsCommand::Suspend),
-                        ("Restart…", QuickSettingsCommand::Reboot),
-                        ("Shut down…", QuickSettingsCommand::PowerOff),
-                    ] {
-                        content
-                            .children
-                            .push(self.button(&p, label, Target::Confirm(c), true))
-                    }
-                }
-            }
         }
+
         if let Some(error) = self.error.clone() {
             content
                 .children
@@ -535,20 +527,48 @@ impl QuickSettings {
                 ),
             )
         }
-        content.children.push(self.button(
-            &p,
-            "Refresh",
-            Target::Command(QuickSettingsCommand::Refresh),
-            true,
-        ));
         scroll.children.push(content);
         panel.children.push(scroll);
-        let mut footer = self.row(&p);
-        footer
-            .children
-            .push(self.button(&p, "Power ›", Target::Page(Page::Power), true));
-        panel.children.push(footer);
         root.children.push(panel);
+        let mut dialog = p
+            .element(CONFIRMATION, Widget::Popup { modal: true })
+            .layout(Layout {
+                width: Length::Px((self.size[0] - 24.0).clamp(1.0, 340.0)),
+                padding: 16.0,
+                gap: 12.0,
+                ..Default::default()
+            });
+        dialog.visible = self.confirmation.is_some();
+        dialog.style.background = Some(ShapePaint {
+            border: Some(Border {
+                color: p.border,
+                width: 1.0,
+            }),
+            radii: CornerRadii::uniform(0.0),
+            ..ShapePaint::fill(p.surface)
+        });
+        if let Some(command) = self.confirmation.clone() {
+            let (title, body, action) = match command {
+                QuickSettingsCommand::Suspend => {
+                    ("Suspend?", "Put the computer to sleep?", "Suspend")
+                }
+                QuickSettingsCommand::Reboot => {
+                    ("Restart?", "Unsaved work may be lost.", "Restart")
+                }
+                _ => ("Shut down?", "Unsaved work may be lost.", "Shut down"),
+            };
+            dialog.children.push(self.label(&p, title, false));
+            dialog.children.push(self.label(&p, body, true));
+            let mut actions = self.row(&p);
+            actions
+                .children
+                .push(p.button(CANCEL_CONFIRMATION, "Cancel", true));
+            let mut confirm = p.button(CONFIRM_ACTION, action, true);
+            confirm.style.text.align = TextAlign::Center;
+            actions.children.push(confirm);
+            dialog.children.push(actions);
+        }
+        root.children.push(dialog);
         root
     }
 }

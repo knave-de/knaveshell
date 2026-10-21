@@ -18,6 +18,10 @@ const TEMPERATURE: u64 = 7;
 const LIMIT: u64 = 8;
 const START: u64 = 9;
 const END: u64 = 10;
+const POWER: u64 = 11;
+const CONFIRMATION: u64 = 12;
+const CANCEL_CONFIRMATION: u64 = 13;
+const CONFIRM_ACTION: u64 = 14;
 #[derive(Clone, Copy, Default, PartialEq)]
 enum Page {
     #[default]
@@ -25,7 +29,6 @@ enum Page {
     Network,
     Night,
     Battery,
-    Power,
 }
 #[derive(Clone)]
 enum Target {
@@ -34,7 +37,6 @@ enum Target {
     NightToggle,
     Schedule,
     ApplyLimit,
-    Confirm(QuickSettingsCommand),
 }
 pub struct QuickSettings {
     state: QuickSettingsSnapshot,
@@ -48,6 +50,7 @@ pub struct QuickSettings {
     error: Option<String>,
     connected: bool,
     closing: bool,
+    authenticating: bool,
     pressed: bool,
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
@@ -76,6 +79,7 @@ impl QuickSettings {
             error: None,
             connected: false,
             closing: false,
+            authenticating: false,
             pressed: false,
             pending: None,
             outside: false,
@@ -132,7 +136,36 @@ impl QuickSettings {
             end: self.night.end,
         }
     }
+    fn dismiss_confirmation(&mut self) {
+        self.scene.close_popup();
+        self.confirmation = None;
+        self.dirty = true;
+    }
+    fn select_power(&mut self, action: u64) {
+        self.confirmation = match action {
+            1 => Some(QuickSettingsCommand::Suspend),
+            2 => Some(QuickSettingsCommand::Reboot),
+            3 => Some(QuickSettingsCommand::PowerOff),
+            _ => None,
+        };
+        self.dirty = true;
+    }
     fn activate(&mut self, id: ElementId) {
+        if id.0 == CANCEL_CONFIRMATION {
+            self.dismiss_confirmation();
+            return;
+        }
+        if id.0 == CONFIRM_ACTION {
+            if let Some(c) = self.confirmation.clone() {
+                self.dismiss_confirmation();
+                self.send(c);
+                self.authenticating = self
+                    .client
+                    .as_ref()
+                    .is_some_and(QuickSettingsClient::authentication_pending);
+            }
+            return;
+        }
         if id.0 == CLOSE {
             self.send(QuickSettingsCommand::Close);
             return;
@@ -170,12 +203,16 @@ impl QuickSettings {
                 self.send(self.night_command());
                 self.dirty = true
             }
-            Some(Target::ApplyLimit) => self.send(QuickSettingsCommand::SetChargeLimit {
-                percent: self.limit,
-            }),
-            Some(Target::Confirm(c)) => {
-                self.confirmation = Some(c);
-                self.dirty = true
+            Some(Target::ApplyLimit) => {
+                self.error = None;
+                self.send(QuickSettingsCommand::SetChargeLimit {
+                    percent: self.limit,
+                });
+                self.authenticating = self
+                    .client
+                    .as_ref()
+                    .is_some_and(QuickSettingsClient::authentication_pending);
+                self.dirty = true;
             }
             None => {}
         }
@@ -234,6 +271,15 @@ impl Application for QuickSettings {
         self.client = Some(QuickSettingsClient::start(w))
     }
     fn update(&mut self) {
+        if self.authenticating
+            && self
+                .client
+                .as_ref()
+                .is_none_or(|c| !c.authentication_pending())
+        {
+            self.authenticating = false;
+            self.dirty = true;
+        }
         if let Some(result) = self.client.as_ref().and_then(QuickSettingsClient::latest) {
             match result {
                 Ok(s) => {
@@ -257,17 +303,17 @@ impl Application for QuickSettings {
         }
     }
     fn surface_visible(&self) -> bool {
-        self.connected && self.state.open
+        self.connected && self.state.open && !self.authenticating
     }
     fn keyboard_mode(&self) -> Option<KeyboardMode> {
-        Some(if self.state.open {
+        Some(if self.surface_visible() {
             KeyboardMode::Exclusive
         } else {
             KeyboardMode::None
         })
     }
     fn input_region(&self) -> Option<Vec<Rect>> {
-        Some(if self.state.open {
+        Some(if self.surface_visible() {
             vec![Rect::new(0.0, 0.0, self.size[0], self.size[1])]
         } else {
             Vec::new()
@@ -285,6 +331,18 @@ impl Application for QuickSettings {
                 ..
             }
         ) {
+            if self.confirmation.is_some() {
+                self.dismiss_confirmation();
+                return;
+            }
+            if self
+                .scene
+                .interaction(ElementId(POWER))
+                .is_some_and(|s| s.expanded)
+            {
+                self.scene.event(event);
+                return;
+            }
             if self.page == Page::Main {
                 self.send(QuickSettingsCommand::Close)
             } else {
@@ -294,12 +352,13 @@ impl Application for QuickSettings {
             }
             return;
         }
-        if matches!(event, Input::FocusLost) && self.state.open {
+        if matches!(event, Input::FocusLost) && self.state.open && !self.authenticating {
             self.send(QuickSettingsCommand::Close)
         }
         if let Input::PointerDown(p) = &event {
             self.pressed = true;
-            self.outside = self.scene.bounds(PANEL).is_some_and(|r| !contains(r, *p));
+            self.outside = self.confirmation.is_none()
+                && self.scene.bounds(PANEL).is_some_and(|r| !contains(r, *p));
         }
         let release = matches!(
             event,
@@ -308,6 +367,8 @@ impl Application for QuickSettings {
         let result = self.scene.event(event);
         match result.action {
             Some(Action::Activated(id)) => self.activate(id),
+            Some(Action::Selected(id, value)) if id.0 == POWER => self.select_power(value),
+            Some(Action::PopupClosed(_)) => self.dismiss_confirmation(),
             Some(Action::ValueChanged(id, v)) => self.value(id, v, !self.pressed),
             Some(Action::ValueCommitted(id, v)) => self.value(id, v, true),
             _ => {}
@@ -337,6 +398,9 @@ impl Application for QuickSettings {
             let tree = self.compose();
             if let Err(e) = self.scene.replace(tree) {
                 self.error = Some(e.to_string())
+            }
+            if self.confirmation.is_some() {
+                let _ = self.scene.open_popup(ElementId(CONFIRMATION));
             }
             self.scene.layout(size, text);
             if self.focus_on_open {

@@ -61,13 +61,7 @@ fn app() -> QuickSettings {
 #[test]
 fn all_pages_fit_narrow_and_short_outputs() {
     for size in [[320.0, 240.0], [320.0, 568.0], [1280.0, 800.0]] {
-        for page in [
-            Page::Main,
-            Page::Network,
-            Page::Night,
-            Page::Battery,
-            Page::Power,
-        ] {
+        for page in [Page::Main, Page::Network, Page::Night, Page::Battery] {
             let mut app = app();
             app.page = page;
             let list = app.frame(size, &mut Metrics).clone();
@@ -117,4 +111,89 @@ fn close_intent_suppresses_late_open_snapshots_until_acknowledged() {
     app.apply(QuickSettingsSnapshot::default());
     app.apply(late);
     assert!(app.surface_visible());
+}
+
+fn click(app: &mut QuickSettings, id: u64) {
+    let r = app.scene.bounds(ElementId(id)).unwrap();
+    let p = [r.x + r.width / 2.0, r.y + r.height / 2.0];
+    app.input(Input::PointerMove(p));
+    app.input(Input::PointerDown(p));
+    app.input(Input::PointerUp(p));
+    app.frame(app.size, &mut Metrics);
+}
+#[test]
+fn power_is_main_header_only_and_refresh_is_absent() {
+    for page in [Page::Main, Page::Network, Page::Night, Page::Battery] {
+        let mut app = app();
+        app.page = page;
+        let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+        assert!(
+            !list
+                .commands
+                .iter()
+                .any(|c| matches!(c,knave_ui::DisplayCommand::Text{text,..} if text=="Refresh"))
+        );
+        assert_eq!(
+            app.scene.bounds(ElementId(POWER)).is_some(),
+            page == Page::Main
+        );
+        let close = app.scene.bounds(ElementId(CLOSE)).unwrap();
+        if page == Page::Main {
+            let power = app.scene.bounds(ElementId(POWER)).unwrap();
+            assert_eq!(power.y, close.y);
+            assert_eq!(power.height, close.height);
+        } else {
+            let back = app.scene.bounds(ElementId(BACK)).unwrap();
+            assert_eq!(back.y, close.y);
+            assert_eq!(back.height, close.height);
+        }
+    }
+}
+#[test]
+fn power_confirmation_is_modal_survives_updates_and_escape_cancels() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.select_power(2);
+    app.frame(app.size, &mut Metrics);
+    assert!(app.confirmation.is_some());
+    let dialog = app.scene.bounds(ElementId(CONFIRMATION)).unwrap();
+    assert!(dialog.width > 0.0 && dialog.height > 0.0);
+    let latest = app.state.clone();
+    app.apply(latest);
+    app.frame(app.size, &mut Metrics);
+    assert!(app.scene.bounds(ElementId(CONFIRMATION)).unwrap().height > 0.0);
+    assert!(app.scene.set_focus(Some(ElementId(CLOSE))).is_err());
+    app.input(Input::Key {
+        key: Key::Escape,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    });
+    app.frame(app.size, &mut Metrics);
+    assert!(app.confirmation.is_none());
+    assert!(app.surface_visible());
+    app.select_power(3);
+    app.frame(app.size, &mut Metrics);
+    click(&mut app, CANCEL_CONFIRMATION);
+    assert!(app.confirmation.is_none());
+    assert!(app.surface_visible());
+}
+#[test]
+fn brightness_home_reaches_one_percent_and_authentication_releases_input() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.scene.set_focus(Some(ElementId(BRIGHTNESS))).unwrap();
+    app.input(Input::Key {
+        key: Key::Home,
+        pressed: true,
+        repeat: false,
+        modifiers: Default::default(),
+    });
+    assert_eq!(app.state.brightness, Some(1));
+    app.authenticating = true;
+    assert!(!app.surface_visible());
+    assert_eq!(app.keyboard_mode(), Some(KeyboardMode::None));
+    assert!(app.input_region().unwrap().is_empty());
+    app.input(Input::FocusLost);
+    assert!(app.state.open);
 }
