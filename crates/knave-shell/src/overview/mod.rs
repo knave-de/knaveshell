@@ -48,6 +48,7 @@ pub struct Overview {
     applets: Vec<knave_ui::status_bar::Applet>,
     notifications_enabled: bool,
     notifications_after_hide: bool,
+    quick_settings_after_hide: bool,
     panes: Vec<OverviewPane>,
     workspace: Option<WorkspaceId>,
     scene: Scene,
@@ -103,6 +104,7 @@ impl Overview {
             applets: Vec::new(),
             notifications_enabled: true,
             notifications_after_hide: false,
+            quick_settings_after_hide: false,
             panes: Vec::new(),
             workspace: None,
             scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
@@ -222,6 +224,12 @@ impl Overview {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
             Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
+            Some(Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)) => {
+                if self.connected {
+                    self.quick_settings_after_hide = true;
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+                }
+            }
             Some(Target::StatusBar(knave_ui::UiAction::ToggleNotifications)) => {
                 if self.connected {
                     self.notifications_after_hide = true;
@@ -477,6 +485,7 @@ impl Application for Overview {
     }
     fn desktop_unavailable(&mut self) {
         self.notifications_after_hide = false;
+        self.quick_settings_after_hide = false;
         self.reset_view();
         self.connected = false;
         if self.request.take().is_some() {
@@ -494,7 +503,11 @@ impl Application for Overview {
         }
         self.pending = false;
         let notifications_after_hide = std::mem::take(&mut self.notifications_after_hide);
+        let quick_settings_after_hide = std::mem::take(&mut self.quick_settings_after_hide);
         match result {
+            Ok(()) if quick_settings_after_hide => {
+                self.request = Some(HostRequest::ToggleQuickSettings);
+            }
             Ok(()) if notifications_after_hide => {
                 self.request = Some(HostRequest::ToggleNotifications);
             }

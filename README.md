@@ -151,3 +151,19 @@ are deduplicated and removed when their bus owner exits. One event-driven worker
 per bar host owns a 16-command queue and at most 32 items. Icons that fit the output
 are shown; narrow outputs retain space for the workspace label and bell. Legacy
 XEmbed tray icons are not supported.
+
+### Quick settings
+
+Click Settings beside the notification bell in the bar or Overview for a native,
+full-height panel. It combines Ethernet/Wi-Fi, Bluetooth, output/microphone mute
+and volume, brightness, power profiles, configurable battery charge limit, and
+manual/scheduled Night Light. Audio devices and application volumes open in
+pavucontrol; additional network profiles open in nm-connection-editor. Do not
+disturb remains in Notifications. Missing hardware/services are shown explicitly.
+
+The session starts the `quick-settings` role and its Knave-owned service. It needs
+NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
+powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
+thresholds need kernel/firmware support and, when root-owned, pkexec plus a running
+desktop authentication agent. There is no dependency on hyprsunset. Deploy matching
+Knave and Villain revisions; see Knave ADR 0013.

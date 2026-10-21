@@ -6,6 +6,7 @@ mod cursor;
 mod harness_ready;
 mod ime;
 pub mod notifications;
+pub mod quick_settings;
 mod snapshot;
 pub mod tray;
 pub mod tray_menu;
@@ -718,6 +719,8 @@ fn run_internal(
             notifications::NotificationClient::start_summary(Waker::new(wake_sender.clone()))
         }),
         notification_snapshot: None,
+        quick_settings_client: tray_bar
+            .then(|| quick_settings::QuickSettingsClient::start(Waker::new(wake_sender.clone()))),
         tray_client: tray_bar.then(|| tray::TrayClient::start(Waker::new(wake_sender.clone()))),
         applets: Vec::new(),
         app_input_region: None,
@@ -798,6 +801,7 @@ struct Runtime {
     app: Option<Box<dyn Application>>,
     options: Option<SurfaceOptions>,
     notification_client: Option<notifications::NotificationClient>,
+    quick_settings_client: Option<quick_settings::QuickSettingsClient>,
     notification_snapshot: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     tray_client: Option<tray::TrayClient>,
     applets: Vec<knave_ui::status_bar::Applet>,
@@ -1303,6 +1307,15 @@ impl Runtime {
                     .find(|(_, item)| item.id == id)
                     .map_or(0, |(r, _)| (r.x + r.width / 2.0) as i32);
                 self.tray_action(id, tray::Action::Activate, x, 18);
+                return;
+            }
+            UiAction::ToggleQuickSettings => {
+                if let Some(client) = &self.quick_settings_client
+                    && let Err(error) = client
+                        .command(knave_desktop_api::quick_settings::QuickSettingsCommand::Toggle)
+                {
+                    eprintln!("knave-shell: {error}");
+                }
                 return;
             }
             UiAction::ToggleNotifications => {
