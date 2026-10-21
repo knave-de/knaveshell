@@ -1011,7 +1011,14 @@ fn overview_renders_the_complete_shared_bar_and_routes_its_bell() {
             .hit_targets()
             .any(|(_, action)| action == knave_ui::UiAction::ToggleNotifications)
     );
-    assert!(app.scene.bounds(bar_element(10 + index as u64)).is_none());
+    assert!(!app.targets.values().any(|target| matches!(
+        target,
+        Target::StatusBar(knave_ui::UiAction::ToggleNotifications)
+    )));
+    assert!(app.targets.values().any(|target| matches!(
+        target,
+        Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)
+    )));
 }
 
 #[test]
@@ -1075,4 +1082,33 @@ fn failed_overview_hide_does_not_open_notifications_behind_it() {
     app.desktop_action_finished(Err("hide failed".into()));
     assert!(app.take_request().is_none());
     assert_eq!(app.error.as_deref(), Some("hide failed"));
+}
+
+#[test]
+fn quick_settings_hides_overview_before_transferring_focus() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let id = *app
+        .targets
+        .iter()
+        .find(|(_, target)| {
+            matches!(
+                target,
+                Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)
+            )
+        })
+        .unwrap()
+        .0;
+    click(&mut app, id);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
+    app.desktop_action_finished(Ok(()));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::ToggleQuickSettings)
+    ));
 }
