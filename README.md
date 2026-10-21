@@ -135,3 +135,19 @@ first, the bell indicates external delivery and shows saved Knave history only.
 Disconnected state is explicit. Match this Shell with the Knave revision supplying
 [ADR 0012](../knave/docs/architecture/decisions/0012-notifications.md); the session
 checks `--supports-notifications-service` before starting the role.
+
+### Application applets
+
+StatusNotifier tray icons appear immediately left of the notification bell in
+both the bar and Overview. Left-click activates the app (or opens a menu-only
+applet), right-click opens its menu, middle-click sends its secondary action,
+and scrolling sends vertical scroll events. Exported dbusmenu menus support
+submenus, disabled actions and check/radio states; Escape, Close or an outside
+click dismisses the menu. Attention icons have a marker; passive items are hidden.
+
+The shell hosts both KDE and freedesktop StatusNotifier interfaces on the
+session bus and uses an existing KDE watcher when one is present. Registrations
+are deduplicated and removed when their bus owner exits. One event-driven worker
+per bar host owns a 16-command queue and at most 32 items. Icons that fit the output
+are shown; narrow outputs retain space for the workspace label and bell. Legacy
+XEmbed tray icons are not supported.

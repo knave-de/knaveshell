@@ -292,6 +292,13 @@ impl Overview {
             button.style.pressed = transparent;
             button.style.selected = transparent;
             button.style.focus = transparent;
+            if let knave_ui::UiAction::Applet(id) = action {
+                button.tooltip = self
+                    .applets
+                    .iter()
+                    .find(|item| item.id == id)
+                    .map(|item| item.title.clone());
+            }
             button.enabled = !self.pending;
             bar.children.push(button);
         }
