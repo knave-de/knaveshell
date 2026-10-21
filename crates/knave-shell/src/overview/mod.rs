@@ -45,6 +45,7 @@ fn app_element(index: usize) -> ElementId {
 pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
+    applets: Vec<knave_ui::status_bar::Applet>,
     notifications_enabled: bool,
     notifications_after_hide: bool,
     panes: Vec<OverviewPane>,
@@ -91,6 +92,7 @@ impl Overview {
             self.snapshot.as_ref(),
             self.notifications_enabled,
             self.notifications.as_ref(),
+            &self.applets,
         )
     }
     pub fn new() -> Self {
@@ -98,6 +100,7 @@ impl Overview {
             display: DisplayList::default(),
             snapshot: None,
             notifications: None,
+            applets: Vec::new(),
             notifications_enabled: true,
             notifications_after_hide: false,
             panes: Vec::new(),
@@ -224,6 +227,9 @@ impl Overview {
                     self.notifications_after_hide = true;
                     self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                 }
+            }
+            Some(Target::StatusBar(knave_ui::UiAction::Applet(id))) => {
+                self.request = Some(HostRequest::Applet(id));
             }
             Some(Target::StatusBar(_)) => {}
             Some(Target::Window(id)) => {
@@ -404,6 +410,10 @@ impl Overview {
     }
 }
 impl Application for Overview {
+    fn applets(&mut self, applets: &[knave_ui::status_bar::Applet]) {
+        self.applets = applets.to_vec();
+        self.dirty = true;
+    }
     fn uses_status_bar(&self) -> bool {
         true
     }

@@ -75,6 +75,7 @@ impl Default for SurfaceOptions {
 #[derive(Clone, Debug)]
 pub enum HostRequest {
     ToggleNotifications,
+    Applet(u64),
     Copy(String),
     Paste(knave_ui::toolkit::ElementId),
     Desktop(knave_desktop_api::DesktopCommand),
@@ -118,6 +119,7 @@ pub trait Application {
     ) {
     }
     fn notifications_enabled(&mut self, _enabled: bool) {}
+    fn applets(&mut self, _applets: &[knave_ui::status_bar::Applet]) {}
     /// Opt into the host's bounded desktop snapshot, preview and action workers.
     fn uses_desktop(&self) -> bool {
         false
@@ -220,6 +222,9 @@ impl super::Runtime {
         match self.app.as_mut().and_then(|app| app.take_request()) {
             Some(HostRequest::ToggleNotifications) => {
                 self.dispatch_ui_action(knave_ui::UiAction::ToggleNotifications)
+            }
+            Some(HostRequest::Applet(id)) => {
+                self.dispatch_ui_action(knave_ui::UiAction::Applet(id))
             }
             Some(HostRequest::Copy(text)) => self.copy_text(text, qh),
             Some(HostRequest::Paste(target)) => self.request_paste(target, qh),

@@ -72,6 +72,7 @@ pub struct NodeId(pub u64);
 pub enum UiAction {
     CloseOverview,
     ToggleNotifications,
+    Applet(u64),
     FocusWorkspace(WorkspaceId),
     FocusWindow(WindowId),
     RestoreWindow(WindowId),

@@ -7,6 +7,8 @@ mod harness_ready;
 mod ime;
 pub mod notifications;
 mod snapshot;
+pub mod tray;
+pub mod tray_menu;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition, Waker,
     run_application,
@@ -686,6 +688,8 @@ fn run_internal(
     if let Some(app) = &mut app {
         app.notifications_enabled(notification_bar);
     }
+    let tray_bar = (options.is_none() && role == ShellRole::Bar)
+        || app.as_ref().is_some_and(|app| app.uses_status_bar());
     let mut state = Runtime {
         harness_ready: harness_ready::ReadySignal::from_env(
             options
@@ -714,6 +718,8 @@ fn run_internal(
             notifications::NotificationClient::start_summary(Waker::new(wake_sender.clone()))
         }),
         notification_snapshot: None,
+        tray_client: tray_bar.then(|| tray::TrayClient::start(Waker::new(wake_sender.clone()))),
+        applets: Vec::new(),
         app_input_region: None,
         app_keyboard_mode: None,
         scale: 1,
@@ -793,6 +799,8 @@ struct Runtime {
     options: Option<SurfaceOptions>,
     notification_client: Option<notifications::NotificationClient>,
     notification_snapshot: Option<knave_desktop_api::notifications::NotificationSnapshot>,
+    tray_client: Option<tray::TrayClient>,
+    applets: Vec<knave_ui::status_bar::Applet>,
     app_input_region: Option<Vec<knave_ui::Rect>>,
     app_keyboard_mode: Option<KeyboardMode>,
     scale: u32,
@@ -895,6 +903,19 @@ impl Runtime {
             self.notification_snapshot = update.ok();
             if let Some(app) = &mut self.app {
                 app.notification_snapshot(self.notification_snapshot.as_ref());
+            }
+            self.scene_dirty = true;
+        }
+        if let Some(update) = self.tray_client.as_ref().and_then(tray::TrayClient::latest) {
+            self.applets = match update {
+                Ok(items) => items,
+                Err(error) => {
+                    eprintln!("knave-shell: applets unavailable: {error}");
+                    Vec::new()
+                }
+            };
+            if let Some(app) = &mut self.app {
+                app.applets(&self.applets);
             }
             self.scene_dirty = true;
         }
@@ -1006,6 +1027,7 @@ impl Runtime {
                     self.snapshot.as_ref(),
                     self.notification_client.is_some(),
                     self.notification_snapshot.as_ref(),
+                    &self.applets,
                 );
                 self.scene = bar.scene;
                 self.render_list = bar.display;
@@ -1276,6 +1298,10 @@ impl Runtime {
 impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
         let command = match action {
+            UiAction::Applet(id) => {
+                self.tray_action(id, tray::Action::Activate, 0, 0);
+                return;
+            }
             UiAction::ToggleNotifications => {
                 if let Some(client) = &self.notification_client
                     && let Err(error) = client.command(
@@ -1309,6 +1335,13 @@ impl Runtime {
         }
     }
 
+    fn tray_action(&self, id: u64, action: tray::Action, x: i32, y: i32) {
+        if let Some(client) = &self.tray_client
+            && let Err(error) = client.command(id, action, x, y)
+        {
+            eprintln!("knave-shell: {error}");
+        }
+    }
     fn handle_pointer(&mut self, x: f32, y: f32) {
         if let Some(action) = self.scene.hit_test(x, y) {
             self.dispatch_ui_action(action);
@@ -1524,6 +1557,31 @@ impl PointerHandler for Runtime {
                 self.clipboard.serial = Some(*serial);
             }
             let p = [event.position.0 as f32, event.position.1 as f32];
+            let applet = knave_ui::status_bar::applet_targets(self.width as f32, &self.applets)
+                .find(|(r, _)| {
+                    p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
+                })
+                .map(|(_, item)| item.id);
+            if let Some(id) = applet {
+                let action = match &event.kind {
+                    PointerEventKind::Press { button: 272, .. } => Some(tray::Action::Activate),
+                    PointerEventKind::Press { button: 273, .. } => Some(tray::Action::ContextMenu),
+                    PointerEventKind::Press { button: 274, .. } => {
+                        Some(tray::Action::SecondaryActivate)
+                    }
+                    PointerEventKind::Axis { vertical, .. } => {
+                        Some(tray::Action::Scroll(vertical.absolute as i32))
+                    }
+                    _ => None,
+                };
+                if let Some(action) = action {
+                    self.tray_action(id, action, p[0] as i32, p[1] as i32);
+                    continue;
+                }
+                if matches!(event.kind, PointerEventKind::Release { .. }) {
+                    continue;
+                }
+            }
             if self.app.is_some() {
                 let input = match &event.kind {
                     PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {

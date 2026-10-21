@@ -1032,8 +1032,15 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     ];
     app.notification_snapshot(Some(&state));
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared =
-        knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, Some(&state));
+    let shared = knave_ui::status_bar::StatusBar::new(
+        0,
+        1200.0,
+        36.0,
+        app.snapshot(),
+        true,
+        Some(&state),
+        &[],
+    );
     assert!(app.display.commands.ends_with(&shared.display.commands));
     for expected in ["99+", "z"] {
         assert!(app.display.commands.iter().any(|command| matches!(command,
@@ -1041,7 +1048,8 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     }
     app.notification_snapshot(None);
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared = knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, None);
+    let shared =
+        knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, None, &[]);
     assert!(app.display.commands.ends_with(&shared.display.commands));
     assert!(!app.display.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text {text, ..} if text == "99+" || text == "z")));
