@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 import subprocess
 import time
+import gi
+gi.require_version('GdkPixbuf', '2.0')
 from gi.repository import Gio, GLib, GdkPixbuf
 
 KDE = 'org.kde.StatusNotifierWatcher'
@@ -134,6 +136,7 @@ def main():
     def pixel(x, y):
         nonlocal counter
         counter += 1
+        subprocess.run(['xdotool', 'mousemove', '640', '400'], env=env, check=True)
         result = shot(f'pixel-{counter}')
         path = Path(result['screenshot'])
         image = GdkPixbuf.Pixbuf.new_from_file(str(path))

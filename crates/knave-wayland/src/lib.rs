@@ -1299,7 +1299,10 @@ impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
         let command = match action {
             UiAction::Applet(id) => {
-                self.tray_action(id, tray::Action::Activate, 0, 0);
+                let x = knave_ui::status_bar::applet_targets(self.width as f32, &self.applets)
+                    .find(|(_, item)| item.id == id)
+                    .map_or(0, |(r, _)| (r.x + r.width / 2.0) as i32);
+                self.tray_action(id, tray::Action::Activate, x, 18);
                 return;
             }
             UiAction::ToggleNotifications => {
@@ -1569,8 +1572,15 @@ impl PointerHandler for Runtime {
                     PointerEventKind::Press { button: 274, .. } => {
                         Some(tray::Action::SecondaryActivate)
                     }
-                    PointerEventKind::Axis { vertical, .. } => {
-                        Some(tray::Action::Scroll(vertical.absolute as i32))
+                    PointerEventKind::Axis { vertical, .. } if !vertical.is_none() => {
+                        let delta = if vertical.value120 != 0 {
+                            vertical.value120
+                        } else if vertical.discrete != 0 {
+                            vertical.discrete.saturating_mul(120)
+                        } else {
+                            vertical.absolute.round() as i32
+                        };
+                        (delta != 0).then_some(tray::Action::Scroll(delta))
                     }
                     _ => None,
                 };
