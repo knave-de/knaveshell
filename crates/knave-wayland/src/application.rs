@@ -75,6 +75,7 @@ impl Default for SurfaceOptions {
 #[derive(Clone, Debug)]
 pub enum HostRequest {
     ToggleNotifications,
+    ToggleQuickSettings,
     Applet(u64),
     Copy(String),
     Paste(knave_ui::toolkit::ElementId),
@@ -220,6 +221,9 @@ pub(super) fn key(raw: u32) -> knave_ui::toolkit::Key {
 impl super::Runtime {
     pub(super) fn application_requests(&mut self, qh: &wayland_client::QueueHandle<Self>) {
         match self.app.as_mut().and_then(|app| app.take_request()) {
+            Some(HostRequest::ToggleQuickSettings) => {
+                self.dispatch_ui_action(knave_ui::UiAction::ToggleQuickSettings)
+            }
             Some(HostRequest::ToggleNotifications) => {
                 self.dispatch_ui_action(knave_ui::UiAction::ToggleNotifications)
             }

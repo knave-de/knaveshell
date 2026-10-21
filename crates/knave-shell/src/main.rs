@@ -39,6 +39,9 @@ fn check(role: ShellRole) {
 }
 
 fn run() -> Result<(), String> {
+    if std::env::args().skip(1).eq(["quick-settings"]) {
+        return knave_shell::quick_settings::run();
+    }
     if std::env::args().nth(1).as_deref() == Some("tray-menu") {
         let args: Vec<_> = std::env::args().skip(2).collect();
         if args.len() != 3 {

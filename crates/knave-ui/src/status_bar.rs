@@ -18,8 +18,8 @@ pub fn applet_targets(
     width: f32,
     applets: &[Applet],
 ) -> impl Iterator<Item = (crate::Rect, &Applet)> {
-    let count = (((width - 210.0).max(0.0) / 32.0) as usize).min(applets.len());
-    let start = width - 60.0 - count as f32 * 32.0;
+    let count = (((width - 290.0).max(0.0) / 32.0) as usize).min(applets.len());
+    let start = width - 140.0 - count as f32 * 32.0;
     applets
         .iter()
         .take(count)
@@ -51,10 +51,25 @@ impl StatusBar {
         if !notifications_enabled {
             scene.disable_notifications();
         }
+        if width >= 240.0 {
+            let bounds = crate::Rect::new(width - 140.0, 0.0, 80.0, STATUS_BAR_HEIGHT);
+            scene.targets.retain(|t| {
+                !matches!(t.action, crate::UiAction::FocusWorkspace(_))
+                    || t.bounds.x + t.bounds.width <= bounds.x
+            });
+            scene.nodes.retain(|n| !matches!(n,crate::UiNode::Label{id,bounds:b,..} if id.0>=10 && b.x+b.width>bounds.x));
+            scene.target(bounds, crate::UiAction::ToggleQuickSettings);
+            scene.push(crate::UiNode::Label {
+                id: crate::NodeId(40_000),
+                bounds: crate::Rect::new(bounds.x + 6.0, 8.0, 74.0, 22.0),
+                color: crate::Color::TEXT,
+                text: "Settings".into(),
+            });
+        }
         let targets: Vec<_> = applet_targets(width, applets).collect();
         if let Some((first, _)) = targets.first() {
             scene.nodes.retain(|node| match node {
-                crate::UiNode::Label { id, bounds, .. } if id.0 >= 10 => {
+                crate::UiNode::Label { id, bounds, .. } if (10..100).contains(&id.0) => {
                     bounds.x + bounds.width <= first.x
                 }
                 _ => true,

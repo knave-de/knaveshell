@@ -1,0 +1,431 @@
+//! Native retained quick-settings panel. Only the transport worker touches system services.
+#[cfg(test)]
+mod tests;
+mod view;
+use knave_desktop_api::quick_settings::*;
+use knave_ui::{Color, DisplayList, Rect, toolkit::*};
+use knave_wayland::{
+    Application, KeyboardMode, SurfaceLayer, SurfaceOptions, quick_settings::QuickSettingsClient,
+};
+use std::collections::HashMap;
+const PANEL: ElementId = ElementId(1);
+const CLOSE: u64 = 2;
+const BACK: u64 = 3;
+const OUTPUT: u64 = 4;
+const INPUT: u64 = 5;
+const BRIGHTNESS: u64 = 6;
+const TEMPERATURE: u64 = 7;
+const LIMIT: u64 = 8;
+const START: u64 = 9;
+const END: u64 = 10;
+const POWER: u64 = 11;
+const CONFIRMATION: u64 = 12;
+const CANCEL_CONFIRMATION: u64 = 13;
+const CONFIRM_ACTION: u64 = 14;
+#[derive(Clone, Copy, Default, PartialEq)]
+enum Page {
+    #[default]
+    Main,
+    Network,
+    Night,
+    Battery,
+}
+#[derive(Clone)]
+enum Target {
+    Page(Page),
+    Command(QuickSettingsCommand),
+    NightToggle,
+    Schedule,
+    ApplyLimit,
+}
+pub struct QuickSettings {
+    state: QuickSettingsSnapshot,
+    client: Option<QuickSettingsClient>,
+    scene: Scene,
+    display: DisplayList,
+    size: [f32; 2],
+    dirty: bool,
+    page: Page,
+    targets: HashMap<ElementId, Target>,
+    error: Option<String>,
+    connected: bool,
+    closing: bool,
+    authenticating: bool,
+    pressed: bool,
+    pending: Option<QuickSettingsSnapshot>,
+    outside: bool,
+    focus_on_open: bool,
+    limit: u8,
+    night: NightLight,
+    confirmation: Option<QuickSettingsCommand>,
+    next: u64,
+}
+impl Default for QuickSettings {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+impl QuickSettings {
+    pub fn new() -> Self {
+        Self {
+            state: Default::default(),
+            client: None,
+            scene: Scene::new(Element::new(0, Widget::Panel)).unwrap(),
+            display: Default::default(),
+            size: [0.0; 2],
+            dirty: true,
+            page: Page::Main,
+            targets: HashMap::new(),
+            error: None,
+            connected: false,
+            closing: false,
+            authenticating: false,
+            pressed: false,
+            pending: None,
+            outside: false,
+            focus_on_open: false,
+            limit: 80,
+            night: Default::default(),
+            confirmation: None,
+            next: 100,
+        }
+    }
+    fn send(&mut self, c: QuickSettingsCommand) {
+        if matches!(c, QuickSettingsCommand::Close) {
+            self.state.open = false;
+            self.closing = true;
+            self.dirty = true;
+        }
+
+        if let Some(client) = &self.client
+            && let Err(e) = client.command(c)
+        {
+            self.error = Some(e);
+            self.dirty = true
+        }
+    }
+    fn apply(&mut self, mut state: QuickSettingsSnapshot) {
+        if self.closing {
+            if state.open {
+                state.open = false;
+            } else {
+                self.closing = false;
+            }
+        }
+        if !self.state.open && state.open {
+            self.page = Page::Main;
+            self.confirmation = None;
+            self.focus_on_open = true;
+            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
+        }
+        if self.page != Page::Night {
+            self.night = state.night
+        }
+        if self.page != Page::Battery {
+            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
+        }
+        self.state = state;
+        self.connected = true;
+        self.dirty = true;
+    }
+    fn night_command(&self) -> QuickSettingsCommand {
+        QuickSettingsCommand::SetNightLight {
+            enabled: self.night.enabled,
+            temperature: self.night.temperature,
+            start: self.night.start,
+            end: self.night.end,
+        }
+    }
+    fn dismiss_confirmation(&mut self) {
+        self.scene.close_popup();
+        self.confirmation = None;
+        self.dirty = true;
+    }
+    fn select_power(&mut self, action: u64) {
+        self.confirmation = match action {
+            1 => Some(QuickSettingsCommand::Suspend),
+            2 => Some(QuickSettingsCommand::Reboot),
+            3 => Some(QuickSettingsCommand::PowerOff),
+            _ => None,
+        };
+        self.dirty = true;
+    }
+    fn activate(&mut self, id: ElementId) {
+        if id.0 == CANCEL_CONFIRMATION {
+            self.dismiss_confirmation();
+            return;
+        }
+        if id.0 == CONFIRM_ACTION {
+            if let Some(c) = self.confirmation.clone() {
+                self.dismiss_confirmation();
+                self.send(c);
+                self.authenticating = self
+                    .client
+                    .as_ref()
+                    .is_some_and(QuickSettingsClient::authentication_pending);
+            }
+            return;
+        }
+        if id.0 == CLOSE {
+            self.send(QuickSettingsCommand::Close);
+            return;
+        }
+        if id.0 == BACK {
+            self.page = Page::Main;
+            self.confirmation = None;
+            self.dirty = true;
+            return;
+        }
+        match self.targets.get(&id).cloned() {
+            Some(Target::Page(page)) => {
+                self.page = page;
+                self.night = self.state.night;
+                self.confirmation = None;
+                self.dirty = true
+            }
+            Some(Target::Command(c)) => {
+                self.error = None;
+                self.send(c)
+            }
+            Some(Target::NightToggle) => {
+                self.night.enabled = !self.night.enabled;
+                self.send(self.night_command());
+                self.dirty = true
+            }
+            Some(Target::Schedule) => {
+                if self.night.start.is_some() {
+                    self.night.start = None;
+                    self.night.end = None
+                } else {
+                    self.night.start = Some(1140);
+                    self.night.end = Some(420)
+                }
+                self.send(self.night_command());
+                self.dirty = true
+            }
+            Some(Target::ApplyLimit) => {
+                self.error = None;
+                self.send(QuickSettingsCommand::SetChargeLimit {
+                    percent: self.limit,
+                });
+                self.authenticating = self
+                    .client
+                    .as_ref()
+                    .is_some_and(QuickSettingsClient::authentication_pending);
+                self.dirty = true;
+            }
+            None => {}
+        }
+    }
+    fn value(&mut self, id: ElementId, value: f64, commit: bool) {
+        let v = value.round() as u8;
+        let c = match id.0 {
+            OUTPUT => {
+                if let Some(s) = &mut self.state.output {
+                    s.percent = v
+                }
+                Some(QuickSettingsCommand::SetVolume {
+                    input: false,
+                    percent: v,
+                })
+            }
+            INPUT => {
+                if let Some(s) = &mut self.state.input {
+                    s.percent = v
+                }
+                Some(QuickSettingsCommand::SetVolume {
+                    input: true,
+                    percent: v,
+                })
+            }
+            BRIGHTNESS => {
+                self.state.brightness = Some(v);
+                Some(QuickSettingsCommand::SetBrightness { percent: v })
+            }
+            TEMPERATURE => {
+                self.night.temperature = value.round() as u16;
+                Some(self.night_command())
+            }
+            LIMIT => {
+                self.limit = v;
+                None
+            }
+            START => {
+                self.night.start = Some(value.round() as u16);
+                Some(self.night_command())
+            }
+            END => {
+                self.night.end = Some(value.round() as u16);
+                Some(self.night_command())
+            }
+            _ => None,
+        };
+        self.dirty = true;
+        if commit && let Some(c) = c {
+            self.send(c)
+        }
+    }
+}
+impl Application for QuickSettings {
+    fn set_waker(&mut self, w: knave_wayland::Waker) {
+        self.client = Some(QuickSettingsClient::start(w))
+    }
+    fn update(&mut self) {
+        if self.authenticating
+            && self
+                .client
+                .as_ref()
+                .is_none_or(|c| !c.authentication_pending())
+        {
+            self.authenticating = false;
+            self.dirty = true;
+        }
+        if let Some(result) = self.client.as_ref().and_then(QuickSettingsClient::latest) {
+            match result {
+                Ok(s) => {
+                    if self.pressed {
+                        self.pending = Some(s)
+                    } else {
+                        self.apply(s)
+                    }
+                }
+                Err(e) => {
+                    self.connected = false;
+                    self.state.open = false;
+                    self.error = Some(e);
+                    self.dirty = true
+                }
+            }
+        }
+        if let Some(error) = self.client.as_ref().and_then(QuickSettingsClient::error) {
+            self.error = Some(error);
+            self.dirty = true;
+        }
+    }
+    fn surface_visible(&self) -> bool {
+        self.connected && self.state.open && !self.authenticating
+    }
+    fn keyboard_mode(&self) -> Option<KeyboardMode> {
+        Some(if self.surface_visible() {
+            KeyboardMode::Exclusive
+        } else {
+            KeyboardMode::None
+        })
+    }
+    fn input_region(&self) -> Option<Vec<Rect>> {
+        Some(if self.surface_visible() {
+            vec![Rect::new(0.0, 0.0, self.size[0], self.size[1])]
+        } else {
+            Vec::new()
+        })
+    }
+    fn cursor(&self) -> CursorShape {
+        self.scene.cursor()
+    }
+    fn input(&mut self, event: Input) {
+        if matches!(
+            event,
+            Input::Key {
+                key: Key::Escape,
+                pressed: true,
+                ..
+            }
+        ) {
+            if self.confirmation.is_some() {
+                self.dismiss_confirmation();
+                return;
+            }
+            if self
+                .scene
+                .interaction(ElementId(POWER))
+                .is_some_and(|s| s.expanded)
+            {
+                self.scene.event(event);
+                return;
+            }
+            if self.page == Page::Main {
+                self.send(QuickSettingsCommand::Close)
+            } else {
+                self.page = Page::Main;
+                self.confirmation = None;
+                self.dirty = true
+            }
+            return;
+        }
+        if matches!(event, Input::FocusLost) && self.state.open && !self.authenticating {
+            self.send(QuickSettingsCommand::Close)
+        }
+        if let Input::PointerDown(p) = &event {
+            self.pressed = true;
+            self.outside = self.confirmation.is_none()
+                && self.scene.bounds(PANEL).is_some_and(|r| !contains(r, *p));
+        }
+        let release = matches!(
+            event,
+            Input::PointerUp(_) | Input::Cancel | Input::FocusLost
+        );
+        let result = self.scene.event(event);
+        match result.action {
+            Some(Action::Activated(id)) => self.activate(id),
+            Some(Action::Selected(id, value)) if id.0 == POWER => self.select_power(value),
+            Some(Action::PopupClosed(_)) => self.dismiss_confirmation(),
+            Some(Action::ValueChanged(id, v)) => self.value(id, v, !self.pressed),
+            Some(Action::ValueCommitted(id, v)) => self.value(id, v, true),
+            _ => {}
+        }
+        if release {
+            if self.outside {
+                self.send(QuickSettingsCommand::Close)
+            }
+            self.outside = false;
+            self.pressed = false;
+            if let Some(state) = self.pending.take() {
+                self.apply(state)
+            }
+        }
+    }
+    fn needs_frame(&self) -> bool {
+        self.dirty
+            || self.scene.needs_frame()
+            || self
+                .client
+                .as_ref()
+                .is_some_and(QuickSettingsClient::has_update)
+    }
+    fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
+        if self.dirty || self.size != size {
+            self.size = size;
+            let tree = self.compose();
+            if let Err(e) = self.scene.replace(tree) {
+                self.error = Some(e.to_string())
+            }
+            if self.confirmation.is_some() {
+                let _ = self.scene.open_popup(ElementId(CONFIRMATION));
+            }
+            self.scene.layout(size, text);
+            if self.focus_on_open {
+                let _ = self.scene.set_focus(Some(ElementId(CLOSE)));
+                self.focus_on_open = false
+            }
+            self.dirty = false
+        }
+        self.display = self.scene.display_list(size, text).clone();
+        self.display.clear_color = Color::rgba(0, 0, 0, 0);
+        &self.display
+    }
+}
+fn contains(r: Rect, p: [f32; 2]) -> bool {
+    p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
+}
+pub fn run() -> Result<(), String> {
+    knave_wayland::run_application(
+        SurfaceOptions {
+            keyboard: KeyboardMode::None,
+            layer: SurfaceLayer::Overlay,
+            namespace: "knave-shell-quick-settings".into(),
+            ..Default::default()
+        },
+        QuickSettings::new(),
+    )
+    .map_err(|e| e.to_string())
+}
