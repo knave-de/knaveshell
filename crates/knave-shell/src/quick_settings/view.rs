@@ -57,6 +57,7 @@ impl Palette {
     fn button(&self, id: u64, label: impl Into<String>, enabled: bool) -> Element {
         let mut e = self.element(id, Widget::Button(label.into()));
         e.layout.padding = 8.0;
+        e.layout.height = Length::Px(40.0);
         e.enabled = enabled;
         e.style.background = Some(ShapePaint {
             border: Some(Border {
@@ -99,8 +100,13 @@ impl QuickSettings {
         enabled: bool,
     ) -> Element {
         let id = self.id();
+        let label = s.into();
         self.targets.insert(ElementId(id), target);
-        p.button(id, s, enabled)
+        let mut e = p.button(id, label.clone(), enabled);
+        if label.contains('\n') {
+            e.layout.height = Length::Px(56.0);
+        }
+        e
     }
     fn group(&mut self, p: &Palette) -> Element {
         let id = self.id();
@@ -193,6 +199,7 @@ impl QuickSettings {
         if self.page != Page::Main {
             let mut b = p.button(BACK, "‹", true);
             b.layout.width = Length::Px(32.0);
+            b.layout.height = Length::Px(32.0);
             header.children.push(b)
         }
         let title = match self.page {
@@ -206,6 +213,7 @@ impl QuickSettings {
         header.children.push(self.label(&p, title, false));
         let mut close = p.button(CLOSE, "×", true);
         close.layout.width = Length::Px(32.0);
+        close.layout.height = Length::Px(32.0);
         header.children.push(close);
         panel.children.push(header);
         let mut scroll = p.element(20, Widget::Scroll).layout(Layout {
@@ -213,7 +221,7 @@ impl QuickSettings {
             ..Default::default()
         });
         let mut content = self.group(&p);
-        content.layout.gap = 16.0;
+        content.layout.gap = 12.0;
         match self.page {
             Page::Main => {
                 let label = self

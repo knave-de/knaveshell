@@ -47,6 +47,7 @@ pub struct QuickSettings {
     targets: HashMap<ElementId, Target>,
     error: Option<String>,
     connected: bool,
+    closing: bool,
     pressed: bool,
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
@@ -74,6 +75,7 @@ impl QuickSettings {
             targets: HashMap::new(),
             error: None,
             connected: false,
+            closing: false,
             pressed: false,
             pending: None,
             outside: false,
@@ -87,6 +89,7 @@ impl QuickSettings {
     fn send(&mut self, c: QuickSettingsCommand) {
         if matches!(c, QuickSettingsCommand::Close) {
             self.state.open = false;
+            self.closing = true;
             self.dirty = true;
         }
 
@@ -97,7 +100,14 @@ impl QuickSettings {
             self.dirty = true
         }
     }
-    fn apply(&mut self, state: QuickSettingsSnapshot) {
+    fn apply(&mut self, mut state: QuickSettingsSnapshot) {
+        if self.closing {
+            if state.open {
+                state.open = false;
+            } else {
+                self.closing = false;
+            }
+        }
         if !self.state.open && state.open {
             self.page = Page::Main;
             self.confirmation = None;

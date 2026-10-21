@@ -103,3 +103,18 @@ fn ethernet_is_preferred_and_volume_values_remain_local_until_commit() {
     app.value(ElementId(TEMPERATURE), 3500.0, false);
     assert_eq!(app.night.temperature, 3500);
 }
+
+#[test]
+fn close_intent_suppresses_late_open_snapshots_until_acknowledged() {
+    let mut app = app();
+    app.send(QuickSettingsCommand::Close);
+    let late = QuickSettingsSnapshot {
+        open: true,
+        ..Default::default()
+    };
+    app.apply(late.clone());
+    assert!(!app.surface_visible());
+    app.apply(QuickSettingsSnapshot::default());
+    app.apply(late);
+    assert!(app.surface_visible());
+}
