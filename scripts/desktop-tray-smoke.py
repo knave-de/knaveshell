@@ -55,17 +55,22 @@ def wait(predicate, label, seconds=10):
 
 
 class Fixture:
-    def __init__(self, address, title, color, menu_only=False):
+    def __init__(self, address, title, color, menu_only=False, freedesktop=False, name=None):
         self.bus = connect(address)
         self.title, self.color, self.menu_only = title, color, menu_only
         self.status, self.actions = 'Active', []
-        node = Gio.DBusNodeInfo.new_for_xml(XML)
+        self.interface = ITEM.replace('org.kde.', 'org.freedesktop.') if freedesktop else ITEM
+        self.watcher = KDE.replace('org.kde.', 'org.freedesktop.') if freedesktop else KDE
+        self.name = name or '/StatusNotifierItem'
+        if name:
+            invoke(self.bus, 'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'RequestName', '(su)', (name, 4))
+        node = Gio.DBusNodeInfo.new_for_xml(XML.replace(ITEM, self.interface))
         self.bus.register_object('/StatusNotifierItem', node.interfaces[0], self.method, self.prop, None)
         self.bus.register_object('/Menu', node.interfaces[1], self.method, None, None)
         self.register()
 
     def register(self):
-        invoke(self.bus, KDE, '/StatusNotifierWatcher', KDE, 'RegisterStatusNotifierItem', '(s)', ('/StatusNotifierItem',))
+        invoke(self.bus, self.watcher, '/StatusNotifierWatcher', self.watcher, 'RegisterStatusNotifierItem', '(s)', (self.name,))
 
     def prop(self, _bus, _sender, _path, _iface, name):
         if name == 'Status': return GLib.Variant('s', self.status)
@@ -94,10 +99,10 @@ class Fixture:
     def change(self, status=None, color=None):
         if status is not None:
             self.status = status
-            self.bus.emit_signal(None, '/StatusNotifierItem', ITEM, 'NewStatus', GLib.Variant('(s)', (status,)))
+            self.bus.emit_signal(None, '/StatusNotifierItem', self.interface, 'NewStatus', GLib.Variant('(s)', (status,)))
         if color is not None:
             self.color = color
-            self.bus.emit_signal(None, '/StatusNotifierItem', ITEM, 'NewIcon', None)
+            self.bus.emit_signal(None, '/StatusNotifierItem', self.interface, 'NewIcon', None)
 
 
 def sample(pid):
@@ -163,6 +168,12 @@ def main():
         color(1172, alpha.color, 'first icon immediately left of second icon')
         color(1204, beta.color, 'second icon immediately left of notification bell')
         shot('applets-in-bar')
+        gamma = Fixture(env['DBUS_SESSION_BUS_ADDRESS'], 'Backup', (100, 90, 220), freedesktop=True, name='org.knave.TrayFixture')
+        fixtures.append(gamma)
+        color(1204, gamma.color, 'freedesktop item registered by service name renders')
+        invoke(gamma.bus, 'org.freedesktop.DBus', '/org/freedesktop/DBus', 'org.freedesktop.DBus', 'ReleaseName', '(s)', ('org.knave.TrayFixture',))
+        wait(lambda: len(registered()) == 2, 'service release unregisters live connection')
+        color(1204, beta.color, 'service name release removes item before connection exit')
         click(1172, 18)
         wait(lambda: any(a[0] == 'Activate' for a in alpha.actions), 'left click activates')
         click(1172, 18, 2)
@@ -196,6 +207,10 @@ def main():
         checks.append('menu-only left click opens exported menu and dispatches action')
         click(1172, 18, 3)
         pump(1)
+        before = len(alpha.actions)
+        click(1100, 126)
+        assert len(alpha.actions) == before, 'disabled menu action must not dispatch'
+        checks.append('disabled menu action remains inactive')
         click(1100, 158)
         pump(0.6)
         shot('applet-submenu')
