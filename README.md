@@ -176,7 +176,7 @@ Knave and Villain revisions; see Knave ADR 0013.
 
 ### Authentication
 
-Knave Session supervises `knave-shell polkit-agent` from startup. It registers
+Knave Session supervises `knave-shell polkit-agent` in direct desktop sessions. It registers
 with the system Polkit authority for the current logind session, and shows an
 exclusive overlay only during authentication. Select an offered administrator,
 enter the requested response, then press Enter or Authenticate. Escape or Cancel
@@ -185,4 +185,6 @@ and IME surrounding text; Ctrl+A replaces the response and Backspace deletes.
 No other desktop's agent is required. Registration failures are logged; stop
 another agent before restarting Knave if one already owns the session. The
 agent needs a system bus, Polkit with its authentication helper, and a logind
-session. Nested test desktops without logind cannot authenticate host actions.
+session. Winit sessions and Auto sessions with inherited display variables skip
+the agent to protect the enclosing desktop. For a direct launch with inherited
+display variables, select `backend = "tty"` explicitly.
