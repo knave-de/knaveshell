@@ -10,7 +10,7 @@ use knave_ui::UiScene;
 use knave_wayland::ShellRole;
 
 fn usage() -> &'static str {
-    "usage: knave-shell [--check] [bar|overview|portal-picker]\n       knave-shell --supports-overview-service"
+    "usage: knave-shell [--check] [bar|overview|portal-picker|polkit-agent]\n       knave-shell --supports-overview-service"
 }
 
 fn check(role: ShellRole) {
@@ -39,6 +39,12 @@ fn check(role: ShellRole) {
 }
 
 fn run() -> Result<(), String> {
+    if std::env::args().skip(1).eq(["--supports-polkit-agent"]) {
+        return Ok(());
+    }
+    if std::env::args().skip(1).eq(["polkit-agent"]) {
+        return knave_shell::polkit::run();
+    }
     if std::env::args().skip(1).eq(["quick-settings"]) {
         return knave_shell::quick_settings::run();
     }

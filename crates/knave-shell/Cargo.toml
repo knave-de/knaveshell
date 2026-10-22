@@ -23,6 +23,14 @@ knave-ui.workspace = true
 knave-desktop-api.workspace = true
 knave-config.workspace = true
 
+glib = "0.19"
+gio = "0.19"
+polkit = "0.19"
+polkit-agent = "0.19"
+async-channel = "2"
+futures-lite = "2"
+zeroize = "1"
+
 [dev-dependencies]
 png.workspace = true
 tempfile = "3"

@@ -40,6 +40,10 @@ Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
 
+Building requires GLib/GIO and Polkit development libraries discoverable by
+`pkg-config` (`glib-2.0`, `gio-2.0`, `polkit-gobject-1`, `polkit-agent-1`).
+
+
     cargo fmt --all -- --check
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
@@ -164,9 +168,21 @@ disturb remains in Notifications. Missing hardware/services are shown explicitly
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need kernel/firmware support and, when root-owned, pkexec. Knave reuses
-or starts an installed polkit agent for authentication and releases the panel's
+thresholds need kernel/firmware support and, when root-owned, pkexec. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
 input while the prompt is active. Power lives in the main header and confirms in
 a modal popup; subpages contain no Power footer or Refresh button. Brightness
 supports 1–100%. There is no dependency on hyprsunset. Deploy matching
 Knave and Villain revisions; see Knave ADR 0013.
+
+### Authentication
+
+Knave Session supervises `knave-shell polkit-agent` from startup. It registers
+with the system Polkit authority for the current logind session, and shows an
+exclusive overlay only during authentication. Select an offered administrator,
+enter the requested response, then press Enter or Authenticate. Escape or Cancel
+cancels the request. Hidden responses are masked and excluded from clipboard
+and IME surrounding text; Ctrl+A replaces the response and Backspace deletes.
+No other desktop's agent is required. Registration failures are logged; stop
+another agent before restarting Knave if one already owns the session. The
+agent needs a system bus, Polkit with its authentication helper, and a logind
+session. Nested test desktops without logind cannot authenticate host actions.
