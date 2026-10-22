@@ -40,6 +40,10 @@ Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
 ## Build
 
+Building requires GLib/GIO and Polkit development libraries discoverable by
+`pkg-config` (`glib-2.0`, `gio-2.0`, `polkit-gobject-1`, `polkit-agent-1`).
+
+
     cargo fmt --all -- --check
     cargo test --workspace
     cargo clippy --workspace --all-targets -- -D warnings
@@ -164,9 +168,34 @@ disturb remains in Notifications. Missing hardware/services are shown explicitly
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need kernel/firmware support and, when root-owned, pkexec. Knave reuses
-or starts an installed polkit agent for authentication and releases the panel's
+thresholds need kernel/firmware support and, when root-owned, pkexec. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
 input while the prompt is active. Power lives in the main header and confirms in
 a modal popup; subpages contain no Power footer or Refresh button. Brightness
 supports 1–100%. There is no dependency on hyprsunset. Deploy matching
 Knave and Villain revisions; see Knave ADR 0013.
+
+### Authentication
+
+Knave Session supervises `knave-shell polkit-agent` in direct desktop sessions. It registers
+with the system Polkit authority for the current logind session, and shows an
+compact password prompt only during authentication. The current account is
+selected automatically when Polkit allows it. If policy requires another account,
+the prompt names that account. Enter the password and press Enter or Continue. Escape or Cancel
+cancels the request. Hidden responses are masked and excluded from clipboard
+and IME surrounding text; Ctrl+A replaces the response and Backspace deletes.
+No other desktop's agent is required. Registration failures are logged; stop
+another agent before restarting Knave if one already owns the session. The
+agent needs a system bus, Polkit with its authentication helper, and a logind
+session. Winit sessions and Auto sessions with inherited display variables skip
+the agent to protect the enclosing desktop. For a direct launch with inherited
+display variables, select `backend = "tty"` explicitly.
+
+Knave saves no password or authorization cache. Polkit owns temporary
+authorizations and decides their lifetime from system policy. Inspect actual
+cached authorizations and their expiration without opening a dialog:
+
+    knave-shell polkit-cache
+
+An empty cache prints `No cached authorizations.` Read failures are errors,
+not an empty cache. The dialog shows retention information only when Polkit
+explicitly supplies it; missing information is never presented as “not cached”.
