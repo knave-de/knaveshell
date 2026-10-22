@@ -197,10 +197,7 @@ pub(super) fn run(shared: Arc<Mutex<Shared>>, commands: async_channel::Receiver<
                 }
             }
             let retry = context.block_on(futures_lite::future::race(
-                async {
-                    let _ = commands.recv().await;
-                    false
-                },
+                async { commands.recv().await.is_ok() },
                 async {
                     glib::timeout_future_seconds(5).await;
                     true
@@ -221,6 +218,7 @@ fn serve(
 ) -> Result<(), String> {
     let connection = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE)
         .map_err(|e| e.to_string())?;
+    connection.set_exit_on_close(false);
     let authority = polkit::Authority::sync(gio::Cancellable::NONE).map_err(|e| e.to_string())?;
     let subject = polkit::UnixSession::new_for_process_sync(
         std::process::id() as i32,
@@ -324,11 +322,11 @@ fn serve(
     cancel(&backend);
     connection.disconnect(closed_handler);
     authority.disconnect(owner_handler);
+    let _ = connection.unregister_object(registration);
     if connection.is_closed() {
         return Err("System bus disconnected".into());
     }
     let _ = authority.unregister_authentication_agent_sync(&subject, PATH, gio::Cancellable::NONE);
-    let _ = connection.unregister_object(registration);
     Ok(())
 }
 fn cancel(backend: &Rc<RefCell<Backend>>) {
