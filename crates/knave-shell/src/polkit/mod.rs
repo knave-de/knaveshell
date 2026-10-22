@@ -1,5 +1,7 @@
 //! Session-scoped authentication; secrets stay outside retained scenes and IME state.
 mod backend;
+mod cache;
+pub use cache::status as cache_status;
 use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker};
 use std::sync::{Arc, Mutex};
@@ -9,14 +11,12 @@ use zeroize::{Zeroize, Zeroizing};
 struct State {
     generation: u64,
     visible: bool,
-    message: String,
-    action: String,
-    identities: Vec<String>,
+    other_user: Option<String>,
+    retention: Option<bool>,
     prompt: Option<(String, bool)>,
     notice: String,
 }
 enum Command {
-    Select(u64, usize),
     Response(u64, Zeroizing<String>),
     Cancel(u64),
 }
@@ -38,7 +38,6 @@ impl Shared {
 const FIELD: ElementId = ElementId(4);
 const CANCEL: ElementId = ElementId(5);
 const CONFIRM: ElementId = ElementId(6);
-const IDENTITY: ElementId = ElementId(7);
 struct Agent {
     shared: Arc<Mutex<Shared>>,
     commands: Option<async_channel::Sender<Command>>,
@@ -46,7 +45,6 @@ struct Agent {
     state: State,
     secret: Zeroizing<String>,
     selected_all: bool,
-    identity: usize,
     scene: Scene,
     dirty: bool,
     focus_field: bool,
@@ -60,7 +58,6 @@ impl Agent {
             state: State::default(),
             secret: Zeroizing::new(String::new()),
             selected_all: false,
-            identity: 0,
             scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
             dirty: true,
             focus_field: false,
@@ -72,7 +69,6 @@ impl Agent {
             if sender.try_send(command).is_ok() {
                 self.secret.zeroize();
                 self.state.prompt = None;
-                self.state.identities.clear();
                 self.dirty = true;
             }
         }
@@ -81,14 +77,12 @@ impl Agent {
         if self.state.prompt.is_some() {
             let response = std::mem::replace(&mut self.secret, Zeroizing::new(String::new()));
             self.send(Command::Response(self.state.generation, response));
-        } else if !self.state.identities.is_empty() {
-            self.send(Command::Select(self.state.generation, self.identity));
         }
     }
     fn compose(&self) -> Element {
         let mut root = Element::new(0, Widget::Panel).layout(Layout {
-            padding: 28.0,
-            gap: 14.0,
+            padding: 20.0,
+            gap: 12.0,
             ..Default::default()
         });
         root.style.background = Some(ShapePaint::fill(Color::rgba(20, 29, 42, 255)));
@@ -97,8 +91,6 @@ impl Agent {
             element.style.text.wrap = TextWrap::WordOrGlyph;
             element
         };
-        root.children
-            .push(text(1, "Authentication required".into()));
         let mut scroll = Element::new(11, Widget::Scroll).layout(Layout {
             height: Length::Fill,
             ..Default::default()
@@ -107,32 +99,23 @@ impl Agent {
             gap: 12.0,
             ..Default::default()
         });
-        content.children.push(text(2, self.state.message.clone()));
-        content.children.push(text(3, self.state.action.clone()));
-        if !self.state.identities.is_empty() {
-            content.children.push(
-                Element::new(
-                    IDENTITY.0,
-                    Widget::Dropdown {
-                        label: "Authenticate as".into(),
-                        items: self
-                            .state
-                            .identities
-                            .iter()
-                            .enumerate()
-                            .map(|(i, label)| MenuItem::option(i as u64, label))
-                            .collect(),
-                        selected: Some(self.identity as u64),
-                    },
-                )
-                .layout(Layout {
-                    height: Length::Px(44.0),
-                    ..Default::default()
-                }),
-            );
-        }
-        if let Some((prompt, echo)) = &self.state.prompt {
-            content.children.push(text(8, prompt.clone()));
+        let heading = self
+            .state
+            .prompt
+            .as_ref()
+            .map_or("Enter password", |(prompt, _)| {
+                if prompt.to_ascii_lowercase().contains("password") {
+                    "Enter password"
+                } else {
+                    prompt.trim()
+                }
+            });
+        let heading = self.state.other_user.as_ref().map_or_else(
+            || heading.to_owned(),
+            |user| format!("{heading} for {user}"),
+        );
+        content.children.push(text(1, heading));
+        if let Some((_, echo)) = &self.state.prompt {
             let value = if *echo {
                 self.secret.to_string()
             } else {
@@ -146,7 +129,20 @@ impl Agent {
             field.style.background = Some(ShapePaint::fill(Color::rgba(31, 43, 60, 255)));
             content.children.push(field);
         }
-        content.children.push(text(9, self.state.notice.clone()));
+        if let Some(retained) = self.state.retention {
+            content.children.push(text(
+                8,
+                if retained {
+                    "Remembered temporarily"
+                } else {
+                    "Only this request"
+                }
+                .into(),
+            ));
+        }
+        if !self.state.notice.is_empty() {
+            content.children.push(text(9, self.state.notice.clone()));
+        }
         scroll.children.push(content);
         root.children.push(scroll);
         let mut row = Element::new(10, Widget::Panel).layout(Layout {
@@ -155,11 +151,10 @@ impl Agent {
             height: Length::Px(44.0),
             ..Default::default()
         });
-        for (id, label) in [(CANCEL, "Cancel"), (CONFIRM, "Authenticate")] {
+        for (id, label) in [(CANCEL, "Cancel"), (CONFIRM, "Continue")] {
             let mut button = Element::new(id.0, Widget::Button(label.into()));
             button.layout.height = Length::Px(44.0);
-            button.enabled =
-                id == CANCEL || self.state.prompt.is_some() || !self.state.identities.is_empty();
+            button.enabled = id == CANCEL || self.state.prompt.is_some();
             row.children.push(button);
         }
         root.children.push(row);
@@ -179,9 +174,6 @@ impl Application for Agent {
         if shared.changed {
             self.secret.zeroize();
             self.selected_all = false;
-            if shared.state.generation != self.state.generation {
-                self.identity = 0;
-            }
             self.state = shared.state.clone();
             shared.changed = false;
             self.focus_field = self.state.prompt.is_some();
@@ -248,7 +240,6 @@ impl Application for Agent {
                     self.send(Command::Cancel(self.state.generation))
                 }
                 Some(Action::Activated(id)) if id == CONFIRM => self.confirm(),
-                Some(Action::Selected(IDENTITY, id)) => self.identity = id as usize,
                 _ => {}
             },
         }
@@ -292,7 +283,7 @@ impl Drop for Agent {
 pub fn run() -> Result<(), String> {
     knave_wayland::run_application(
         SurfaceOptions {
-            size: Some([560, 440]),
+            size: Some([360, 220]),
             keyboard: KeyboardMode::None,
             layer: SurfaceLayer::Overlay,
             namespace: "knave-shell-polkit".into(),

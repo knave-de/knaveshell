@@ -25,7 +25,7 @@ type Begin = (
 struct Pending {
     generation: u64,
     cookie: String,
-    identities: Vec<polkit::Identity>,
+    identity: polkit::Identity,
     invocation: gio::DBusMethodInvocation,
     session: Option<polkit_agent::Session>,
     waiting: bool,
@@ -39,20 +39,25 @@ impl Backend {
     fn publish(&self, f: impl FnOnce(&mut State)) {
         self.shared.lock().unwrap().change(f);
     }
-    fn begin(&mut self, parameters: &glib::Variant, invocation: gio::DBusMethodInvocation) {
+    fn begin(
+        &mut self,
+        parameters: &glib::Variant,
+        invocation: gio::DBusMethodInvocation,
+    ) -> Option<u64> {
         if self.pending.is_some() {
             invocation.return_dbus_error(
                 "org.freedesktop.PolicyKit1.Error.Failed",
                 "Authentication already in progress",
             );
-            return;
+            return None;
         }
-        let Some((action, message, _, _, cookie, identities)) = parameters.get::<Begin>() else {
+        let Some((action, message, _, details, cookie, identities)) = parameters.get::<Begin>()
+        else {
             invocation.return_dbus_error(
                 "org.freedesktop.DBus.Error.InvalidArgs",
                 "Invalid authentication request",
             );
-            return;
+            return None;
         };
         if action.len() > 512
             || message.len() > 4096
@@ -64,40 +69,26 @@ impl Backend {
                 "org.freedesktop.DBus.Error.InvalidArgs",
                 "Authentication request exceeds limits",
             );
-            return;
+            return None;
         }
-        let mut users = Vec::new();
-        let mut names = Vec::new();
-        for (kind, details) in identities {
-            if kind != "unix-user" {
-                continue;
-            }
-            let Some(uid) = details.get("uid").and_then(|v| v.get::<u32>()) else {
-                continue;
-            };
-            if let Ok(uid) = i32::try_from(uid) {
-                let user = polkit::UnixUser::new(uid);
-                names.push(
-                    user.downcast_ref::<polkit::UnixUser>()
-                        .unwrap()
-                        .name()
-                        .map_or_else(|| format!("User {uid}"), |name| name.to_string()),
-                );
-                users.push(user.upcast());
-            }
-        }
-        if users.is_empty() {
+        let Some(identity) = preferred_identity(&identities, unsafe { libc::geteuid() }) else {
             invocation.return_dbus_error(
                 "org.freedesktop.PolicyKit1.Error.Failed",
                 "No supported Unix user identity",
             );
-            return;
-        }
+            return None;
+        };
+        let user = identity.downcast_ref::<polkit::UnixUser>().unwrap();
+        let other_user = (user.uid() as u32 != unsafe { libc::geteuid() }).then(|| {
+            user.name()
+                .map_or_else(|| format!("user {}", user.uid()), |name| name.to_string())
+        });
+        let retention = retention_hint(&details);
         self.generation += 1;
         self.pending = Some(Pending {
             generation: self.generation,
             cookie,
-            identities: users,
+            identity,
             invocation,
             session: None,
             waiting: false,
@@ -105,16 +96,15 @@ impl Backend {
         self.publish(|state| {
             *state = State {
                 generation: self.generation,
-                visible: true,
-                message,
-                action,
-                identities: names,
+                other_user,
+                retention,
                 ..Default::default()
             }
         });
+        Some(self.generation)
     }
 }
-fn select(backend: &Rc<RefCell<Backend>>, generation: u64, index: usize) {
+fn start_session(backend: &Rc<RefCell<Backend>>, generation: u64) {
     let session = {
         let mut b = backend.borrow_mut();
         let Some(p) = b
@@ -124,10 +114,7 @@ fn select(backend: &Rc<RefCell<Backend>>, generation: u64, index: usize) {
         else {
             return;
         };
-        let Some(identity) = p.identities.get(index) else {
-            return;
-        };
-        let session = polkit_agent::Session::new(identity, &p.cookie);
+        let session = polkit_agent::Session::new(&p.identity, &p.cookie);
         p.session = Some(session.clone());
         session
     };
@@ -139,7 +126,7 @@ fn select(backend: &Rc<RefCell<Backend>>, generation: u64, index: usize) {
                 p.waiting = true;
                 b.publish(|s| {
                     s.prompt = Some((prompt.chars().take(1024).collect(), echo));
-                    s.identities.clear();
+                    s.visible = true;
                 });
             }
         }
@@ -169,7 +156,10 @@ fn select(backend: &Rc<RefCell<Backend>>, generation: u64, index: usize) {
                     .as_ref()
                     .is_some_and(|p| p.generation == generation)
                 {
-                    b.publish(|s| s.notice = message.chars().take(1024).collect());
+                    b.publish(|s| {
+                        s.notice = message.chars().take(1024).collect();
+                        s.visible = true;
+                    });
                 }
             }
         };
@@ -239,14 +229,16 @@ fn serve(
             PATH,
             &info.interfaces()[0],
             move |_, sender, _, _, method, parameters, invocation| {
-                dispatch(
+                if let Some(generation) = dispatch(
                     &b,
                     a.owner().as_deref(),
                     sender,
                     method,
                     &parameters,
                     invocation,
-                );
+                ) {
+                    start_session(&b, generation);
+                }
             },
             |_, _, _, _, _| ().to_variant(),
             |_, _, _, _, _, _| false,
@@ -284,7 +276,6 @@ fn serve(
     let command_task = glib::MainContext::ref_thread_default().spawn_local(async move {
         while let Ok(command) = commands.recv().await {
             match command {
-                Command::Select(g, i) => select(&b, g, i),
                 Command::Cancel(g) => {
                     let matches = b
                         .borrow()
@@ -350,29 +341,17 @@ fn dispatch(
     method: &str,
     parameters: &glib::Variant,
     invocation: gio::DBusMethodInvocation,
-) {
+) -> Option<u64> {
     // System bus access alone is insufficient: only the current polkitd may prompt.
     if Some(sender) != owner {
         invocation.return_dbus_error(
             "org.freedesktop.DBus.Error.AccessDenied",
             "Only polkitd may invoke the authentication agent",
         );
-        return;
+        return None;
     }
     match method {
-        "BeginAuthentication" => {
-            let available = backend.borrow().pending.is_none();
-            backend.borrow_mut().begin(parameters, invocation);
-            let single = backend
-                .borrow()
-                .pending
-                .as_ref()
-                .filter(|p| available && p.identities.len() == 1)
-                .map(|p| p.generation);
-            if let Some(generation) = single {
-                select(backend, generation, 0);
-            }
-        }
+        "BeginAuthentication" => return backend.borrow_mut().begin(parameters, invocation),
         "CancelAuthentication" => {
             let cookie = parameters.get::<(String,)>().map(|v| v.0);
             let matches = backend
@@ -393,6 +372,42 @@ fn dispatch(
         }
         _ => invocation
             .return_dbus_error("org.freedesktop.DBus.Error.UnknownMethod", "Unknown method"),
+    }
+    None
+}
+
+fn preferred_identity(identities: &[Identity], current_uid: u32) -> Option<polkit::Identity> {
+    let users: Vec<_> = identities
+        .iter()
+        .filter_map(|(kind, details)| {
+            if kind != "unix-user" {
+                return None;
+            }
+            details
+                .get("uid")?
+                .get::<u32>()
+                .and_then(|uid| i32::try_from(uid).ok())
+        })
+        .collect();
+    let uid = users
+        .iter()
+        .copied()
+        .find(|uid| *uid as u32 == current_uid)
+        .or_else(|| users.first().copied())?;
+    Some(polkit::UnixUser::new(uid))
+}
+fn retention_hint(details: &HashMap<String, String>) -> Option<bool> {
+    match details
+        .get("polkit.retains_authorization_after_challenge")
+        .map(String::as_str)
+    {
+        Some("1" | "true") => Some(true),
+        Some("0" | "false") => Some(false),
+        _ => match details.get("polkit.result").map(String::as_str) {
+            Some("auth_self_keep" | "auth_admin_keep") => Some(true),
+            Some("auth_self" | "auth_admin") => Some(false),
+            _ => None,
+        },
     }
 }
 
@@ -451,7 +466,8 @@ mod tests {
                         PATH,
                         &info.interfaces()[0],
                         move |_, sender, _, _, method, parameters, invocation| {
-                            dispatch(&b, Some(&owner), sender, method, &parameters, invocation)
+                            let _ =
+                                dispatch(&b, Some(&owner), sender, method, &parameters, invocation);
                         },
                         |_, _, _, _, _| ().to_variant(),
                         |_, _, _, _, _, _| false,
@@ -525,8 +541,7 @@ mod tests {
                         .to_string()
                         .contains("already in progress")
                 );
-                assert!(shared.lock().unwrap().state.visible);
-                assert_eq!(shared.lock().unwrap().state.identities.len(), 2);
+                assert!(backend.borrow().pending.is_some());
                 assert!(call(&client, "CancelAuthentication", &("wrong",).to_variant()).is_err());
                 assert!(backend.borrow().pending.is_some());
                 assert!(
@@ -543,5 +558,48 @@ mod tests {
                 }
             })
             .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    fn identity(uid: u32) -> Identity {
+        (
+            "unix-user".into(),
+            HashMap::from([("uid".into(), uid.to_variant())]),
+        )
+    }
+    #[test]
+    fn current_user_is_preferred_over_first_administrator() {
+        let user =
+            preferred_identity(&[identity(0), identity(1000), identity(1001)], 1000).unwrap();
+        assert_eq!(user.downcast_ref::<polkit::UnixUser>().unwrap().uid(), 1000);
+        let user = preferred_identity(&[identity(0)], 1000).unwrap();
+        assert_eq!(user.downcast_ref::<polkit::UnixUser>().unwrap().uid(), 0);
+        assert!(preferred_identity(&[], 1000).is_none());
+    }
+    #[test]
+    fn retention_requires_explicit_authority_information() {
+        assert_eq!(retention_hint(&HashMap::new()), None);
+        for value in ["1", "true"] {
+            assert_eq!(
+                retention_hint(&HashMap::from([(
+                    "polkit.retains_authorization_after_challenge".into(),
+                    value.into()
+                )])),
+                Some(true)
+            );
+        }
+        for (value, expected) in [
+            ("auth_admin_keep", Some(true)),
+            ("auth_self", Some(false)),
+            ("unexpected", None),
+        ] {
+            assert_eq!(
+                retention_hint(&HashMap::from([("polkit.result".into(), value.into())])),
+                expected
+            );
+        }
     }
 }

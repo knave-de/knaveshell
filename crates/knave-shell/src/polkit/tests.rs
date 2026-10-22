@@ -25,12 +25,11 @@ fn agent(echo: bool) -> Agent {
     a.state = State {
         generation: 42,
         visible: true,
-        message: "An application requires administrator privileges".into(),
         prompt: Some(("Password:".into(), echo)),
         ..Default::default()
     };
     a.focus_field = true;
-    a.frame([560.0, 440.0], &mut Metrics);
+    a.frame([360.0, 220.0], &mut Metrics);
     a
 }
 fn key(a: &mut Agent, key: Key) {
@@ -45,7 +44,7 @@ fn key(a: &mut Agent, key: Key) {
 fn hidden_response_never_enters_scene_clipboard_or_ime() {
     let mut a = agent(false);
     a.input(Input::Text("pāss🔑".into()));
-    let display = format!("{:?}", a.frame([560.0, 440.0], &mut Metrics));
+    let display = format!("{:?}", a.frame([360.0, 220.0], &mut Metrics));
     assert!(!display.contains("pāss"));
     assert_eq!(a.scene.widget(FIELD), Some(&Widget::Button("•••••".into())));
     assert!(a.text_input().is_none());
@@ -109,7 +108,7 @@ fn echo_prompt_and_unicode_deletion() {
     let mut a = agent(true);
     a.input(Input::Text("a🔑".into()));
     key(&mut a, Key::Backspace);
-    a.frame([560.0, 440.0], &mut Metrics);
+    a.frame([360.0, 220.0], &mut Metrics);
     assert_eq!(a.scene.widget(FIELD), Some(&Widget::Button("a".into())));
 }
 
@@ -138,7 +137,6 @@ fn live_dialog() {
                         eprintln!("POLKIT_PREVIEW: cancelled");
                         self.0.state.visible = false;
                     }
-                    Command::Select(..) => unreachable!(),
                 }
             }
         }
@@ -158,7 +156,7 @@ fn live_dialog() {
     a.dirty = true;
     knave_wayland::run_application(
         SurfaceOptions {
-            size: Some([560, 440]),
+            size: Some([360, 220]),
             keyboard: KeyboardMode::Exclusive,
             layer: SurfaceLayer::Overlay,
             namespace: "knave-shell-polkit-preview".into(),
@@ -170,20 +168,42 @@ fn live_dialog() {
 }
 
 #[test]
-fn long_messages_keep_actions_visible_and_identity_selection_is_typed() {
+fn compact_prompt_has_no_account_chooser_or_action_details() {
     let mut a = agent(false);
-    a.state.message = "Long authorization explanation ".repeat(130);
-    a.state.prompt = None;
-    a.state.identities = vec!["Administrator".into(), "Other admin".into()];
-    a.dirty = true;
-    a.frame([560.0, 440.0], &mut Metrics);
+    assert_eq!(
+        a.scene.widget(ElementId(1)),
+        Some(&Widget::Text("Enter password".into()))
+    );
+    assert!(!format!("{:?}", a.compose()).contains("Dropdown"));
     for id in [CANCEL, CONFIRM] {
         let bounds = a.scene.bounds(id).unwrap();
-        assert!(bounds.y >= 0.0 && bounds.y + bounds.height <= 440.0);
+        assert!(bounds.y >= 0.0 && bounds.y + bounds.height <= 220.0);
     }
-    let (sender, receiver) = async_channel::bounded(1);
-    a.commands = Some(sender);
-    a.identity = 1;
-    key(&mut a, Key::Enter);
-    assert!(matches!(receiver.try_recv(), Ok(Command::Select(42, 1))));
+    a.state.other_user = Some("root".into());
+    a.state.notice = "An authentication error ".repeat(40);
+    a.dirty = true;
+    a.frame([360.0, 220.0], &mut Metrics);
+    assert_eq!(
+        a.scene.widget(ElementId(1)),
+        Some(&Widget::Text("Enter password for root".into()))
+    );
+    let bounds = a.scene.bounds(CONFIRM).unwrap();
+    assert!(bounds.y + bounds.height <= 220.0);
+}
+#[test]
+fn unknown_cache_policy_is_not_presented_as_uncached() {
+    let mut a = agent(false);
+    assert!(a.scene.widget(ElementId(8)).is_none());
+    for (retained, label) in [
+        (true, "Remembered temporarily"),
+        (false, "Only this request"),
+    ] {
+        a.state.retention = Some(retained);
+        a.dirty = true;
+        a.frame([360.0, 220.0], &mut Metrics);
+        assert_eq!(
+            a.scene.widget(ElementId(8)),
+            Some(&Widget::Text(label.into()))
+        );
+    }
 }

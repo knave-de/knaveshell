@@ -178,8 +178,9 @@ Knave and Villain revisions; see Knave ADR 0013.
 
 Knave Session supervises `knave-shell polkit-agent` in direct desktop sessions. It registers
 with the system Polkit authority for the current logind session, and shows an
-exclusive overlay only during authentication. Select an offered administrator,
-enter the requested response, then press Enter or Authenticate. Escape or Cancel
+compact password prompt only during authentication. The current account is
+selected automatically when Polkit allows it. If policy requires another account,
+the prompt names that account. Enter the password and press Enter or Continue. Escape or Cancel
 cancels the request. Hidden responses are masked and excluded from clipboard
 and IME surrounding text; Ctrl+A replaces the response and Backspace deletes.
 No other desktop's agent is required. Registration failures are logged; stop
@@ -188,3 +189,13 @@ agent needs a system bus, Polkit with its authentication helper, and a logind
 session. Winit sessions and Auto sessions with inherited display variables skip
 the agent to protect the enclosing desktop. For a direct launch with inherited
 display variables, select `backend = "tty"` explicitly.
+
+Knave saves no password or authorization cache. Polkit owns temporary
+authorizations and decides their lifetime from system policy. Inspect actual
+cached authorizations and their expiration without opening a dialog:
+
+    knave-shell polkit-cache
+
+An empty cache prints `No cached authorizations.` Read failures are errors,
+not an empty cache. The dialog shows retention information only when Polkit
+explicitly supplies it; missing information is never presented as “not cached”.
