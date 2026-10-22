@@ -19,6 +19,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y \
+            dbus \
+            libglib2.0-dev \
+            libpolkit-agent-1-dev \
+            libpolkit-gobject-1-dev \
             libegl1-mesa-dev \
             libgles2-mesa-dev \
             libwayland-dev \
