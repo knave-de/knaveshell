@@ -862,7 +862,7 @@ fn status_title(app: &Overview) -> Option<String> {
         .rev()
         .find_map(|command| match command {
             knave_ui::DisplayCommand::Text { text, bounds, .. }
-                if bounds.x == 16.0 && bounds.y == 0.0 =>
+                if bounds.x == 46.0 && bounds.y == 0.0 =>
             {
                 Some(text.clone())
             }
@@ -876,6 +876,13 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
     assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
+    // Hit targets start with the shared brand control, then the workspace chips.
+    assert!(
+        app.targets
+            .values()
+            .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview))),
+        "the brand control is routed for the overview's shared bar"
+    );
     for (index, bounds) in [
         Rect::new(150.0, 5.0, 32.0, 26.0),
         Rect::new(188.0, 5.0, 32.0, 26.0),
@@ -885,12 +892,12 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     .enumerate()
     {
         assert_eq!(
-            app.scene.bounds(bar_element(10 + index as u64)),
+            app.scene.bounds(bar_element(11 + index as u64)),
             Some(bounds)
         );
     }
     // A chip click switches that workspace directly, like the desktop bar.
-    click(&mut app, bar_element(12));
+    click(&mut app, bar_element(13));
     assert!(matches!(
         app.take_request(),
         Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
@@ -969,14 +976,40 @@ fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
 }
 
 #[test]
-fn without_a_snapshot_the_shared_bar_shows_the_session_title() {
+fn without_a_snapshot_the_shared_bar_shows_the_brand_mark_without_a_wordmark() {
     let mut app = Overview::new();
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(status_title(&app).as_deref(), Some("Knave"));
+    // Icon-only mark: no disconnected "Knave" title is painted beside it.
+    assert!(status_title(&app).as_deref().is_none_or(str::is_empty));
+    let image = app
+        .display
+        .commands
+        .iter()
+        .any(|command| matches!(command, knave_ui::DisplayCommand::Image { bounds, .. } if *bounds == Rect::new(6.0, 6.0, 24.0, 24.0)));
+    assert!(image, "the bundled brand mark renders on the shared bar");
     assert!(!app.targets.values().any(|target| matches!(
         target,
         Target::StatusBar(knave_ui::UiAction::FocusWorkspace(_))
     )));
+}
+
+#[test]
+fn the_brand_mark_toggles_the_visible_overview_off() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let id = *app
+        .targets
+        .iter()
+        .find(|(_, target)| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
+        .unwrap()
+        .0;
+    click(&mut app, id);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
 }
 
 #[test]
@@ -1111,4 +1144,24 @@ fn quick_settings_hides_overview_before_transferring_focus() {
         app.take_request(),
         Some(HostRequest::ToggleQuickSettings)
     ));
+}
+
+#[test]
+fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    // The reduced stage margins leave more room for the preview.
+    let search = app.scene.bounds(SEARCH).unwrap();
+    let card = app
+        .scene
+        .bounds(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    assert!(search.y >= STATUS_BAR_HEIGHT);
+    assert!(card.height >= 550.0);
+    // The card no longer reserves the previous 100-pixel footer band.
+    let dot = app
+        .scene
+        .bounds(ElementId(0x200_0000_0000 + 2))
+        .expect("current workspace dot");
+    assert!(dot.y + dot.height <= 800.0 - 24.0);
 }

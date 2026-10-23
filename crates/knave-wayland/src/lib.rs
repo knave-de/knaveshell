@@ -1332,6 +1332,12 @@ impl Runtime {
                 self.exit = true;
                 return;
             }
+            UiAction::OpenOverview => DesktopCommand::SetOverviewVisible {
+                visible: !self
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.overview_visible),
+            },
             UiAction::FocusWorkspace(workspace) => DesktopCommand::FocusWorkspace { workspace },
             UiAction::FocusWindow(window) => DesktopCommand::FocusWindow { window },
             UiAction::RestoreWindow(window) => DesktopCommand::RestoreWindow { window },

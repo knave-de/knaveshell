@@ -224,6 +224,12 @@ impl Overview {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
             Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
+            Some(Target::StatusBar(knave_ui::UiAction::OpenOverview)) => {
+                // The overview is visible here, so the shared brand control hides it.
+                if self.connected {
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+                }
+            }
             Some(Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)) => {
                 if self.connected {
                     self.quick_settings_after_hide = true;

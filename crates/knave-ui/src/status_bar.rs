@@ -215,6 +215,23 @@ mod tests {
     use super::*;
     use crate::UiAction;
     #[test]
+    fn the_brand_mark_opens_overview_without_clashing_with_bar_controls() {
+        for width in [100.0, 180.0, 250.0, 800.0, 1920.0] {
+            let bar = StatusBar::new(0, width, 36.0, None, true, None, &[]);
+            assert_eq!(bar.scene.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
+            // Workspace chips and the bell keep their zones remote from the brand.
+            assert_ne!(
+                bar.scene.hit_test(160.0, 18.0),
+                Some(UiAction::OpenOverview)
+            );
+            assert_eq!(
+                bar.scene.hit_test((width - 28.0).max(0.0), 18.0),
+                Some(UiAction::ToggleNotifications)
+            );
+        }
+    }
+
+    #[test]
     fn applets_stay_left_of_bell_and_fit_small_outputs() {
         let applets: Vec<_> = (1..=32)
             .map(|id| Applet {

@@ -46,8 +46,9 @@ mod tests {
         let list = renderer.prepare(&scene);
 
         assert_eq!(list.revision, 4);
-        assert_eq!(list.commands.len(), 2);
+        assert_eq!(list.commands.len(), 3);
         assert!(matches!(list.commands[0], DisplayCommand::Shape { .. }));
         assert!(matches!(list.commands[1], DisplayCommand::Text { .. }));
+        assert!(matches!(list.commands[2], DisplayCommand::Image { .. }));
     }
 }

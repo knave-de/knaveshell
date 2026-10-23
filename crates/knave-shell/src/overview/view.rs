@@ -121,8 +121,8 @@ impl Overview {
                 .iter()
                 .position(|w| w.workspace == ws)
                 .unwrap_or(0);
-            let top = search_rect.y + search_rect.height + 42.0f32.min(height * 0.04);
-            let bottom_room = 100.0f32.min(height * 0.18);
+            let top = search_rect.y + search_rect.height + 28.0f32.min(height * 0.04);
+            let bottom_room = 64.0f32.min(height * 0.12);
             let available_h = (height - top - bottom_room).max(40.0);
             let preview_width = ((width * 0.82).min(available_h * 16.0 / 9.0)).max(1.0);
             let preview_height = (preview_width * 9.0 / 16.0).min(available_h);

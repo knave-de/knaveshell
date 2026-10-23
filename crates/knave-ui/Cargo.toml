@@ -7,3 +7,4 @@ description = "Renderer-independent UI scene and interaction primitives for Knav
 [dependencies]
 knave-desktop-api.workspace = true
 unicode-segmentation = "1.12"
+png.workspace = true
