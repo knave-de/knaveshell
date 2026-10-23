@@ -22,7 +22,7 @@ protocol or configuration change and no added background activity.
 The shell computes one selected card and up to two neighboring cards from the
 current logical output size and the active workspace in each desktop snapshot.
 Arrows, side cards, dots, and bar chips dispatch `FocusWorkspace` without hiding;
-the subscription updates the selected card, minimized shelf, and projected bar
+the subscription updates the selected card, minimized icon tray, and projected bar
 together. A failed switch leaves the last confirmed workspace selected. The
 existing single in-flight action bounds repeated navigation requests. No new
 worker, timer, or subscription is added. It sends their interior rectangles and workspace
@@ -40,16 +40,21 @@ spec's size rule. Knave has no icon-theme setting and the shell reads no other
 desktop's settings, so lookup tries `hicolor`, then every other installed theme by
 name, then `pixmaps`.
 
-Catalog and icon loading run on one worker owned by the `Overview`, started on the
-first typed character. The input and frame paths never read the filesystem. The
-job queue holds 32 jobs; icon requests are limited to visible rows and
-deduplicated, and finished icons live in a 128-entry cache. The worker wakes the
-host through `Application::set_waker`, and `needs_frame` reports delivered
-results, so there is no polling. A scan examines at most 16,384 directory entries
-and keeps at most 4,096 applications; reaching a limit marks the catalog
-incomplete and logs it. Only regular files are opened, so a FIFO cannot block the
-worker. The queue closes and the worker is detached when the session ends. Enter
-pressed before the catalog arrives launches the top result when it does.
+Catalog and icon loading run on one worker owned by the `Overview`, started on
+the first typed character or when a snapshot first shows minimized windows, so
+their icons can resolve before any query. The input and frame paths never read
+the filesystem. The job queue holds 32 jobs; icon requests are limited to
+visible rows and tray pages and deduplicated, and finished icons live in a
+128-entry cache. The worker wakes the host through `Application::set_waker`, and
+`needs_frame` reports delivered results, so there is no polling. A scan examines
+at most 16,384 directory entries and keeps at most 4,096 applications; reaching
+a limit marks the catalog incomplete and logs it. Only regular files are opened,
+so a FIFO cannot block the worker. The queue closes and the worker is detached
+when the session ends. Enter pressed before the catalog arrives launches the top
+result when it does. Minimized tray icons resolve a window's `app_id` to a
+desktop entry icon; unmatched or unavailable applications reuse the generic
+executable icon, and every tray entry stays a button that names its exact
+window.
 Icons rasterize at 64px (SVG through resvg without text or system fonts, PNG
 downscaled if oversized).
 Window and wallpaper textures are composed: there is no screenshot readback, PNG

@@ -1,4 +1,4 @@
-//! Workspace-first overview with a separate minimized-window shelf.
+//! Workspace-first overview with a compact minimized-window icon tray.
 pub(crate) mod icons;
 pub(crate) mod loader;
 mod view;
@@ -29,8 +29,9 @@ enum Target {
     Page(bool),
 }
 
-/// The catalog loads on a worker after the first query, so neither startup nor
-/// typing ever waits on the filesystem.
+/// The catalog loads on a worker after the first query or when a snapshot
+/// first shows minimized windows, so neither startup nor typing ever waits on
+/// the filesystem.
 enum Apps {
     Unloaded,
     Loading,
@@ -487,6 +488,15 @@ impl Application for Overview {
             }
         }
         self.snapshot = Some(snapshot.clone());
+        // Minimized icons resolve through the catalog; warm it up before any
+        // query when the desktop already reports minimized windows. This is
+        // event-driven here, never on the frame path.
+        if matches!(self.apps, Apps::Unloaded)
+            && snapshot.overview_visible
+            && snapshot.windows.iter().any(|w| w.minimized)
+        {
+            self.ensure_catalog();
+        }
         self.dirty = true;
     }
     fn desktop_unavailable(&mut self) {

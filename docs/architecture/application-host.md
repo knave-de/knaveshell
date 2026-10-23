@@ -105,4 +105,4 @@ the full-card previews and shell controls. The host selects premultiplied surfac
 its blended render output. Villain includes the existing wallpaper texture in
 workspace panes with centered cover scaling and rounded masks, and suppresses
 full-size desktop windows and the bar behind Overview. Empty workspaces omit the
-minimized shelf; when needed, its controls render above the wallpaper.
+minimized icon tray; when needed, its controls render above the wallpaper.

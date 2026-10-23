@@ -182,6 +182,175 @@ fn minimized_shelf_is_workspace_scoped_and_paginated() {
     assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(7)]).is_some());
 }
+
+/// Element id of the minimized icon tray docked in one workspace card.
+fn tray_id(ws: u64) -> ElementId {
+    ElementId(0x100_0000_0000 + ws * 32 + 3)
+}
+fn tooltip_visible(app: &Overview, label: &str) -> bool {
+    app.display.commands.iter().any(|command| match command {
+        knave_ui::DisplayCommand::Text { text, .. } => text == label,
+        _ => false,
+    })
+}
+#[test]
+fn the_minimized_tray_is_icon_only_in_the_lower_left_of_the_selected_card() {
+    let mut app = app();
+    settle(&mut app, [1200.0, 800.0]);
+    let card = app
+        .scene
+        .bounds(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    let tray = app
+        .scene
+        .bounds(tray_id(2))
+        .expect("tray on the selected card");
+    assert!(tray.height <= 50.0 && tray.height >= 30.0);
+    assert!(tray.width < card.width);
+    assert!((tray.x - (card.x + 12.0)).abs() < 1.0);
+    assert!(((card.y + card.height) - (tray.y + tray.height) - 12.0).abs() < 1.0);
+    // Entries are small icon buttons inside the tray, not heading/chip cards.
+    let icon = app.scene.bounds(app.window_ids[&WindowId(2)]).unwrap();
+    assert!(icon.width <= 40.0 && icon.height <= 40.0);
+    assert!(icon.x >= tray.x && icon.y >= tray.y);
+    assert!(icon.x + icon.width <= tray.x + tray.width + 0.5);
+    assert!(icon.y + icon.height <= tray.y + tray.height + 0.5);
+    for other in [tray_id(1), tray_id(3)] {
+        assert!(app.scene.bounds(other).is_none(), "tray off selected card");
+    }
+    // Only the current page is composed in the tray.
+    assert!(app.scene.bounds(app.window_ids[&WindowId(12)]).is_none());
+    let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Image { bounds, clip, .. }
+            if bounds.x >= tray.x
+                && bounds.y >= tray.y
+                && bounds.x + bounds.width <= tray.x + tray.width
+                && bounds.y + bounds.height <= tray.y + tray.height
+                && clip.is_some()
+    )));
+    // No heading, no app id or window title subtitles, no empty-shelf note.
+    for command in &list.commands {
+        if let knave_ui::DisplayCommand::Text { text, .. } = command {
+            assert!(!text.contains("Minimized"), "{text:?}");
+            assert!(!text.contains("Editor"), "{text:?}");
+        }
+    }
+}
+#[test]
+fn tray_icons_name_the_exact_window_on_hover() {
+    let mut app = app();
+    let point = |app: &Overview, id: ElementId| {
+        let r = app.scene.bounds(id).unwrap();
+        [r.x + r.width / 2.0, r.y + r.height / 2.0]
+    };
+    for id in 2..=6 {
+        app.input(Input::PointerMove(point(
+            &app,
+            app.window_ids[&WindowId(id)],
+        )));
+        app.frame([1200.0, 800.0], &mut Metrics);
+        // Same-application windows are still told apart.
+        assert!(
+            tooltip_visible(&app, &format!("Restore Window {id}")),
+            "window {id}"
+        );
+    }
+    assert!(!tooltip_visible(&app, "Restore Window 7"));
+    click(&mut app, ElementId(31));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.scene.bounds(app.window_ids[&WindowId(8)]).is_some());
+    app.input(Input::PointerMove(point(
+        &app,
+        app.window_ids[&WindowId(8)],
+    )));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(tooltip_visible(&app, "Restore Window 8"));
+    app.input(Input::PointerLeave);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(!tooltip_visible(&app, "Restore Window 8"));
+}
+#[test]
+fn keyboard_navigation_reaches_tray_icons_and_restores() {
+    let mut app = app();
+    let mut focused = None;
+    for _ in 0..64 {
+        key(&mut app, Key::Tab, true);
+        key(&mut app, Key::Tab, false);
+        let id = match app.scene.focus() {
+            Some(id) => id,
+            None => continue,
+        };
+        if matches!(app.targets.get(&id), Some(Target::Window(_))) {
+            focused = Some(id);
+            break;
+        }
+    }
+    let id = focused.expect("Tab reaches a tray icon");
+    key(&mut app, Key::Enter, true);
+    key(&mut app, Key::Enter, false);
+    let expected = match app.targets.get(&id) {
+        Some(Target::Window(window)) => *window,
+        _ => unreachable!("checked above"),
+    };
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::RestoreWindow { window }))
+            if window == expected
+    ));
+}
+#[test]
+fn minimized_icons_load_without_typing_a_query() {
+    let mut app = Overview::new()
+        .with_catalog_environment(apps_environment())
+        .with_icon_lookup(icon_lookup(true));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+    assert!(app.query.text().is_empty());
+    assert!(matches!(app.apps, Apps::Ready(_)));
+    assert!(app.icons.get("editor-icon").is_some());
+    let wid = app.window_ids[&WindowId(2)].0;
+    assert!(app.scene.bounds(ElementId(0x500_0000_0000 + wid)).is_some());
+}
+#[test]
+fn unknown_minimized_apps_fall_back_to_the_generic_icon() {
+    let mut app = app();
+    let mut next = app.snapshot().unwrap().clone();
+    next.windows[1].app_id = "Mystery".into();
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+    // The worker answers an unknown application with the theme fallback.
+    assert!(app.icons.get("application-x-executable").is_some());
+    assert!(app.error.is_none());
+    assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_some());
+}
+#[test]
+fn no_icon_tray_when_the_selected_workspace_has_no_minimized_windows() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(true));
+    let mut next = snapshot();
+    for window in &mut next.windows {
+        window.minimized = false;
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.scene.bounds(tray_id(2)).is_none());
+    assert!(!app.display.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text == "No minimized windows"
+    )));
+    assert!(app.error.is_none());
+    assert!(
+        app.panes
+            .iter()
+            .any(|pane| pane.workspace == WorkspaceId(2))
+    );
+}
 #[test]
 fn navigation_switches_workspace_without_hiding_and_enter_returns_to_it() {
     let mut app = app();
