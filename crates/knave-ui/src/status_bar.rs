@@ -47,6 +47,28 @@ impl StatusBar {
         notifications: Option<&NotificationSnapshot>,
         applets: &[Applet],
     ) -> Self {
+        Self::with_focused_icon(
+            revision,
+            width,
+            height,
+            desktop,
+            notifications_enabled,
+            notifications,
+            applets,
+            None,
+        )
+    }
+
+    pub fn with_focused_icon(
+        revision: u64,
+        width: f32,
+        height: f32,
+        desktop: Option<&DesktopSnapshot>,
+        notifications_enabled: bool,
+        notifications: Option<&NotificationSnapshot>,
+        applets: &[Applet],
+        focused_icon: Option<&crate::UiImage>,
+    ) -> Self {
         let mut scene = UiScene::bar_with_snapshot(revision, width, height, desktop);
         if !notifications_enabled {
             scene.disable_notifications();
@@ -104,6 +126,74 @@ impl StatusBar {
                 });
             }
         }
+        // The workspace chips and the existing brand area own the left edge;
+        // applets, quick settings and the bell own the right edge.
+        if let Some(snapshot) = desktop {
+            scene.nodes.retain(|node| {
+                !matches!(
+                    node,
+                    crate::UiNode::Label {
+                        id: crate::NodeId(2), text, ..
+                    } if text.starts_with("Workspace ")
+                )
+            });
+            let workspace_end = scene
+                .targets
+                .iter()
+                .filter(|target| matches!(target.action, crate::UiAction::FocusWorkspace(_)))
+                .map(|target| target.bounds.x + target.bounds.width)
+                .fold(48.0_f32, f32::max);
+            let applet_start = applet_targets(width, applets)
+                .next()
+                .map(|(bounds, _)| bounds.x)
+                .unwrap_or(width);
+            let reserved_start = scene
+                .targets
+                .iter()
+                .filter(|target| {
+                    matches!(
+                        target.action,
+                        crate::UiAction::ToggleQuickSettings | crate::UiAction::ToggleNotifications
+                    )
+                })
+                .map(|target| target.bounds.x)
+                .fold(width, f32::min);
+            let left = workspace_end + 8.0;
+            let right = applet_start.min(reserved_start) - 8.0;
+            let focused = snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.active)
+                .and_then(|workspace| {
+                    snapshot.windows.iter().find(|window| {
+                        window.focused
+                            && !window.minimized
+                            && window.workspace == workspace.workspace
+                    })
+                })
+                .filter(|window| !window.title.is_empty());
+            if let Some(window) = focused.filter(|_| left + 22.0 <= right) {
+                let icon = crate::Rect::new(left, 7.0, 22.0, 22.0);
+                if let Some(image) = focused_icon {
+                    scene.push(crate::UiNode::Image {
+                        id: crate::NodeId(9),
+                        bounds: icon,
+                        image: image.clone(),
+                    });
+                }
+                let text_left = icon.x + icon.width + 6.0;
+                let text_width = (right - text_left).max(0.0);
+                let text = ellipsize(&window.title, text_width);
+                if !text.is_empty() {
+                    scene.push(crate::UiNode::Label {
+                        id: crate::NodeId(8),
+                        bounds: crate::Rect::new(text_left, 0.0, text_width, STATUS_BAR_HEIGHT),
+                        color: crate::Color::TEXT,
+                        text,
+                    });
+                }
+            }
+        }
         let mut display = DisplayList::from_scene(&scene);
         // Keep the strip opaque at surface edges even when the host clears to
         // transparent: clip an oversized fill rather than antialiasing its edge.
@@ -118,6 +208,29 @@ impl StatusBar {
         }
         Self { scene, display }
     }
+}
+
+fn ellipsize(text: &str, width: f32) -> String {
+    const ELLIPSIS_WIDTH: f32 = 8.0;
+    let glyph_width = |ch: char| if ch.is_ascii() { 8.0 } else { 16.0 };
+    if text.chars().map(glyph_width).sum::<f32>() <= width {
+        return text.to_owned();
+    }
+    let mut used = 0.0;
+    let mut prefix = String::new();
+    for ch in text.chars() {
+        let next_width = glyph_width(ch);
+        if used + next_width + ELLIPSIS_WIDTH > width {
+            break;
+        }
+        used += next_width;
+        prefix.push(ch);
+    }
+    if width < ELLIPSIS_WIDTH {
+        return String::new();
+    }
+    prefix.push('…');
+    prefix
 }
 
 /// Stable right-edge bell and count. Counts describe unread history, independent of banner lifetime.
@@ -214,6 +327,159 @@ fn append_bell(list: &mut crate::DisplayList, width: f32, snapshot: Option<&Noti
 mod tests {
     use super::*;
     use crate::UiAction;
+    use knave_desktop_api::{WindowId, WindowSummary, WorkspaceId, WorkspaceSummary};
+
+    fn desktop(title: &str) -> DesktopSnapshot {
+        DesktopSnapshot {
+            generation: 1,
+            overview_visible: true,
+            workspaces: vec![WorkspaceSummary {
+                workspace: WorkspaceId(1),
+                active: true,
+                window_count: 1,
+                visible_window_count: 1,
+            }],
+            windows: vec![WindowSummary {
+                id: WindowId(1),
+                title: title.into(),
+                app_id: "org.example.App".into(),
+                workspace: WorkspaceId(1),
+                focused: true,
+                minimized: false,
+                floating: false,
+                fullscreen: false,
+                maximized: false,
+            }],
+        }
+    }
+
+    fn node_label(bar: &StatusBar, id: u64) -> Option<&str> {
+        bar.scene.nodes().iter().find_map(|node| match node {
+            crate::UiNode::Label {
+                id: node_id, text, ..
+            } if node_id.0 == id => Some(text.as_str()),
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn focused_title_is_unicode_safe_and_ellipsized_before_reserved_targets() {
+        let long = "文書作成 — very long application title 📄📄";
+        let image = crate::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+        let bar = StatusBar::with_focused_icon(
+            0,
+            500.0,
+            36.0,
+            Some(&desktop(long)),
+            true,
+            None,
+            &[],
+            Some(&image),
+        );
+        let label = node_label(&bar, 8).expect("focused title");
+        assert!(label.ends_with('…'));
+        assert!(label.is_char_boundary(label.len()));
+        let bounds = bar
+            .scene
+            .nodes()
+            .iter()
+            .find_map(|node| match node {
+                crate::UiNode::Label { id, bounds, .. } if id.0 == 8 => Some(*bounds),
+                _ => None,
+            })
+            .unwrap();
+        assert!(bounds.x + bounds.width <= 352.0);
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            crate::UiNode::Image { id, .. } if id.0 == 9)));
+        assert_eq!(
+            bar.scene.hit_test(490.0, 18.0),
+            Some(UiAction::ToggleNotifications)
+        );
+        assert_eq!(
+            bar.scene.hit_test(380.0, 18.0),
+            Some(UiAction::ToggleQuickSettings)
+        );
+    }
+
+    #[test]
+    fn missing_focus_clears_the_title_and_icon_and_tiny_widths_stay_clamped() {
+        let image = crate::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+        let empty = desktop("");
+        let bar = StatusBar::with_focused_icon(
+            0,
+            180.0,
+            36.0,
+            Some(&empty),
+            true,
+            None,
+            &[],
+            Some(&image),
+        );
+        assert!(node_label(&bar, 8).is_none());
+        assert!(!bar.scene.nodes().iter().any(|node| matches!(node,
+            crate::UiNode::Image { id, .. } if id.0 == 9)));
+        let disconnected = StatusBar::new(0, 1.0, 36.0, None, true, None, &[]);
+        assert!(node_label(&disconnected, 8).is_none());
+        assert_eq!(
+            disconnected.scene.hit_test(0.0, 18.0),
+            Some(UiAction::ToggleNotifications)
+        );
+        let narrow = StatusBar::with_focused_icon(
+            0,
+            350.0,
+            36.0,
+            Some(&desktop("Window title")),
+            true,
+            None,
+            &[],
+            Some(&image),
+        );
+        assert!(node_label(&narrow, 8).is_none());
+        assert!(!narrow.scene.nodes().iter().any(|node| matches!(node,
+            crate::UiNode::Image { id, .. } if id.0 == 9)));
+        assert_eq!(
+            narrow.scene.hit_test(340.0, 18.0),
+            Some(UiAction::ToggleNotifications)
+        );
+    }
+
+    #[test]
+    fn focused_title_ends_before_the_first_applet() {
+        let applets: Vec<_> = (1..=2)
+            .map(|id| Applet {
+                id,
+                title: "App".into(),
+                image: None,
+                attention: false,
+            })
+            .collect();
+        let bar = StatusBar::with_focused_icon(
+            0,
+            800.0,
+            36.0,
+            Some(&desktop("A lengthy focused application title")),
+            true,
+            None,
+            &applets,
+            None,
+        );
+        let title = bar
+            .scene
+            .nodes()
+            .iter()
+            .find_map(|node| match node {
+                crate::UiNode::Label {
+                    id, bounds, text, ..
+                } if id.0 == 8 => Some((*bounds, text.as_str())),
+                _ => None,
+            })
+            .expect("focused title fits");
+        assert!(title.0.x + title.0.width <= 588.0);
+        assert!(title.1.ends_with('…'));
+        let first_applet = applet_targets(800.0, &applets).next().unwrap().0;
+        assert_eq!(first_applet.x, 596.0);
+        assert!(title.0.x + title.0.width < first_applet.x);
+    }
     #[test]
     fn the_brand_mark_opens_overview_without_clashing_with_bar_controls() {
         for width in [100.0, 180.0, 250.0, 800.0, 1920.0] {

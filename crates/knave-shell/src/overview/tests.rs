@@ -407,7 +407,7 @@ fn navigation_switches_workspace_without_hiding_and_enter_returns_to_it() {
     assert!(app.take_request().is_none());
     assert!(app.surface_visible());
     assert_eq!(app.workspace, Some(WorkspaceId(3)));
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+    assert_eq!(status_title(&app), None);
     assert!(app.scene.bounds(app.window_ids[&WindowId(14)]).is_some());
     key(&mut app, Key::Enter, true);
     key(&mut app, Key::Enter, false);
@@ -477,7 +477,7 @@ fn workspace_controls_switch_without_hiding() {
         assert!(app.take_request().is_none());
         publish_workspace(&mut app, WorkspaceId(3));
         assert_eq!(app.workspace, Some(WorkspaceId(3)));
-        assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+        assert_eq!(status_title(&app), None);
         assert!(app.surface_visible());
     }
 }
@@ -511,7 +511,7 @@ fn snapshots_with_same_generation_sync_active_workspace_and_membership() {
     app.desktop_snapshot(&next);
     app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(app.workspace, Some(WorkspaceId(1)));
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 1"));
+    assert_eq!(status_title(&app), None);
     assert!(!app.window_ids.contains_key(&WindowId(2)));
     next.workspaces.pop();
     app.desktop_snapshot(&next);
@@ -1069,9 +1069,7 @@ fn status_title(app: &Overview) -> Option<String> {
         .iter()
         .rev()
         .find_map(|command| match command {
-            knave_ui::DisplayCommand::Text { text, bounds, .. }
-                if bounds.x == 46.0 && bounds.y == 0.0 =>
-            {
+            knave_ui::DisplayCommand::Text { text, bounds, .. } if bounds.y == 0.0 => {
                 Some(text.clone())
             }
             _ => None,
@@ -1083,14 +1081,8 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     let mut app = app();
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
-    // Hit targets start with the shared brand control, then the workspace chips.
-    assert!(
-        app.targets
-            .values()
-            .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview))),
-        "the brand control is routed for the overview's shared bar"
-    );
+    assert_eq!(status_title(&app).as_deref(), Some("Window 1"));
+    assert!(app.targets.values().any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview))));
     for (index, bounds) in [
         Rect::new(150.0, 5.0, 32.0, 26.0),
         Rect::new(188.0, 5.0, 32.0, 26.0),
@@ -1118,11 +1110,24 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
 }
 
 #[test]
-fn the_shared_bar_title_tracks_the_selected_workspace() {
+fn overview_rejects_stale_focused_icons_and_clears_on_disconnect() {
+    let mut app = app();
+    let current = knave_ui::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+    let stale = knave_ui::UiImage::from_rgba(1, 1, vec![4, 5, 6, 255]).unwrap();
+    app.focused_app_icon(Some("Editor"), Some(&current));
+    assert_eq!(app.focused_icon.as_ref(), Some(&current));
+    app.focused_app_icon(Some("old.application"), Some(&stale));
+    assert_eq!(app.focused_icon.as_ref(), Some(&current));
+    app.desktop_unavailable();
+    assert!(app.focused_icon.is_none());
+}
+
+#[test]
+fn the_shared_bar_clears_the_title_when_the_focused_window_is_on_another_workspace() {
     let mut app = app();
     publish_workspace(&mut app, WorkspaceId(3));
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+    assert_eq!(status_title(&app), None);
     // The bar, including its chips, stays visible while searching.
     type_query(&mut app, "edit");
     assert!(app.scene.bounds(bar_element(12)).is_some());
@@ -1134,8 +1139,17 @@ fn the_shared_bar_title_tracks_the_selected_workspace() {
 fn shared_bar_text_matches_the_desktop_bar_display_list() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
-    let bar = UiScene::bar_with_snapshot(0, 1200.0, 36.0, Some(app.snapshot().unwrap()));
-    for node in bar.nodes().iter() {
+    let bar = knave_ui::status_bar::StatusBar::with_focused_icon(
+        0,
+        1200.0,
+        36.0,
+        app.snapshot(),
+        true,
+        None,
+        &[],
+        app.focused_icon.as_ref(),
+    );
+    for node in bar.scene.nodes().iter() {
         let (bounds, color, text) = match node {
             UiNode::Label {
                 bounds,
@@ -1280,7 +1294,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     ];
     app.notification_snapshot(Some(&state));
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared = knave_ui::status_bar::StatusBar::new(
+    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
         0,
         1200.0,
         36.0,
@@ -1288,6 +1302,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
         true,
         Some(&state),
         &[],
+        app.focused_icon.as_ref(),
     );
     assert!(app.display.commands.ends_with(&shared.display.commands));
     for expected in ["99+", "z"] {
@@ -1296,8 +1311,16 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     }
     app.notification_snapshot(None);
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared =
-        knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, None, &[]);
+    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
+        0,
+        1200.0,
+        36.0,
+        app.snapshot(),
+        true,
+        None,
+        &[],
+        app.focused_icon.as_ref(),
+    );
     assert!(app.display.commands.ends_with(&shared.display.commands));
     assert!(!app.display.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text {text, ..} if text == "99+" || text == "z")));

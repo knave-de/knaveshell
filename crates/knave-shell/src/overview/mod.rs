@@ -47,6 +47,7 @@ pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     applets: Vec<knave_ui::status_bar::Applet>,
+    focused_icon: Option<knave_ui::UiImage>,
     notifications_enabled: bool,
     notifications_after_hide: bool,
     quick_settings_after_hide: bool,
@@ -87,7 +88,7 @@ impl Default for Overview {
 }
 impl Overview {
     fn status_bar_component(&self, width: f32) -> StatusBar {
-        StatusBar::new(
+        StatusBar::with_focused_icon(
             0,
             width,
             STATUS_BAR_HEIGHT,
@@ -95,6 +96,7 @@ impl Overview {
             self.notifications_enabled,
             self.notifications.as_ref(),
             &self.applets,
+            self.focused_icon.as_ref(),
         )
     }
     pub fn new() -> Self {
@@ -103,6 +105,7 @@ impl Overview {
             snapshot: None,
             notifications: None,
             applets: Vec::new(),
+            focused_icon: None,
             notifications_enabled: true,
             notifications_after_hide: false,
             quick_settings_after_hide: false,
@@ -499,7 +502,32 @@ impl Application for Overview {
         }
         self.dirty = true;
     }
+    fn focused_app_icon(&mut self, app_id: Option<&str>, image: Option<&knave_ui::UiImage>) {
+        if let Some(app_id) = app_id {
+            let current_app = self.snapshot.as_ref().and_then(|snapshot| {
+                let workspace = snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.active)?;
+                snapshot
+                    .windows
+                    .iter()
+                    .find(|window| {
+                        window.focused
+                            && !window.minimized
+                            && window.workspace == workspace.workspace
+                    })
+                    .map(|window| window.app_id.as_str())
+            });
+            if current_app != Some(app_id) {
+                return;
+            }
+        }
+        self.focused_icon = image.cloned();
+        self.dirty = true;
+    }
     fn desktop_unavailable(&mut self) {
+        self.focused_icon = None;
         self.notifications_after_hide = false;
         self.quick_settings_after_hide = false;
         self.reset_view();
