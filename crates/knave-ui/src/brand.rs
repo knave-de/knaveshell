@@ -34,7 +34,7 @@ pub fn image() -> Option<UiImage> {
                 .set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
             let mut reader = decoder.read_info().ok()?;
             let buffer_size = reader.output_buffer_size().filter(|size| {
-                bounded_buffer_size(reader.info()).is_some_and(|bounded| size <= bounded)
+                bounded_buffer_size(reader.info()).is_some_and(|bounded| *size <= bounded)
             })?;
             let mut buffer = vec![0; buffer_size];
             let info = reader.next_frame(&mut buffer).ok()?;
