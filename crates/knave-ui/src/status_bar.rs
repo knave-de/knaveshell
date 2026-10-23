@@ -183,7 +183,7 @@ impl StatusBar {
                 }
                 let text_left = icon.x + icon.width + 6.0;
                 let text_width = (right - text_left).max(0.0);
-                let text = ellipsize(&window.title, text_width);
+                let text = ellipsize(&window.title.replace(['\n', '\r'], " "), text_width);
                 if !text.is_empty() {
                     scene.push(crate::UiNode::Label {
                         id: crate::NodeId(8),
@@ -195,6 +195,33 @@ impl StatusBar {
             }
         }
         let mut display = DisplayList::from_scene(&scene);
+        // Scene labels default to word wrapping. The focused title owns exactly
+        // one line and must never paint into adjacent controls.
+        if let Some(crate::UiNode::Label { bounds, text, .. }) = scene.nodes().iter().find(|node| {
+            matches!(
+                node,
+                crate::UiNode::Label {
+                    id: crate::NodeId(8),
+                    ..
+                }
+            )
+        }) {
+            display.commands.retain(|command| {
+                !matches!(command,
+                crate::DisplayCommand::Text { bounds: b, text: t, .. }
+                    if b == bounds && t == text)
+            });
+            display.commands.push(crate::DisplayCommand::Text {
+                bounds: *bounds,
+                text: text.clone(),
+                style: crate::TextStyle {
+                    wrap: crate::TextWrap::None,
+                    ..Default::default()
+                },
+                transform: crate::Transform2D::IDENTITY,
+                clip: Some(*bounds),
+            });
+        }
         // Keep the strip opaque at surface edges even when the host clears to
         // transparent: clip an oversized fill rather than antialiasing its edge.
         if let Some(crate::DisplayCommand::Shape { bounds, clip, .. }) =
@@ -211,8 +238,11 @@ impl StatusBar {
 }
 
 fn ellipsize(text: &str, width: f32) -> String {
-    const ELLIPSIS_WIDTH: f32 = 8.0;
-    let glyph_width = |ch: char| if ch.is_ascii() { 8.0 } else { 16.0 };
+    // Composition has no renderer/font system. Reserve more than one em per
+    // scalar (including the ellipsis); the display clip remains authoritative
+    // for unusual fonts and shaping sequences.
+    const ELLIPSIS_WIDTH: f32 = 18.0;
+    let glyph_width = |_: char| 18.0;
     if text.chars().map(glyph_width).sum::<f32>() <= width {
         return text.to_owned();
     }

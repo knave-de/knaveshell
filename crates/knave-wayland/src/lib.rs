@@ -867,12 +867,8 @@ impl Runtime {
             worker.cancel_before(self.focused_icon_token);
         }
         self.focused_app_icon = None;
-        self.focused_icon_request = self.focused_icon_key.as_ref().and_then(|(_, _, app_id)| {
-            (!app_id.is_empty()).then(|| focused_app::Request {
-                token: self.focused_icon_token,
-                app_id: app_id.clone(),
-            })
-        });
+        self.focused_icon_request =
+            focused_app::request(self.focused_icon_key.as_ref(), self.focused_icon_token);
         if let Some(app) = &mut self.app {
             app.focused_app_icon(None, None);
         }

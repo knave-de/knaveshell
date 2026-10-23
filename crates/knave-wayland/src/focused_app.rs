@@ -47,46 +47,77 @@ pub(super) fn identity(snapshot: &DesktopSnapshot) -> Option<Identity> {
         .map(|window| (window.id, workspace, window.app_id.clone()))
 }
 
+pub(super) fn request(identity: Option<&Identity>, token: u64) -> Option<Request> {
+    identity.map(|(_, _, app_id)| Request {
+        token,
+        app_id: app_id.clone(),
+    })
+}
+
 pub(super) fn matches(identity: Option<&Identity>, token: u64, result: &ResultIcon) -> bool {
     token == result.token && identity.is_some_and(|(_, _, app_id)| app_id == &result.app_id)
 }
 
+#[derive(Default)]
+struct Completion {
+    closed: bool,
+    result: Option<ResultIcon>,
+}
+
 pub(super) struct Worker {
     jobs: Option<SyncSender<Request>>,
-    result: Arc<Mutex<Option<ResultIcon>>>,
+    result: Arc<Mutex<Completion>>,
     current_token: Arc<AtomicU64>,
     thread: Option<JoinHandle<()>>,
 }
 
 impl Worker {
     pub fn start(waker: Waker) -> Self {
+        let mut catalog: Option<Option<Catalog>> = None;
+        let mut lookup = None;
+        Self::start_with(waker, move |app_id| {
+            let catalog = catalog.get_or_insert_with(|| Catalog::load().ok());
+            let icon = catalog
+                .as_ref()
+                .and_then(|catalog| app_icon(catalog, app_id));
+            let lookup = lookup.get_or_insert_with(IconLookup::from_process);
+            icon_candidates(icon.as_deref())
+                .iter()
+                .find_map(|name| load(lookup, name))
+                .or_else(|| Some(generic_icon()))
+        })
+    }
+
+    fn start_with(
+        waker: Waker,
+        mut resolve: impl FnMut(&str) -> Option<UiImage> + Send + 'static,
+    ) -> Self {
         let (jobs, receiver) = mpsc::sync_channel::<Request>(QUEUE);
-        let result = Arc::new(Mutex::new(None));
+        let result = Arc::new(Mutex::new(Completion::default()));
         let results = result.clone();
         let current_token = Arc::new(AtomicU64::new(0));
         let active_token = current_token.clone();
         let thread = thread::spawn(move || {
-            let mut catalog: Option<Option<Catalog>> = None;
-            let mut lookup = IconLookup::from_process();
             let mut cache = HashMap::<String, Option<UiImage>>::new();
             let mut order = VecDeque::<String>::new();
             while let Ok(request) = receiver.recv() {
                 if active_token.load(Ordering::Acquire) != request.token {
+                    let completion = results.lock().unwrap_or_else(PoisonError::into_inner);
+                    if completion.closed {
+                        break;
+                    }
                     waker.wake();
                     continue;
                 }
                 let image = if let Some(image) = cache.get(&request.app_id) {
                     image.clone()
                 } else {
-                    let catalog = catalog.get_or_insert_with(|| Catalog::load().ok());
-                    let icon = catalog
-                        .as_ref()
-                        .and_then(|catalog| app_icon(catalog, &request.app_id));
-                    let image = icon_candidates(icon.as_deref())
-                        .iter()
-                        .find_map(|name| load(&mut lookup, name))
-                        .or_else(|| Some(generic_icon()));
+                    let image = resolve(&request.app_id);
                     if active_token.load(Ordering::Acquire) != request.token {
+                        let completion = results.lock().unwrap_or_else(PoisonError::into_inner);
+                        if completion.closed {
+                            break;
+                        }
                         waker.wake();
                         continue;
                     }
@@ -100,10 +131,18 @@ impl Worker {
                     image
                 };
                 if active_token.load(Ordering::Acquire) != request.token {
+                    let completion = results.lock().unwrap_or_else(PoisonError::into_inner);
+                    if completion.closed {
+                        break;
+                    }
                     waker.wake();
                     continue;
                 }
-                *results.lock().unwrap_or_else(PoisonError::into_inner) = Some(ResultIcon {
+                let mut completion = results.lock().unwrap_or_else(PoisonError::into_inner);
+                if completion.closed {
+                    break;
+                }
+                completion.result = Some(ResultIcon {
                     token: request.token,
                     app_id: request.app_id,
                     image,
@@ -134,12 +173,20 @@ impl Worker {
         self.result
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
+            .result
             .take()
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
+        // Serialize shutdown with publication/waking without waiting for I/O.
+        {
+            let mut completion = self.result.lock().unwrap_or_else(PoisonError::into_inner);
+            completion.closed = true;
+            completion.result = None;
+            self.current_token.fetch_add(1, Ordering::AcqRel);
+        }
         self.jobs.take();
         if let Some(thread) = self.thread.take()
             && thread.is_finished()
@@ -260,6 +307,63 @@ mod tests {
         next.windows[0].id = WindowId(8);
         next.windows[0].app_id = "org.example.Other".into();
         assert!(!matches(identity(&next).as_ref(), 4, &result));
+    }
+
+    #[test]
+    fn empty_app_id_keeps_focus_and_requests_fallback() {
+        let mut state = snapshot();
+        state.windows[0].app_id.clear();
+        let key = identity(&state);
+        assert_eq!(
+            request(key.as_ref(), 1),
+            Some(Request {
+                token: 1,
+                app_id: String::new()
+            })
+        );
+        assert_eq!(request(None, 2), None);
+        assert_eq!(icon_candidates(None), vec![FALLBACK.to_owned()]);
+    }
+
+    #[test]
+    fn drop_cancels_queued_lookup_and_suppresses_late_results_and_wakes() {
+        use std::time::Duration;
+        let (wake, wakes) = super::super::channel::sync_channel(1);
+        let (started, starts) = mpsc::channel();
+        let (release, blocked) = mpsc::channel();
+        let mut worker = Worker::start_with(Waker::new(wake), move |app_id| {
+            started.send(app_id.to_owned()).unwrap();
+            blocked.recv().unwrap();
+            Some(generic_icon())
+        });
+        worker.cancel_before(1);
+        assert!(worker.submit(Request {
+            token: 1,
+            app_id: String::new()
+        }));
+        assert_eq!(starts.recv_timeout(Duration::from_secs(2)).unwrap(), "");
+        assert!(worker.submit(Request {
+            token: 1,
+            app_id: "queued".into()
+        }));
+        assert!(!worker.submit(Request {
+            token: 1,
+            app_id: "overflow".into()
+        }));
+        let completion = worker.result.clone();
+        // Retain the handle only to synchronize the test after nonblocking Drop.
+        let thread = worker.thread.take().unwrap();
+        drop(worker);
+        assert!(completion.lock().unwrap().closed);
+        release.send(()).unwrap();
+        drop(release);
+        thread.join().unwrap();
+        assert!(starts.try_recv().is_err(), "queued lookup must not run");
+        assert!(completion.lock().unwrap().result.is_none());
+        assert!(
+            wakes.try_recv().is_err(),
+            "shutdown must not wake the old host"
+        );
     }
 
     #[test]
