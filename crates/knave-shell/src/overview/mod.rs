@@ -1,4 +1,4 @@
-//! Workspace-first overview with a separate minimized-window shelf.
+//! Workspace-first overview with a compact minimized-window icon tray.
 pub(crate) mod icons;
 pub(crate) mod loader;
 mod view;
@@ -29,8 +29,9 @@ enum Target {
     Page(bool),
 }
 
-/// The catalog loads on a worker after the first query, so neither startup nor
-/// typing ever waits on the filesystem.
+/// The catalog loads on a worker after the first query or when a snapshot
+/// first shows minimized windows, so neither startup nor typing ever waits on
+/// the filesystem.
 enum Apps {
     Unloaded,
     Loading,
@@ -46,6 +47,7 @@ pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     applets: Vec<knave_ui::status_bar::Applet>,
+    focused_icon: Option<knave_ui::UiImage>,
     notifications_enabled: bool,
     notifications_after_hide: bool,
     quick_settings_after_hide: bool,
@@ -86,7 +88,7 @@ impl Default for Overview {
 }
 impl Overview {
     fn status_bar_component(&self, width: f32) -> StatusBar {
-        StatusBar::new(
+        StatusBar::with_focused_icon(
             0,
             width,
             STATUS_BAR_HEIGHT,
@@ -94,6 +96,7 @@ impl Overview {
             self.notifications_enabled,
             self.notifications.as_ref(),
             &self.applets,
+            self.focused_icon.as_ref(),
         )
     }
     pub fn new() -> Self {
@@ -102,6 +105,7 @@ impl Overview {
             snapshot: None,
             notifications: None,
             applets: Vec::new(),
+            focused_icon: None,
             notifications_enabled: true,
             notifications_after_hide: false,
             quick_settings_after_hide: false,
@@ -224,6 +228,12 @@ impl Overview {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
             Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
+            Some(Target::StatusBar(knave_ui::UiAction::OpenOverview)) => {
+                // The overview is visible here, so the shared brand control hides it.
+                if self.connected {
+                    self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
+                }
+            }
             Some(Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)) => {
                 if self.connected {
                     self.quick_settings_after_hide = true;
@@ -481,9 +491,43 @@ impl Application for Overview {
             }
         }
         self.snapshot = Some(snapshot.clone());
+        // Minimized icons resolve through the catalog; warm it up before any
+        // query when the desktop already reports minimized windows. This is
+        // event-driven here, never on the frame path.
+        if matches!(self.apps, Apps::Unloaded)
+            && snapshot.overview_visible
+            && snapshot.windows.iter().any(|w| w.minimized)
+        {
+            self.ensure_catalog();
+        }
+        self.dirty = true;
+    }
+    fn focused_app_icon(&mut self, app_id: Option<&str>, image: Option<&knave_ui::UiImage>) {
+        if let Some(app_id) = app_id {
+            let current_app = self.snapshot.as_ref().and_then(|snapshot| {
+                let workspace = snapshot
+                    .workspaces
+                    .iter()
+                    .find(|workspace| workspace.active)?;
+                snapshot
+                    .windows
+                    .iter()
+                    .find(|window| {
+                        window.focused
+                            && !window.minimized
+                            && window.workspace == workspace.workspace
+                    })
+                    .map(|window| window.app_id.as_str())
+            });
+            if current_app != Some(app_id) {
+                return;
+            }
+        }
+        self.focused_icon = image.cloned();
         self.dirty = true;
     }
     fn desktop_unavailable(&mut self) {
+        self.focused_icon = None;
         self.notifications_after_hide = false;
         self.quick_settings_after_hide = false;
         self.reset_view();

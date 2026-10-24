@@ -19,16 +19,19 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
     knave-shell bar
     knave-shell --supports-overview-service
 
-The bar is a top layer with a 36-pixel exclusive zone. Overview fills the output,
-so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
+The bar is a top layer with a 36-pixel exclusive zone. Its left edge carries the
+icon-only bundled Knave mark; clicking it toggles Overview. Overview fills the
+output, so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
 component, including the notification bell, unread count and DND state. Overview
 routes the component's shared hit targets for workspace switching and notifications.
+Overview spacing and panel headers are compact; status, unavailable-service, and
+administrator-authentication messages remain visible.
 Overview also shows a
-workspace carousel, search, and a minimized-window shelf for the browsed
+workspace carousel, search, and a minimized-window icon tray for the browsed
 workspace. Left/Right, arrows, side previews, dots, and bar chips switch the
 active workspace while keeping Overview open. Its preview and bar follow live
 workspace changes. Click the center preview or press Enter to return to it. Click
-a minimized card to restore it. Type or press Ctrl+K to search installed applications and press Enter to launch the top match, use Tab
+a tray icon to restore its minimized window. Type or press Ctrl+K to search installed applications and press Enter to launch the top match, use Tab
 to traverse controls, and Escape to hide overview. Super toggles
 the session-owned Overview process. Entering the center workspace, restoring a
 window, or launching an app hides Overview after the desktop service acknowledges

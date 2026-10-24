@@ -193,7 +193,7 @@ impl QuickSettings {
             height: Length::Px((self.size[1] - top - gap).max(1.0)),
             offset: [(self.size[0] - width - gap).max(0.0), top],
             padding: 12.0,
-            gap: 12.0,
+            gap: 8.0,
             ..Default::default()
         });
         panel.style.background = Some(ShapePaint {
@@ -383,7 +383,6 @@ impl QuickSettings {
                 ));
                 if let Some(n) = self.state.network.clone() {
                     content.children.push(self.label(&p, n.summary(), false));
-                    content.children.push(self.label(&p,"Ethernet is preferred when connected; Wi-Fi remains available as a fallback.",true));
                     if n.ethernet.is_some() {
                         content.children.push(self.button(
                             &p,
@@ -490,7 +489,11 @@ impl QuickSettings {
                         5.0,
                         b.limit.is_some(),
                     ));
-                    content.children.push(self.label(&p,"Stop charging at this level. Applying a limit may request administrator authentication.",true));
+                    content.children.push(self.label(
+                        &p,
+                        "Applying a limit may request administrator authentication.",
+                        true,
+                    ));
                     content.children.push(self.button(
                         &p,
                         format!("Apply {}% limit", self.limit),

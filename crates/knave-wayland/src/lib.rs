@@ -3,6 +3,7 @@
 mod application;
 mod clipboard;
 mod cursor;
+mod focused_app;
 mod harness_ready;
 mod ime;
 pub mod notifications;
@@ -738,6 +739,12 @@ fn run_internal(
         revision: 0,
         frame_pending: false,
         snapshot_worker: desktop_role.then(|| SnapshotWorker::start(wake_sender.clone())),
+        focused_icon_worker: tray_bar
+            .then(|| focused_app::Worker::start(Waker::new(wake_sender.clone()))),
+        focused_icon_key: None,
+        focused_icon_token: 0,
+        focused_icon_request: None,
+        focused_app_icon: None,
         action_worker: desktop_role.then(|| ActionWorker::start(wake_sender.clone())),
         preview_worker: (desktop_role && role == ShellRole::Overview && !application_overview)
             .then(|| PreviewWorker::start(wake_sender.clone())),
@@ -817,6 +824,11 @@ struct Runtime {
     queue: wgpu::Queue,
     painter: Option<WgpuPainter>,
     snapshot_worker: Option<SnapshotWorker>,
+    focused_icon_worker: Option<focused_app::Worker>,
+    focused_icon_key: Option<focused_app::Identity>,
+    focused_icon_token: u64,
+    focused_icon_request: Option<focused_app::Request>,
+    focused_app_icon: Option<UiImage>,
     action_worker: Option<ActionWorker>,
     preview_worker: Option<PreviewWorker>,
     pane_worker: Option<PaneWorker>,
@@ -844,6 +856,25 @@ struct Runtime {
 }
 
 impl Runtime {
+    fn set_focused_app(&mut self, snapshot: Option<&DesktopSnapshot>) {
+        let next = snapshot.and_then(focused_app::identity);
+        if next == self.focused_icon_key {
+            return;
+        }
+        self.focused_icon_key = next;
+        self.focused_icon_token = self.focused_icon_token.wrapping_add(1);
+        if let Some(worker) = &self.focused_icon_worker {
+            worker.cancel_before(self.focused_icon_token);
+        }
+        self.focused_app_icon = None;
+        self.focused_icon_request =
+            focused_app::request(self.focused_icon_key.as_ref(), self.focused_icon_token);
+        if let Some(app) = &mut self.app {
+            app.focused_app_icon(None, None);
+        }
+        self.scene_dirty = true;
+    }
+
     fn configure_surface(&self, width: u32, height: u32) -> Option<wgpu::SurfaceConfiguration> {
         let mut config = self.surface.get_default_config(
             &self.adapter,
@@ -932,6 +963,7 @@ impl Runtime {
         {
             match update {
                 Ok(snapshot) => {
+                    self.set_focused_app(Some(&snapshot));
                     if let Some(app) = &mut self.app {
                         app.desktop_snapshot(&snapshot);
                     }
@@ -943,6 +975,7 @@ impl Runtime {
                     self.snapshot = Some(snapshot);
                 }
                 Err(_) => {
+                    self.set_focused_app(None);
                     self.snapshot = None;
                     self.preview_refresh = true;
                     self.pane_requested.clear();
@@ -954,6 +987,31 @@ impl Runtime {
             }
             self.scene_dirty = true;
             should_render = true;
+        }
+        if let Some(result) = self
+            .focused_icon_worker
+            .as_ref()
+            .and_then(focused_app::Worker::take)
+            && focused_app::matches(
+                self.focused_icon_key.as_ref(),
+                self.focused_icon_token,
+                &result,
+            )
+        {
+            self.focused_app_icon = result.image;
+            if let Some(app) = &mut self.app {
+                app.focused_app_icon(Some(&result.app_id), self.focused_app_icon.as_ref());
+            }
+            self.scene_dirty = true;
+            should_render = true;
+        }
+        if let Some(request) = self.focused_icon_request.take()
+            && !self
+                .focused_icon_worker
+                .as_ref()
+                .is_some_and(|worker| worker.submit(request.clone()))
+        {
+            self.focused_icon_request = Some(request);
         }
         if let Some(result) = self.action_worker.as_ref().and_then(ActionWorker::latest)
             && let Some(app) = &mut self.app
@@ -1024,7 +1082,7 @@ impl Runtime {
         }
         if self.app.is_none() && self.scene_dirty {
             if self.role == ShellRole::Bar {
-                let bar = knave_ui::status_bar::StatusBar::new(
+                let bar = knave_ui::status_bar::StatusBar::with_focused_icon(
                     self.revision,
                     self.width as f32,
                     self.height as f32,
@@ -1032,6 +1090,7 @@ impl Runtime {
                     self.notification_client.is_some(),
                     self.notification_snapshot.as_ref(),
                     &self.applets,
+                    self.focused_app_icon.as_ref(),
                 );
                 self.scene = bar.scene;
                 self.render_list = bar.display;
@@ -1332,6 +1391,12 @@ impl Runtime {
                 self.exit = true;
                 return;
             }
+            UiAction::OpenOverview => DesktopCommand::SetOverviewVisible {
+                visible: !self
+                    .snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.overview_visible),
+            },
             UiAction::FocusWorkspace(workspace) => DesktopCommand::FocusWorkspace { workspace },
             UiAction::FocusWindow(window) => DesktopCommand::FocusWindow { window },
             UiAction::RestoreWindow(window) => DesktopCommand::RestoreWindow { window },

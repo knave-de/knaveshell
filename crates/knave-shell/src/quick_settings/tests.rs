@@ -30,7 +30,10 @@ fn app() -> QuickSettings {
     let mut app = QuickSettings::new();
     app.apply(QuickSettingsSnapshot {
         open: true,
-        network: Some(Network::default()),
+        network: Some(Network {
+            ethernet: Some("enp1s0".into()),
+            ..Default::default()
+        }),
         output: Some(Volume {
             percent: 65,
             muted: false,
@@ -196,4 +199,26 @@ fn brightness_home_reaches_one_percent_and_authentication_releases_input() {
     assert!(app.input_region().unwrap().is_empty());
     app.input(Input::FocusLost);
     assert!(app.state.open);
+}
+
+#[test]
+fn trimmed_subtitles_keep_status_and_authentication_text() {
+    let mut app = app();
+    app.page = Page::Network;
+    let network = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(!network.commands.iter().any(|command| matches!(command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text.contains("Wi-Fi remains available"))));
+    assert!(network.commands.iter().any(|command| matches!(command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text.contains("Ethernet"))));
+    app.page = Page::Battery;
+    app.dirty = true;
+    let battery = app.frame(app.size, &mut Metrics).clone();
+    assert!(!battery.commands.iter().any(|command| matches!(command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text.contains("Stop charging at this level"))));
+    assert!(battery.commands.iter().any(|command| matches!(command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text.contains("administrator authentication"))));
 }

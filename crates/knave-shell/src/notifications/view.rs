@@ -141,7 +141,7 @@ impl Notifications {
             },
             offset: [(width - panel_width - gap).max(0.0), top],
             padding: 12.0,
-            gap: 10.0,
+            gap: 8.0,
             ..Default::default()
         });
         if self.state.center_open {
@@ -197,7 +197,10 @@ impl Notifications {
             }
             panel.children.push(controls);
             if !self.state.owned {
-                panel.children.push(p.text(13,"An external service handles new notifications. Saved Knave history is shown below.".into(),true));
+                panel.children.push(p.text(13,
+                    "An external service delivers new notifications; saved Knave history is below.".into(),
+                    true,
+                ));
             }
             if let Some(error) = &self.error {
                 panel.children.push(p.text(14, short(error, 180), true));

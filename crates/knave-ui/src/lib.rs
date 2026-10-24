@@ -1,5 +1,6 @@
 //! Renderer-independent primitives for the Knave shell UI.
 
+mod brand;
 mod display_list;
 mod geometry;
 mod paint;
@@ -70,6 +71,7 @@ pub struct NodeId(pub u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiAction {
+    OpenOverview,
     CloseOverview,
     ToggleNotifications,
     ToggleQuickSettings,
@@ -342,10 +344,19 @@ impl UiScene {
         });
         scene.push(UiNode::Label {
             id: NodeId(2),
-            bounds: Rect::new(16.0, 0.0, width - 32.0, height),
+            bounds: Rect::new(46.0, 0.0, (width - 62.0).max(1.0), height),
             color: Color::TEXT,
-            text: "Knave".into(),
+            text: String::new(),
         });
+        // The icon-only Knave mark opens the Overview; no wordmark is painted.
+        scene.target(Rect::new(0.0, 0.0, 40.0, height), UiAction::OpenOverview);
+        if let Some(image) = brand::image() {
+            scene.push(UiNode::Image {
+                id: NodeId(3),
+                bounds: Rect::new(6.0, 6.0, 24.0, 24.0),
+                image,
+            });
+        }
         scene
     }
 
@@ -364,10 +375,9 @@ impl UiScene {
                         .iter()
                         .find(|workspace| workspace.active)
                 })
-                .map_or_else(
-                    || "Knave".into(),
-                    |workspace| format!("Workspace {}", workspace.workspace.0),
-                );
+                .map_or_else(String::new, |workspace| {
+                    format!("Workspace {}", workspace.workspace.0)
+                });
         }
         if let Some(snapshot) = snapshot {
             for (index, workspace) in snapshot.workspaces.iter().enumerate() {
@@ -594,14 +604,38 @@ mod tests {
     fn bar_scene_is_renderer_independent() {
         let scene = UiScene::bar(7, 1920.0, 36.0);
         assert_eq!(scene.revision(), 7);
-        assert_eq!(scene.nodes().len(), 2);
+        assert_eq!(scene.nodes().len(), 3);
+        // The brand mark is always resolvable from the bundled asset.
+        assert!(
+            scene
+                .nodes()
+                .iter()
+                .any(|node| matches!(node, UiNode::Image { .. }))
+        );
+    }
+
+    #[test]
+    fn unknown_workspace_state_never_adds_a_wordmark() {
+        let snapshot = DesktopSnapshot {
+            generation: 0,
+            overview_visible: false,
+            workspaces: vec![],
+            windows: vec![],
+        };
+        for scene in [
+            UiScene::bar(0, 800.0, 36.0),
+            UiScene::bar_with_snapshot(0, 800.0, 36.0, None),
+            UiScene::bar_with_snapshot(0, 800.0, 36.0, Some(&snapshot)),
+        ] {
+            assert!(matches!(&scene.nodes()[1], UiNode::Label { text, .. } if text.is_empty()));
+        }
     }
 
     #[test]
     fn overview_scene_does_not_require_a_gpu() {
         let scene = UiScene::overview(1, 1920.0, 1080.0);
         assert_eq!(scene.clear_color(), Color::rgba(8, 12, 18, 245));
-        assert_eq!(scene.nodes().len(), 3);
+        assert_eq!(scene.nodes().len(), 4);
         assert_eq!(
             scene.nodes()[0],
             UiNode::Panel {
@@ -617,8 +651,15 @@ mod tests {
         ));
         assert!(matches!(
             &scene.nodes()[2],
-            UiNode::Label { text, .. } if text == "Knave"
+            UiNode::Label { text, .. } if text.is_empty()
         ));
+        assert!(matches!(
+            &scene.nodes()[3],
+            UiNode::Image { bounds, .. }
+                if *bounds == Rect::new(6.0, 6.0, 24.0, 24.0)
+        ));
+        // The icon-only mark introduces the overview from the shared strip.
+        assert_eq!(scene.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
     }
     #[test]
     fn snapshot_scene_reflects_active_workspace() {
@@ -659,7 +700,8 @@ mod tests {
         let bar = UiScene::bar_with_snapshot(4, 1920.0, 36.0, Some(&snapshot));
         assert!(matches!(&bar.nodes()[1], UiNode::Label { text, .. } if text == "Workspace 2"));
         let overview = UiScene::overview_with_snapshot(4, 1920.0, 1080.0, Some(&snapshot));
-        assert!(overview.nodes().iter().any(|node| matches!(node, UiNode::Label { bounds, text, .. } if *bounds == Rect::new(16.0, 0.0, 1888.0, 36.0) && text == "Workspace 2")));
+        assert!(overview.nodes().iter().any(|node| matches!(node, UiNode::Label { bounds, text, .. } if *bounds == Rect::new(46.0, 0.0, 1858.0, 36.0) && text == "Workspace 2")));
+        assert_eq!(overview.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
         assert_eq!(
             overview.hit_test(40.0, 420.0),
             Some(UiAction::FocusWindow(WindowId(41)))

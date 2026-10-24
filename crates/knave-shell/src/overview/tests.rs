@@ -1,6 +1,6 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
-use knave_ui::{Color, Rect, TextSpan, TextStyle, UiNode, UiScene};
+use knave_ui::{Color, Rect, TextSpan, TextStyle, UiNode};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
@@ -177,10 +177,222 @@ fn minimized_shelf_is_workspace_scoped_and_paginated() {
     assert!(app.scene.bounds(app.window_ids[&WindowId(1)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(14)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_some());
+    let previous = app.scene.bounds(ElementId(30)).unwrap();
+    let next = app.scene.bounds(ElementId(31)).unwrap();
+    assert!(
+        previous.x < next.x,
+        "previous: {previous:?}, next: {next:?}"
+    );
     click(&mut app, ElementId(31));
     app.frame([1200.0, 800.0], &mut Metrics);
     assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(7)]).is_some());
+}
+
+#[test]
+fn single_icon_tray_uses_only_the_visible_icon_width() {
+    let mut app = app();
+    let mut next = app.snapshot().unwrap().clone();
+    for window in &mut next.windows {
+        window.minimized = window.id == WindowId(2);
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+
+    let tray = app.scene.bounds(tray_id(2)).unwrap();
+    let icon = app.scene.bounds(app.window_ids[&WindowId(2)]).unwrap();
+    assert!(
+        tray.width <= icon.width + 13.0,
+        "tray: {tray:?}, icon: {icon:?}"
+    );
+}
+
+/// Element id of the minimized icon tray docked in one workspace card.
+fn tray_id(ws: u64) -> ElementId {
+    ElementId(0x100_0000_0000 + ws * 32 + 3)
+}
+fn tooltip_visible(app: &Overview, label: &str) -> bool {
+    app.display.commands.iter().any(|command| match command {
+        knave_ui::DisplayCommand::Text { text, .. } => text == label,
+        _ => false,
+    })
+}
+#[test]
+fn the_minimized_tray_is_icon_only_in_the_lower_left_of_the_selected_card() {
+    let mut app = app();
+    settle(&mut app, [1200.0, 800.0]);
+    let card = app
+        .scene
+        .bounds(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    let tray = app
+        .scene
+        .bounds(tray_id(2))
+        .expect("tray on the selected card");
+    assert!(tray.height <= 50.0 && tray.height >= 30.0);
+    assert!(tray.width < card.width);
+    assert!((tray.x - (card.x + 12.0)).abs() < 1.0);
+    assert!(((card.y + card.height) - (tray.y + tray.height) - 12.0).abs() < 1.0);
+    // Entries are small icon buttons inside the tray, not heading/chip cards.
+    let icon = app.scene.bounds(app.window_ids[&WindowId(2)]).unwrap();
+    assert!(icon.width <= 40.0 && icon.height <= 40.0);
+    assert!(icon.x >= tray.x && icon.y >= tray.y);
+    assert!(icon.x + icon.width <= tray.x + tray.width + 0.5);
+    assert!(icon.y + icon.height <= tray.y + tray.height + 0.5);
+    for other in [tray_id(1), tray_id(3)] {
+        assert!(app.scene.bounds(other).is_none(), "tray off selected card");
+    }
+    // Only the current page is composed in the tray.
+    assert!(app.scene.bounds(app.window_ids[&WindowId(12)]).is_none());
+    let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Image { bounds, clip, .. }
+            if bounds.x >= tray.x
+                && bounds.y >= tray.y
+                && bounds.x + bounds.width <= tray.x + tray.width
+                && bounds.y + bounds.height <= tray.y + tray.height
+                && clip.is_some()
+    )));
+    // No heading, no app id or window title subtitles, no empty-shelf note.
+    for command in &list.commands {
+        if let knave_ui::DisplayCommand::Text { text, .. } = command {
+            assert!(!text.contains("Minimized"), "{text:?}");
+            assert!(!text.contains("Editor"), "{text:?}");
+        }
+    }
+}
+#[test]
+fn tray_icons_name_the_exact_window_on_hover() {
+    let mut app = app();
+    let point = |app: &Overview, id: ElementId| {
+        let r = app.scene.bounds(id).unwrap();
+        [r.x + r.width / 2.0, r.y + r.height / 2.0]
+    };
+    for id in 2..=6 {
+        app.input(Input::PointerMove(point(
+            &app,
+            app.window_ids[&WindowId(id)],
+        )));
+        app.frame([1200.0, 800.0], &mut Metrics);
+        // Same-application windows are still told apart.
+        assert!(
+            tooltip_visible(&app, &format!("Restore Window {id}")),
+            "window {id}"
+        );
+    }
+    assert!(!tooltip_visible(&app, "Restore Window 7"));
+    click(&mut app, ElementId(31));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.scene.bounds(app.window_ids[&WindowId(8)]).is_some());
+    app.input(Input::PointerMove(point(
+        &app,
+        app.window_ids[&WindowId(8)],
+    )));
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(tooltip_visible(&app, "Restore Window 8"));
+    app.input(Input::PointerLeave);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(!tooltip_visible(&app, "Restore Window 8"));
+}
+#[test]
+fn keyboard_navigation_reaches_tray_icons_and_restores() {
+    let mut app = app();
+    let mut focused = None;
+    for _ in 0..64 {
+        key(&mut app, Key::Tab, true);
+        key(&mut app, Key::Tab, false);
+        let id = match app.scene.focus() {
+            Some(id) => id,
+            None => continue,
+        };
+        if matches!(app.targets.get(&id), Some(Target::Window(_))) {
+            focused = Some(id);
+            break;
+        }
+    }
+    let id = focused.expect("Tab reaches a tray icon");
+    key(&mut app, Key::Enter, true);
+    key(&mut app, Key::Enter, false);
+    let expected = match app.targets.get(&id) {
+        Some(Target::Window(window)) => *window,
+        _ => unreachable!("checked above"),
+    };
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::RestoreWindow { window }))
+            if window == expected
+    ));
+}
+#[test]
+fn minimized_icons_load_without_typing_a_query() {
+    let mut app = Overview::new()
+        .with_catalog_environment(apps_environment())
+        .with_icon_lookup(icon_lookup(true));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+    assert!(app.query.text().is_empty());
+    assert!(matches!(app.apps, Apps::Ready(_)));
+    assert!(app.icons.get("editor-icon").is_some());
+    let wid = app.window_ids[&WindowId(2)].0;
+    assert!(app.scene.bounds(ElementId(0x500_0000_0000 + wid)).is_some());
+}
+
+#[test]
+fn missing_theme_icons_show_a_builtin_tray_glyph() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(false));
+    let mut next = snapshot();
+    for window in &mut next.windows {
+        window.app_id = "Mystery".into();
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+
+    assert!(app.display.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Text { text, .. } if text == "▣"
+    )));
+}
+#[test]
+fn unknown_minimized_apps_fall_back_to_the_generic_icon() {
+    let mut app = app();
+    let mut next = app.snapshot().unwrap().clone();
+    next.windows[1].app_id = "Mystery".into();
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+    // The worker answers an unknown application with the theme fallback.
+    assert!(app.icons.get("application-x-executable").is_some());
+    assert!(app.error.is_none());
+    assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_some());
+}
+#[test]
+fn no_icon_tray_when_the_selected_workspace_has_no_minimized_windows() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(true));
+    let mut next = snapshot();
+    for window in &mut next.windows {
+        window.minimized = false;
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    assert!(app.scene.bounds(tray_id(2)).is_none());
+    assert!(!app.display.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Text { text, .. }
+            if text == "No minimized windows"
+    )));
+    assert!(app.error.is_none());
+    assert!(
+        app.panes
+            .iter()
+            .any(|pane| pane.workspace == WorkspaceId(2))
+    );
 }
 #[test]
 fn navigation_switches_workspace_without_hiding_and_enter_returns_to_it() {
@@ -199,7 +411,7 @@ fn navigation_switches_workspace_without_hiding_and_enter_returns_to_it() {
     assert!(app.take_request().is_none());
     assert!(app.surface_visible());
     assert_eq!(app.workspace, Some(WorkspaceId(3)));
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+    assert_eq!(status_title(&app), None);
     assert!(app.scene.bounds(app.window_ids[&WindowId(14)]).is_some());
     key(&mut app, Key::Enter, true);
     key(&mut app, Key::Enter, false);
@@ -254,7 +466,7 @@ fn workspace_controls_switch_without_hiding() {
         ElementId(21),
         ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
-        bar_element(12),
+        bar_element(13),
     ] {
         let mut app = app();
         // A side card may be clipped; activating its target exercises the same action.
@@ -269,7 +481,7 @@ fn workspace_controls_switch_without_hiding() {
         assert!(app.take_request().is_none());
         publish_workspace(&mut app, WorkspaceId(3));
         assert_eq!(app.workspace, Some(WorkspaceId(3)));
-        assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+        assert_eq!(status_title(&app), None);
         assert!(app.surface_visible());
     }
 }
@@ -303,7 +515,7 @@ fn snapshots_with_same_generation_sync_active_workspace_and_membership() {
     app.desktop_snapshot(&next);
     app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(app.workspace, Some(WorkspaceId(1)));
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 1"));
+    assert_eq!(status_title(&app), None);
     assert!(!app.window_ids.contains_key(&WindowId(2)));
     next.workspaces.pop();
     app.desktop_snapshot(&next);
@@ -705,6 +917,7 @@ fn icons_are_painted_unclipped_not_just_laid_out() {
             knave_ui::DisplayCommand::Image { bounds, clip, .. } => Some((*bounds, *clip)),
             _ => None,
         })
+        .filter(|(_, clip)| clip.is_some())
         .collect();
     assert_eq!(images.len(), 1);
     let (bounds, clip) = images[0];
@@ -861,9 +1074,7 @@ fn status_title(app: &Overview) -> Option<String> {
         .iter()
         .rev()
         .find_map(|command| match command {
-            knave_ui::DisplayCommand::Text { text, bounds, .. }
-                if bounds.x == 16.0 && bounds.y == 0.0 =>
-            {
+            knave_ui::DisplayCommand::Text { text, bounds, .. } if bounds.y == 0.0 => {
                 Some(text.clone())
             }
             _ => None,
@@ -875,7 +1086,12 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     let mut app = app();
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 2"));
+    assert_eq!(status_title(&app).as_deref(), Some("Window 1"));
+    assert!(
+        app.targets
+            .values()
+            .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
+    );
     for (index, bounds) in [
         Rect::new(150.0, 5.0, 32.0, 26.0),
         Rect::new(188.0, 5.0, 32.0, 26.0),
@@ -885,12 +1101,12 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     .enumerate()
     {
         assert_eq!(
-            app.scene.bounds(bar_element(10 + index as u64)),
+            app.scene.bounds(bar_element(11 + index as u64)),
             Some(bounds)
         );
     }
     // A chip click switches that workspace directly, like the desktop bar.
-    click(&mut app, bar_element(12));
+    click(&mut app, bar_element(13));
     assert!(matches!(
         app.take_request(),
         Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
@@ -903,11 +1119,24 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
 }
 
 #[test]
-fn the_shared_bar_title_tracks_the_selected_workspace() {
+fn overview_rejects_stale_focused_icons_and_clears_on_disconnect() {
+    let mut app = app();
+    let current = knave_ui::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+    let stale = knave_ui::UiImage::from_rgba(1, 1, vec![4, 5, 6, 255]).unwrap();
+    app.focused_app_icon(Some("Editor"), Some(&current));
+    assert_eq!(app.focused_icon.as_ref(), Some(&current));
+    app.focused_app_icon(Some("old.application"), Some(&stale));
+    assert_eq!(app.focused_icon.as_ref(), Some(&current));
+    app.desktop_unavailable();
+    assert!(app.focused_icon.is_none());
+}
+
+#[test]
+fn the_shared_bar_clears_the_title_when_the_focused_window_is_on_another_workspace() {
     let mut app = app();
     publish_workspace(&mut app, WorkspaceId(3));
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(status_title(&app).as_deref(), Some("Workspace 3"));
+    assert_eq!(status_title(&app), None);
     // The bar, including its chips, stays visible while searching.
     type_query(&mut app, "edit");
     assert!(app.scene.bounds(bar_element(12)).is_some());
@@ -919,8 +1148,17 @@ fn the_shared_bar_title_tracks_the_selected_workspace() {
 fn shared_bar_text_matches_the_desktop_bar_display_list() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
-    let bar = UiScene::bar_with_snapshot(0, 1200.0, 36.0, Some(app.snapshot().unwrap()));
-    for node in bar.nodes().iter() {
+    let bar = knave_ui::status_bar::StatusBar::with_focused_icon(
+        0,
+        1200.0,
+        36.0,
+        app.snapshot(),
+        true,
+        None,
+        &[],
+        app.focused_icon.as_ref(),
+    );
+    for node in bar.scene.nodes().iter() {
         let (bounds, color, text) = match node {
             UiNode::Label {
                 bounds,
@@ -969,14 +1207,40 @@ fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
 }
 
 #[test]
-fn without_a_snapshot_the_shared_bar_shows_the_session_title() {
+fn without_a_snapshot_the_shared_bar_shows_the_brand_mark_without_a_wordmark() {
     let mut app = Overview::new();
     app.frame([1200.0, 800.0], &mut Metrics);
-    assert_eq!(status_title(&app).as_deref(), Some("Knave"));
+    // Icon-only mark: no disconnected "Knave" title is painted beside it.
+    assert!(status_title(&app).as_deref().is_none_or(str::is_empty));
+    let image = app
+        .display
+        .commands
+        .iter()
+        .any(|command| matches!(command, knave_ui::DisplayCommand::Image { bounds, .. } if *bounds == Rect::new(6.0, 6.0, 24.0, 24.0)));
+    assert!(image, "the bundled brand mark renders on the shared bar");
     assert!(!app.targets.values().any(|target| matches!(
         target,
         Target::StatusBar(knave_ui::UiAction::FocusWorkspace(_))
     )));
+}
+
+#[test]
+fn the_brand_mark_toggles_the_visible_overview_off() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    let id = *app
+        .targets
+        .iter()
+        .find(|(_, target)| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
+        .unwrap()
+        .0;
+    click(&mut app, id);
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::SetOverviewVisible {
+            visible: false
+        }))
+    ));
 }
 
 #[test]
@@ -1039,7 +1303,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     ];
     app.notification_snapshot(Some(&state));
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared = knave_ui::status_bar::StatusBar::new(
+    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
         0,
         1200.0,
         36.0,
@@ -1047,6 +1311,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
         true,
         Some(&state),
         &[],
+        app.focused_icon.as_ref(),
     );
     assert!(app.display.commands.ends_with(&shared.display.commands));
     for expected in ["99+", "z"] {
@@ -1055,8 +1320,16 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     }
     app.notification_snapshot(None);
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared =
-        knave_ui::status_bar::StatusBar::new(0, 1200.0, 36.0, app.snapshot(), true, None, &[]);
+    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
+        0,
+        1200.0,
+        36.0,
+        app.snapshot(),
+        true,
+        None,
+        &[],
+        app.focused_icon.as_ref(),
+    );
     assert!(app.display.commands.ends_with(&shared.display.commands));
     assert!(!app.display.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text {text, ..} if text == "99+" || text == "z")));
@@ -1111,4 +1384,24 @@ fn quick_settings_hides_overview_before_transferring_focus() {
         app.take_request(),
         Some(HostRequest::ToggleQuickSettings)
     ));
+}
+
+#[test]
+fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
+    let mut app = app();
+    app.frame([1200.0, 800.0], &mut Metrics);
+    // The reduced stage margins leave more room for the preview.
+    let search = app.scene.bounds(SEARCH).unwrap();
+    let card = app
+        .scene
+        .bounds(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    assert!(search.y >= STATUS_BAR_HEIGHT);
+    assert!(card.height >= 550.0);
+    // The card no longer reserves the previous 100-pixel footer band.
+    let dot = app
+        .scene
+        .bounds(ElementId(0x200_0000_0000 + 2))
+        .expect("current workspace dot");
+    assert!(dot.y + dot.height <= 800.0 - 24.0);
 }

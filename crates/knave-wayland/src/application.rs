@@ -126,6 +126,8 @@ pub trait Application {
         false
     }
     fn desktop_snapshot(&mut self, _snapshot: &knave_desktop_api::DesktopSnapshot) {}
+    /// Resolved focused-window icon, delivered only while the matching focus is current.
+    fn focused_app_icon(&mut self, _app_id: Option<&str>, _image: Option<&knave_ui::UiImage>) {}
     /// Request only the workspace previews currently visible to this application.
     /// Display-only compositor panes for this shell surface, in logical output pixels.
     fn overview_panes(&self) -> Option<Vec<knave_desktop_api::OverviewPane>> {

@@ -938,6 +938,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "glyphon",
+ "knave-desktop-api",
  "knave-ui",
  "png",
  "pollster",
@@ -976,6 +977,7 @@ name = "knave-ui"
 version = "0.1.0"
 dependencies = [
  "knave-desktop-api",
+ "png",
  "unicode-segmentation",
 ]
 
@@ -985,6 +987,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "futures-util",
+ "knave-apps",
  "knave-desktop-api",
  "knave-icons",
  "knave-renderer",
