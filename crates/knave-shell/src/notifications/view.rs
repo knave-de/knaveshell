@@ -270,6 +270,7 @@ impl Notifications {
                 ..Default::default()
             });
             p.style(&mut toggle);
+            toggle.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             toggle.enabled = self.state.owned;
             toggle.tooltip = Some("Hide popups from all apps. Notifications remain in history; turning this off does not replay them.".into());
             dnd.children.push(toggle);

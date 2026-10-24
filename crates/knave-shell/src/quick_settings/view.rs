@@ -90,6 +90,7 @@ impl Palette {
         );
         e.enabled = enabled;
         e.layout.height = Length::Px(30.0);
+        e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }
 }
@@ -371,7 +372,7 @@ impl QuickSettings {
         control.layout.flow = Flow::Overlay;
         control.layout.padding = 6.0;
         control.layout.padding_edges = None;
-        control.style.background = None;
+        control.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         control.tooltip = Some(label.into());
         control.style.text.color = p.text;
         control.children.push(self.icon(icon));
@@ -658,7 +659,7 @@ impl QuickSettings {
                     Target::Command(QuickSettingsCommand::OpenAudio),
                     true,
                 );
-                devices.style.background = None;
+                devices.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
                 devices.layout.height = Length::Px(32.0);
                 audio.children.push(devices);
                 content.children.push(audio);
@@ -701,7 +702,7 @@ impl QuickSettings {
                     Target::Page(Page::Night),
                     true,
                 );
-                night.style.background = None;
+                night.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
                 night.layout.height = Length::Px(34.0);
                 display.children.push(night);
                 content.children.push(display);

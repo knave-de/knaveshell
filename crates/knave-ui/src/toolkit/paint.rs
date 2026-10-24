@@ -173,7 +173,10 @@ impl Scene {
                             12.0,
                         ),
                         clip,
-                        ShapePaint::fill(Color::TEXT),
+                        ShapePaint {
+                            radii: CornerRadii::uniform(6.0),
+                            ..ShapePaint::fill(Color::TEXT)
+                        },
                     );
                 }
                 if *checked && !toggle {
