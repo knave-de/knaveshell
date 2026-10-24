@@ -328,7 +328,7 @@ impl Overview {
     }
     /// Icon theme name for a minimized window's application; apps missing
     /// from the catalog (or with no catalog at all) reuse the generic
-    /// executable icon so every tray slot stays identifiable and stable.
+    /// executable icon, with a built-in glyph if theme lookup also fails.
     fn window_icon_name(&self, app_id: &str) -> String {
         match &self.apps {
             Apps::Ready(catalog) => catalog_icon(catalog, app_id),
@@ -387,7 +387,7 @@ impl Overview {
             self.page = self.page.min(min.len().saturating_sub(1) / capacity);
             let first = self.page * capacity;
             let shown = min.len().saturating_sub(first).min(capacity);
-            let span = (capacity as f32 - 1.0) * pitch + icon_size;
+            let span = (shown as f32 - 1.0) * pitch + icon_size;
             let tray_w = if min.len() > capacity {
                 12.0 + span + paging_w
             } else {
@@ -447,12 +447,22 @@ impl Overview {
                         ),
                         Rect::new(inset, inset, side, side),
                     ));
+                } else {
+                    let mut fallback = text(
+                        TRAY_ICON_ELEMENT_BASE + wid.0,
+                        "▣",
+                        Rect::new(0.0, 0.0, icon_size, icon_size),
+                        icon_size * 0.72,
+                        Color::rgba(202, 215, 233, 255),
+                    );
+                    fallback.style.text.align = TextAlign::Center;
+                    icon.children.push(fallback);
                 }
                 self.targets.insert(wid, Target::Window(window.id));
                 tray.children.push(icon);
             }
             if min.len() > capacity {
-                for (bid, label, next, bx) in [(30, "‹", false, 34.0), (31, "›", true, 6.0)] {
+                for (bid, label, next, bx) in [(30, "‹", false, 6.0), (31, "›", true, 34.0)] {
                     let mut b = control(
                         bid,
                         label,

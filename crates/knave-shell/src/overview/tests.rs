@@ -177,10 +177,34 @@ fn minimized_shelf_is_workspace_scoped_and_paginated() {
     assert!(app.scene.bounds(app.window_ids[&WindowId(1)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(14)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_some());
+    let previous = app.scene.bounds(ElementId(30)).unwrap();
+    let next = app.scene.bounds(ElementId(31)).unwrap();
+    assert!(
+        previous.x < next.x,
+        "previous: {previous:?}, next: {next:?}"
+    );
     click(&mut app, ElementId(31));
     app.frame([1200.0, 800.0], &mut Metrics);
     assert!(app.scene.bounds(app.window_ids[&WindowId(2)]).is_none());
     assert!(app.scene.bounds(app.window_ids[&WindowId(7)]).is_some());
+}
+
+#[test]
+fn single_icon_tray_uses_only_the_visible_icon_width() {
+    let mut app = app();
+    let mut next = app.snapshot().unwrap().clone();
+    for window in &mut next.windows {
+        window.minimized = window.id == WindowId(2);
+    }
+    app.desktop_snapshot(&next);
+    app.frame([1200.0, 800.0], &mut Metrics);
+
+    let tray = app.scene.bounds(tray_id(2)).unwrap();
+    let icon = app.scene.bounds(app.window_ids[&WindowId(2)]).unwrap();
+    assert!(
+        tray.width <= icon.width + 13.0,
+        "tray: {tray:?}, icon: {icon:?}"
+    );
 }
 
 /// Element id of the minimized icon tray docked in one workspace card.
@@ -313,6 +337,21 @@ fn minimized_icons_load_without_typing_a_query() {
     assert!(app.icons.get("editor-icon").is_some());
     let wid = app.window_ids[&WindowId(2)].0;
     assert!(app.scene.bounds(ElementId(0x500_0000_0000 + wid)).is_some());
+}
+
+#[test]
+fn missing_theme_icons_show_a_builtin_tray_glyph() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(false));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    settle(&mut app, [1200.0, 800.0]);
+
+    assert!(app.display.commands.iter().any(|command| matches!(
+        command,
+        knave_ui::DisplayCommand::Text { text, .. } if text == "▣"
+    )));
 }
 #[test]
 fn unknown_minimized_apps_fall_back_to_the_generic_icon() {
