@@ -59,6 +59,7 @@ impl StatusBar {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn with_focused_icon(
         revision: u64,
         width: f32,

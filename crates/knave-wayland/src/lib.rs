@@ -992,19 +992,18 @@ impl Runtime {
             .focused_icon_worker
             .as_ref()
             .and_then(focused_app::Worker::take)
-        {
-            if focused_app::matches(
+            && focused_app::matches(
                 self.focused_icon_key.as_ref(),
                 self.focused_icon_token,
                 &result,
-            ) {
-                self.focused_app_icon = result.image;
-                if let Some(app) = &mut self.app {
-                    app.focused_app_icon(Some(&result.app_id), self.focused_app_icon.as_ref());
-                }
-                self.scene_dirty = true;
-                should_render = true;
+            )
+        {
+            self.focused_app_icon = result.image;
+            if let Some(app) = &mut self.app {
+                app.focused_app_icon(Some(&result.app_id), self.focused_app_icon.as_ref());
             }
+            self.scene_dirty = true;
+            should_render = true;
         }
         if let Some(request) = self.focused_icon_request.take()
             && !self

@@ -45,7 +45,9 @@ pub fn image() -> Option<UiImage> {
                     buffer
                 }
                 png::ColorType::Rgb => data
-                    .chunks_exact(3)
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
                     .flat_map(|pixel| [pixel[0], pixel[1], pixel[2], 255])
                     .collect(),
                 png::ColorType::Grayscale => data
@@ -53,7 +55,9 @@ pub fn image() -> Option<UiImage> {
                     .flat_map(|value| [*value, *value, *value, 255])
                     .collect(),
                 png::ColorType::GrayscaleAlpha => data
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .flat_map(|pixel| [pixel[0], pixel[0], pixel[0], pixel[1]])
                     .collect(),
                 png::ColorType::Indexed => return None,
