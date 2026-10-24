@@ -144,14 +144,20 @@ impl StatusBar {
                 let x = group_x + 4.0 + index as f32 * (WORKSPACE_WIDTH + WORKSPACE_GAP);
                 let bounds = crate::Rect::new(x, ISLAND_Y + 3.0, WORKSPACE_WIDTH, 22.0);
                 scene.push(crate::UiNode::Label {
-                    id: crate::NodeId(10 + workspace.workspace.0),
+                    id: crate::NodeId(10 + u64::from(workspace.workspace.0)),
                     bounds,
                     color: if workspace.active {
-                        crate::Color::rgba(255, 255, 255, 255)
+                        crate::Color::rgba(186, 213, 255, 255)
+                    } else if workspace.window_count > 0 {
+                        crate::Color::rgba(185, 192, 198, 255)
                     } else {
-                        crate::Color::TEXT
+                        crate::Color::rgba(125, 133, 140, 255)
                     },
-                    text: workspace.workspace.0.to_string(),
+                    text: if workspace.workspace.0 == 10 {
+                        "0".into()
+                    } else {
+                        workspace.workspace.0.to_string()
+                    },
                 });
                 scene.target(bounds, crate::UiAction::FocusWorkspace(workspace.workspace));
             }
@@ -319,13 +325,13 @@ impl StatusBar {
                 crate::Rect::new(workspace_start, ISLAND_Y, group_width, ISLAND_HEIGHT),
                 pill(crate::Color::rgba(32, 38, 43, 255)),
             );
-            for (index, workspace) in workspaces.iter().enumerate().filter(|(_, w)| w.active) {
+            for (index, _) in workspaces.iter().enumerate().filter(|(_, w)| w.active) {
                 let x = workspace_start + 4.0 + index as f32 * (WORKSPACE_WIDTH + WORKSPACE_GAP);
                 islands.shape(
                     crate::Rect::new(x, ISLAND_Y + 3.0, WORKSPACE_WIDTH, 22.0),
                     crate::ShapePaint {
                         radii: crate::CornerRadii::uniform(4.0),
-                        ..crate::ShapePaint::fill(crate::Color::ACCENT)
+                        ..crate::ShapePaint::fill(crate::Color::rgba(49, 60, 73, 255))
                     },
                 );
             }
@@ -403,11 +409,11 @@ impl StatusBar {
     }
 }
 
-fn visible_workspaces<'a>(
-    desktop: Option<&'a DesktopSnapshot>,
+fn visible_workspaces(
+    desktop: Option<&DesktopSnapshot>,
     start: f32,
     limit: f32,
-) -> Vec<&'a knave_desktop_api::WorkspaceSummary> {
+) -> Vec<&knave_desktop_api::WorkspaceSummary> {
     let Some(snapshot) = desktop else {
         return Vec::new();
     };
@@ -458,6 +464,9 @@ fn set_status_text_style(display: &mut DisplayList) {
             style.font_size = 11.0;
             style.line_height = 14.0;
             style.wrap = crate::TextWrap::None;
+            if bounds.width <= WORKSPACE_WIDTH {
+                style.align = crate::TextAlign::Center;
+            }
             *clip = Some(*bounds);
         }
     }
@@ -481,7 +490,7 @@ fn append_system_icons(scene: &mut UiScene, x: f32) {
 }
 
 fn ellipsize(text: &str, width: f32) -> String {
-    const ELLIPSIS_WIDTH: f32 = 7.0;
+    const ELLIPSIS_WIDTH: f32 = 11.0;
     if estimated_text_width(text) <= width {
         return text.to_owned();
     }
@@ -556,21 +565,23 @@ fn append_bell(
     }
     if snapshot.is_some_and(|s| s.dnd) {
         b.text(
-            Rect::new(x + 1.0, 23.0, 5.0, 7.0),
+            Rect::new(x + 1.0, 22.0, 5.0, 10.0),
             "z".into(),
             TextStyle {
                 color: Color::ACCENT,
                 font_size: 8.0,
+                line_height: 10.0,
                 ..Default::default()
             },
         );
     } else if snapshot.is_none_or(|s| !s.owned) {
         b.text(
-            Rect::new(x + 22.0, 23.0, 6.0, 7.0),
+            Rect::new(x + 22.0, 22.0, 6.0, 10.0),
             if snapshot.is_some() { "E" } else { "!" }.into(),
             TextStyle {
                 color: Color::rgba(174, 220, 242, 255),
                 font_size: 8.0,
+                line_height: 10.0,
                 ..Default::default()
             },
         );
@@ -676,7 +687,7 @@ mod tests {
     }
 
     #[test]
-    fn focused_title_uses_a_measured_clipped_island_and_one_line_text() {
+    fn focused_title_uses_a_bounded_clipped_island_and_one_line_text() {
         let mut desktop = desktop();
         desktop.windows.push(knave_desktop_api::WindowSummary {
             id: knave_desktop_api::WindowId(9),
@@ -771,5 +782,45 @@ mod tests {
                 .hit_targets()
                 .any(|(_, action)| action == UiAction::ToggleQuickSettings)
         );
+    }
+
+    #[test]
+    fn untitled_focus_keeps_its_icon_and_missing_focus_clears_the_island() {
+        let mut snapshot = desktop();
+        snapshot.windows.push(knave_desktop_api::WindowSummary {
+            id: knave_desktop_api::WindowId(9),
+            title: String::new(),
+            app_id: String::new(),
+            workspace: WorkspaceId(1),
+            focused: true,
+            minimized: false,
+            floating: false,
+            fullscreen: false,
+            maximized: false,
+        });
+        let image = crate::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+        let compose = |snapshot: &DesktopSnapshot| {
+            StatusBar::with_focused_icon(
+                1,
+                800.0,
+                36.0,
+                Some(snapshot),
+                true,
+                None,
+                &[],
+                Some(&image),
+            )
+        };
+        let bar = compose(&snapshot);
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id, .. } if id.0 == 9)));
+        assert!(!bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Label { id, .. } if id.0 == 8)));
+        snapshot.windows[0].focused = false;
+        let bar = compose(&snapshot);
+        assert!(!bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id, .. } if id.0 == 9)));
+        assert!(!bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Panel { id, .. } if id.0 == 7_000)));
     }
 }

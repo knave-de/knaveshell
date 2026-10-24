@@ -595,7 +595,7 @@ mod tests {
     fn overview_scene_does_not_require_a_gpu() {
         let scene = UiScene::overview(1, 1920.0, 1080.0);
         assert_eq!(scene.clear_color(), Color::rgba(8, 12, 18, 245));
-        assert_eq!(scene.nodes().len(), 3);
+        assert_eq!(scene.nodes().len(), 6);
         assert_eq!(
             scene.nodes()[0],
             UiNode::Panel {

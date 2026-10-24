@@ -1,6 +1,6 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
-use knave_ui::{Color, Rect, TextSpan, TextStyle, UiNode};
+use knave_ui::{Color, TextSpan, TextStyle, UiNode};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
