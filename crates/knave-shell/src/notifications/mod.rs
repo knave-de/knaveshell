@@ -286,8 +286,12 @@ impl Application for Notifications {
             Input::PointerUp(_) | Input::Cancel | Input::FocusLost
         );
         let result = self.scene.event(event);
-        if let Some(Action::Activated(id)) = result.action {
-            self.activate(id);
+        match result.action {
+            Some(Action::Activated(id)) => self.activate(id),
+            Some(Action::Toggled(id, checked)) if id == ElementId(DND) => {
+                self.send(NotificationCommand::SetDnd { enabled: checked });
+            }
+            _ => {}
         }
         if is_up {
             if self.pointer_down_outside {

@@ -129,7 +129,9 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                 }
                 for command in &list.commands {
                     if let DisplayCommand::Shape { paint, .. } = command {
-                        assert_eq!(paint.radii, knave_ui::CornerRadii::uniform(0.0));
+                        let radius = paint.radii.top_left;
+                        assert!([0.0, 4.0, 6.0, 7.0, 9.0].contains(&radius));
+                        assert_eq!(paint.radii, knave_ui::CornerRadii::uniform(radius));
                     }
                 }
                 let scroll = app.scene.bounds(ElementId(SCROLL)).unwrap();
@@ -155,6 +157,88 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
             }
         }
     }
+}
+
+#[test]
+fn notification_panel_uses_proposed_surface_and_a_real_dnd_toggle() {
+    let mut app = app(2);
+    app.state.dnd = true;
+    let list = app.frame([400.0, 800.0], &mut Metrics).clone();
+    let panel = app.scene.bounds(PANEL).unwrap();
+    let toggle_bounds = app.scene.bounds(ElementId(DND)).unwrap();
+    let dnd_bounds = app.scene.bounds(ElementId(20)).unwrap();
+    assert!(toggle_bounds.x >= dnd_bounds.x);
+    assert!(toggle_bounds.x + toggle_bounds.width <= dnd_bounds.x + dnd_bounds.width);
+    assert!(toggle_bounds.y >= dnd_bounds.y);
+    assert!(toggle_bounds.y + toggle_bounds.height <= dnd_bounds.y + dnd_bounds.height);
+    assert_eq!(
+        app.scene.widget(ElementId(DND)),
+        Some(&Widget::Toggle {
+            label: String::new(),
+            checked: true,
+        })
+    );
+    assert!(app.scene.bounds(ElementId(READ)).unwrap().width > 0.0);
+    assert!(app.scene.bounds(ElementId(CLEAR)).unwrap().width > 0.0);
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        DisplayCommand::Shape { paint, .. }
+            if paint.fill == Some(Color::rgba(32, 36, 39, 255))
+                && paint.radii == knave_ui::CornerRadii::uniform(7.0)
+    )));
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        DisplayCommand::Shape { paint, .. }
+            if paint.fill == Some(Color::rgba(41, 47, 51, 255))
+                && paint.radii == knave_ui::CornerRadii::uniform(7.0)
+    )));
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        DisplayCommand::Text { text, style, .. }
+            if text == "Notifications" && style.font_size == 17.0
+    )));
+    assert!(list.commands.iter().any(|command| matches!(
+        command,
+        DisplayCommand::Text { text, .. } if text == "RECENT · 2"
+    )));
+    assert!(panel.width < 400.0);
+}
+
+#[test]
+fn dnd_toggle_retains_pointer_activation() {
+    let mut app = app(1);
+    app.state.dnd = false;
+    app.frame([400.0, 800.0], &mut Metrics);
+    click(&mut app, ElementId(DND));
+    assert_eq!(
+        app.scene.widget(ElementId(DND)),
+        Some(&Widget::Toggle {
+            label: String::new(),
+            checked: true,
+        })
+    );
+}
+
+#[test]
+fn external_notification_service_cannot_toggle_global_dnd() {
+    let mut app = app(1);
+    app.state.owned = false;
+    app.frame([400.0, 800.0], &mut Metrics);
+    assert_eq!(
+        app.scene.widget(ElementId(DND)),
+        Some(&Widget::Toggle {
+            label: String::new(),
+            checked: false,
+        })
+    );
+    click(&mut app, ElementId(DND));
+    assert_eq!(
+        app.scene.widget(ElementId(DND)),
+        Some(&Widget::Toggle {
+            label: String::new(),
+            checked: false,
+        })
+    );
 }
 #[test]
 fn paging_reaches_all_history_without_exceeding_scene_budget() {
@@ -323,6 +407,22 @@ fn missing_notification_icon_uses_app_identity_without_recoloring() {
             assert_eq!(image.pixels(), colors);
         }
     }
+}
+
+#[test]
+fn unavailable_app_icon_uses_bundled_bell_without_a_loader_result() {
+    let mut app = app(1);
+    app.icons.finish("org.example.App".into(), None);
+    let list = app.frame([400.0, 800.0], &mut Metrics);
+    let image = list
+        .commands
+        .iter()
+        .find_map(|command| match command {
+            DisplayCommand::Image { image, .. } => Some(image),
+            _ => None,
+        })
+        .expect("notification cards always have a fallback glyph");
+    assert_eq!((image.width(), image.height()), (48, 48));
 }
 
 #[test]
