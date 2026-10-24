@@ -435,7 +435,8 @@ mod tests {
     #[test]
     fn missing_focus_clears_the_title_and_icon_and_tiny_widths_stay_clamped() {
         let image = crate::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
-        let empty = desktop("");
+        let mut empty = desktop("");
+        empty.windows[0].focused = false;
         let bar = StatusBar::with_focused_icon(
             0,
             180.0,
