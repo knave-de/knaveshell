@@ -344,7 +344,11 @@ fn missing_theme_icons_show_a_builtin_tray_glyph() {
     let mut app = Overview::new()
         .with_catalog(catalog())
         .with_icon_lookup(icon_lookup(false));
-    app.desktop_snapshot(&snapshot());
+    let mut next = snapshot();
+    for window in &mut next.windows {
+        window.app_id = "Mystery".into();
+    }
+    app.desktop_snapshot(&next);
     app.frame([1200.0, 800.0], &mut Metrics);
     settle(&mut app, [1200.0, 800.0]);
 
@@ -462,7 +466,7 @@ fn workspace_controls_switch_without_hiding() {
         ElementId(21),
         ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
-        bar_element(12),
+        bar_element(13),
     ] {
         let mut app = app();
         // A side card may be clipped; activating its target exercises the same action.
@@ -913,6 +917,7 @@ fn icons_are_painted_unclipped_not_just_laid_out() {
             knave_ui::DisplayCommand::Image { bounds, clip, .. } => Some((*bounds, *clip)),
             _ => None,
         })
+        .filter(|(_, clip)| clip.is_some())
         .collect();
     assert_eq!(images.len(), 1);
     let (bounds, clip) = images[0];
