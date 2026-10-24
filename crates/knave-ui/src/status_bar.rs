@@ -490,7 +490,7 @@ fn append_system_icons(scene: &mut UiScene, x: f32) {
 }
 
 fn ellipsize(text: &str, width: f32) -> String {
-    const ELLIPSIS_WIDTH: f32 = 11.0;
+    const ELLIPSIS_WIDTH: f32 = 12.0;
     if estimated_text_width(text) <= width {
         return text.to_owned();
     }
@@ -516,12 +516,15 @@ fn estimated_text_width(text: &str) -> f32 {
 }
 
 fn estimated_glyph_width(character: char) -> f32 {
+    // Conservative bounds for the 11px bar font; the renderer also clips the line.
     match character {
-        ' ' | 'i' | 'l' | '!' | '.' | ',' | ':' | ';' | '|' => 3.2,
-        'm' | 'w' | 'M' | 'W' => 8.5,
-        '\u{2e80}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{1f300}'..='\u{1faff}' => 11.0,
-        _ if character.is_ascii() => 6.2,
-        _ => 11.0,
+        ' ' | 'i' | 'l' | '.' | ',' | ':' | ';' => 4.0,
+        '!' | '|' | '(' | ')' | '[' | ']' => 5.0,
+        'm' | 'w' | 'M' | 'W' | '@' | '%' | '&' | '…' => 12.0,
+        'A'..='Z' => 9.0,
+        '0'..='9' => 7.5,
+        _ if character.is_ascii() => 7.0,
+        _ => 12.0,
     }
 }
 
