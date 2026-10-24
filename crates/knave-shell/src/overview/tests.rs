@@ -1082,7 +1082,11 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
     assert_eq!(status_title(&app).as_deref(), Some("Window 1"));
-    assert!(app.targets.values().any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview))));
+    assert!(
+        app.targets
+            .values()
+            .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
+    );
     for (index, bounds) in [
         Rect::new(150.0, 5.0, 32.0, 26.0),
         Rect::new(188.0, 5.0, 32.0, 26.0),
