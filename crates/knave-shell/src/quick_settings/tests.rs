@@ -30,7 +30,10 @@ fn app() -> QuickSettings {
     let mut app = QuickSettings::new();
     app.apply(QuickSettingsSnapshot {
         open: true,
-        network: Some(Network::default()),
+        network: Some(Network {
+            ethernet: Some("enp1s0".into()),
+            ..Default::default()
+        }),
         output: Some(Volume {
             percent: 65,
             muted: false,
@@ -201,7 +204,6 @@ fn brightness_home_reaches_one_percent_and_authentication_releases_input() {
 #[test]
 fn trimmed_subtitles_keep_status_and_authentication_text() {
     let mut app = app();
-    app.state.network.as_mut().unwrap().ethernet = Some("enp1s0".into());
     app.page = Page::Network;
     let network = app.frame([1280.0, 800.0], &mut Metrics).clone();
     assert!(!network.commands.iter().any(|command| matches!(command,
