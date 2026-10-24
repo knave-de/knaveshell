@@ -476,7 +476,7 @@ impl QuickSettings {
         value.layout.width = Length::Px(90.0);
         value.layout.height = Length::Px(30.0);
         value.layout.padding_edges = Some(Insets::symmetric(8.0, 0.0));
-        value.style.text.align = TextAlign::Right;
+        value.style.text.align = TextAlign::End;
         heading.children.push(value);
         group.children.push(heading);
         group.children.push(p.slider(
@@ -676,7 +676,7 @@ impl QuickSettings {
                     true,
                 );
                 value.layout.width = Length::Px(80.0);
-                value.style.text.align = TextAlign::Right;
+                value.style.text.align = TextAlign::End;
                 brightness.children.push(value);
                 display.children.push(brightness);
                 display.children.push(p.slider(
