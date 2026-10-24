@@ -81,7 +81,7 @@ impl Palette {
         e.style.hover = self.surface;
         e.style.pressed = self.card;
         e.style.focus = self.accent;
-        e.style.radii = Some(CornerRadii::uniform(6.0));
+        e.style.radii = Some(CornerRadii::uniform(7.0));
     }
     fn panel(&self, id: u64) -> Element {
         let mut e = Element::new(id, Widget::Panel);
