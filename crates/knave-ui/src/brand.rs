@@ -78,11 +78,9 @@ mod tests {
 
     #[test]
     fn bounded_buffer_size_caps_dimensional_growth() {
-        let info = png::Info {
-            width: u32::MAX,
-            height: u32::MAX,
-            ..png::Info::default()
-        };
+        let mut info = png::Info::default();
+        info.width = u32::MAX;
+        info.height = u32::MAX;
         assert_eq!(bounded_buffer_size(&info), None);
     }
 }
