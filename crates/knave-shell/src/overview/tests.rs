@@ -1,6 +1,6 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
-use knave_ui::{Color, Rect, TextSpan, TextStyle, UiNode};
+use knave_ui::{Color, TextSpan, TextStyle, UiNode};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
@@ -466,7 +466,7 @@ fn workspace_controls_switch_without_hiding() {
         ElementId(21),
         ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
-        bar_element(13),
+        bar_target(&app(), knave_ui::UiAction::FocusWorkspace(WorkspaceId(3))),
     ] {
         let mut app = app();
         // A side card may be clipped; activating its target exercises the same action.
@@ -910,6 +910,7 @@ fn icons_are_painted_unclipped_not_just_laid_out() {
     let mut app = app();
     type_query(&mut app, "edit");
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+    let row_icon = app.scene.bounds(icon_element(app.search()[0])).unwrap();
     let images: Vec<_> = list
         .commands
         .iter()
@@ -917,7 +918,7 @@ fn icons_are_painted_unclipped_not_just_laid_out() {
             knave_ui::DisplayCommand::Image { bounds, clip, .. } => Some((*bounds, *clip)),
             _ => None,
         })
-        .filter(|(_, clip)| clip.is_some())
+        .filter(|(bounds, _)| *bounds == row_icon)
         .collect();
     assert_eq!(images.len(), 1);
     let (bounds, clip) = images[0];
@@ -1068,13 +1069,29 @@ fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
 fn bar_element(node_id: u64) -> ElementId {
     ElementId(0x800_0000_0000 + node_id)
 }
+fn bar_target(app: &Overview, action: knave_ui::UiAction) -> ElementId {
+    *app.targets
+        .iter()
+        .find_map(|(id, target)| {
+            matches!(target, Target::StatusBar(candidate) if *candidate == action).then_some(id)
+        })
+        .expect("shared bar action exists")
+}
 fn status_title(app: &Overview) -> Option<String> {
+    let bar = app.status_bar_component(app.size[0]);
+    let (title_bounds, title) = bar.scene.nodes().iter().find_map(|node| match node {
+        UiNode::Label {
+            id, bounds, text, ..
+        } if id.0 == 8 => Some((*bounds, text)),
+        _ => None,
+    })?;
     app.display
         .commands
         .iter()
-        .rev()
         .find_map(|command| match command {
-            knave_ui::DisplayCommand::Text { text, bounds, .. } if bounds.y == 0.0 => {
+            knave_ui::DisplayCommand::Text { bounds, text, .. }
+                if *bounds == title_bounds && text == title =>
+            {
                 Some(text.clone())
             }
             _ => None,
@@ -1092,21 +1109,36 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
             .values()
             .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
     );
-    for (index, bounds) in [
-        Rect::new(150.0, 5.0, 32.0, 26.0),
-        Rect::new(188.0, 5.0, 32.0, 26.0),
-        Rect::new(226.0, 5.0, 32.0, 26.0),
-    ]
-    .into_iter()
-    .enumerate()
-    {
+    let shared = app.status_bar_component(1200.0);
+    let chips: Vec<_> = shared
+        .scene
+        .hit_targets()
+        .filter_map(|(bounds, action)| {
+            if let knave_ui::UiAction::FocusWorkspace(workspace) = action {
+                Some((bounds, workspace))
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(chips.len(), 3);
+    assert!(
+        chips[0].0.x < 80.0,
+        "no legacy reserved gap before workspaces"
+    );
+    for (bounds, workspace) in chips {
+        assert!(bounds.width <= 26.0, "compact workspace chip");
         assert_eq!(
-            app.scene.bounds(bar_element(11 + index as u64)),
+            app.scene.bounds(bar_target(
+                &app,
+                knave_ui::UiAction::FocusWorkspace(workspace)
+            )),
             Some(bounds)
         );
     }
     // A chip click switches that workspace directly, like the desktop bar.
-    click(&mut app, bar_element(13));
+    let third = bar_target(&app, knave_ui::UiAction::FocusWorkspace(WorkspaceId(3)));
+    click(&mut app, third);
     assert!(matches!(
         app.take_request(),
         Some(HostRequest::Desktop(DesktopCommand::FocusWorkspace {
@@ -1139,7 +1171,14 @@ fn the_shared_bar_clears_the_title_when_the_focused_window_is_on_another_workspa
     assert_eq!(status_title(&app), None);
     // The bar, including its chips, stays visible while searching.
     type_query(&mut app, "edit");
-    assert!(app.scene.bounds(bar_element(12)).is_some());
+    assert!(
+        app.scene
+            .bounds(bar_target(
+                &app,
+                knave_ui::UiAction::FocusWorkspace(WorkspaceId(3))
+            ))
+            .is_some()
+    );
     let search = app.scene.bounds(SEARCH).unwrap();
     assert!(search.y >= 36.0, "search overlaps the status bar");
 }
@@ -1199,9 +1238,14 @@ fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
             _ => None,
         })
         .collect();
+    let shared = app.status_bar_component(1200.0);
+    let background = match &shared.display.commands[0] {
+        knave_ui::DisplayCommand::Shape { paint, .. } => paint.fill,
+        _ => panic!("bar background is the first command"),
+    };
     assert_eq!(
         strip,
-        vec![Some(Color::rgba(0, 0, 0, 0)), Some(Color::BACKGROUND)],
+        vec![Some(Color::rgba(0, 0, 0, 0)), background],
         "strip shapes"
     );
 }
@@ -1212,11 +1256,20 @@ fn without_a_snapshot_the_shared_bar_shows_the_brand_mark_without_a_wordmark() {
     app.frame([1200.0, 800.0], &mut Metrics);
     // Icon-only mark: no disconnected "Knave" title is painted beside it.
     assert!(status_title(&app).as_deref().is_none_or(str::is_empty));
-    let image = app
-        .display
-        .commands
+    let brand_bounds = app
+        .status_bar_component(1200.0)
+        .scene
+        .nodes()
         .iter()
-        .any(|command| matches!(command, knave_ui::DisplayCommand::Image { bounds, .. } if *bounds == Rect::new(6.0, 6.0, 24.0, 24.0)));
+        .find_map(|node| match node {
+            UiNode::Image { id, bounds, .. } if id.0 == 3 => Some(*bounds),
+            _ => None,
+        })
+        .expect("brand image in shared component");
+    let image = app.display.commands.iter().any(|command| {
+        matches!(command,
+        knave_ui::DisplayCommand::Image { bounds, .. } if *bounds == brand_bounds)
+    });
     assert!(image, "the bundled brand mark renders on the shared bar");
     assert!(!app.targets.values().any(|target| matches!(
         target,

@@ -1362,9 +1362,13 @@ impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
         let command = match action {
             UiAction::Applet(id) => {
-                let x = knave_ui::status_bar::applet_targets(self.width as f32, &self.applets)
-                    .find(|(_, item)| item.id == id)
-                    .map_or(0, |(r, _)| (r.x + r.width / 2.0) as i32);
+                let x = knave_ui::status_bar::applet_targets_with_notifications(
+                    self.width as f32,
+                    &self.applets,
+                    self.notification_client.is_some(),
+                )
+                .find(|(_, item)| item.id == id)
+                .map_or(0, |(r, _)| (r.x + r.width / 2.0) as i32);
                 self.tray_action(id, tray::Action::Activate, x, 18);
                 return;
             }
@@ -1638,11 +1642,15 @@ impl PointerHandler for Runtime {
                 self.clipboard.serial = Some(*serial);
             }
             let p = [event.position.0 as f32, event.position.1 as f32];
-            let applet = knave_ui::status_bar::applet_targets(self.width as f32, &self.applets)
-                .find(|(r, _)| {
-                    p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
-                })
-                .map(|(_, item)| item.id);
+            let applet = knave_ui::status_bar::applet_targets_with_notifications(
+                self.width as f32,
+                &self.applets,
+                self.notification_client.is_some(),
+            )
+            .find(|(r, _)| {
+                p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
+            })
+            .map(|(_, item)| item.id);
             if let Some(id) = applet {
                 let action = match &event.kind {
                     PointerEventKind::Press { button: 272, .. } => Some(tray::Action::Activate),

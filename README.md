@@ -22,8 +22,11 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
 The bar is a top layer with a 36-pixel exclusive zone. Its left edge carries the
 icon-only bundled Knave mark; clicking it toggles Overview. Overview fills the
 output, so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
-component, including the notification bell, unread count and DND state. Overview
-routes the component's shared hit targets for workspace switching and notifications.
+component. Compact rounded groups place the logo, workspace chips, and focused
+application together on the left, with tray applets, notifications, and icon-only
+network/audio controls on the right. The network/audio group opens Quick Settings;
+workspace occupancy dots, the active chip, unread count, and DND state follow the
+existing desktop services. Overview routes the same hit targets.
 Overview spacing and panel headers are compact; status, unavailable-service, and
 administrator-authentication messages remain visible.
 Overview also shows a
