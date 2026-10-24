@@ -5,6 +5,7 @@ mod display_list;
 mod geometry;
 mod paint;
 pub mod status_bar;
+mod status_icons;
 pub mod toolkit;
 
 use std::sync::Arc;
@@ -342,18 +343,12 @@ impl UiScene {
             bounds: Rect::new(0.0, 0.0, width, height),
             color: Color::BACKGROUND,
         });
-        scene.push(UiNode::Label {
-            id: NodeId(2),
-            bounds: Rect::new(46.0, 0.0, (width - 62.0).max(1.0), height),
-            color: Color::TEXT,
-            text: String::new(),
-        });
         // The icon-only Knave mark opens the Overview; no wordmark is painted.
         scene.target(Rect::new(0.0, 0.0, 40.0, height), UiAction::OpenOverview);
         if let Some(image) = brand::image() {
             scene.push(UiNode::Image {
                 id: NodeId(3),
-                bounds: Rect::new(6.0, 6.0, 24.0, 24.0),
+                bounds: Rect::new(11.0, 7.0, 22.0, 22.0),
                 image,
             });
         }
@@ -366,43 +361,7 @@ impl UiScene {
         height: f32,
         snapshot: Option<&DesktopSnapshot>,
     ) -> Self {
-        let mut scene = Self::bar(revision, width, height);
-        if let Some(UiNode::Label { text, .. }) = scene.nodes.get_mut(1) {
-            *text = snapshot
-                .and_then(|snapshot| {
-                    snapshot
-                        .workspaces
-                        .iter()
-                        .find(|workspace| workspace.active)
-                })
-                .map_or_else(String::new, |workspace| {
-                    format!("Workspace {}", workspace.workspace.0)
-                });
-        }
-        if let Some(snapshot) = snapshot {
-            for (index, workspace) in snapshot.workspaces.iter().enumerate() {
-                if 150.0 + index as f32 * 38.0 + 32.0 > width - 68.0 {
-                    break;
-                }
-                let bounds = Rect::new(150.0 + index as f32 * 38.0, 5.0, 32.0, height - 10.0);
-                scene.push(UiNode::Label {
-                    id: NodeId(10 + index as u64),
-                    bounds,
-                    color: if workspace.active {
-                        Color::ACCENT
-                    } else {
-                        Color::TEXT
-                    },
-                    text: workspace.workspace.0.to_string(),
-                });
-                scene.target(bounds, UiAction::FocusWorkspace(workspace.workspace));
-            }
-        }
-        scene.target(
-            Rect::new((width - 60.0).max(0.0), 0.0, width.min(60.0), height),
-            UiAction::ToggleNotifications,
-        );
-        scene
+        status_bar::StatusBar::new(revision, width, height, snapshot, true, None, &[]).scene
     }
 
     pub fn overview(revision: u64, width: f32, height: f32) -> Self {
@@ -604,7 +563,7 @@ mod tests {
     fn bar_scene_is_renderer_independent() {
         let scene = UiScene::bar(7, 1920.0, 36.0);
         assert_eq!(scene.revision(), 7);
-        assert_eq!(scene.nodes().len(), 3);
+        assert_eq!(scene.nodes().len(), 2);
         // The brand mark is always resolvable from the bundled asset.
         assert!(
             scene
@@ -627,7 +586,8 @@ mod tests {
             UiScene::bar_with_snapshot(0, 800.0, 36.0, None),
             UiScene::bar_with_snapshot(0, 800.0, 36.0, Some(&snapshot)),
         ] {
-            assert!(matches!(&scene.nodes()[1], UiNode::Label { text, .. } if text.is_empty()));
+            assert!(!scene.nodes().iter().any(|node| matches!(node,
+                UiNode::Label { text, .. } if text.starts_with("Workspace "))));
         }
     }
 
@@ -635,7 +595,7 @@ mod tests {
     fn overview_scene_does_not_require_a_gpu() {
         let scene = UiScene::overview(1, 1920.0, 1080.0);
         assert_eq!(scene.clear_color(), Color::rgba(8, 12, 18, 245));
-        assert_eq!(scene.nodes().len(), 4);
+        assert_eq!(scene.nodes().len(), 3);
         assert_eq!(
             scene.nodes()[0],
             UiNode::Panel {
@@ -651,12 +611,8 @@ mod tests {
         ));
         assert!(matches!(
             &scene.nodes()[2],
-            UiNode::Label { text, .. } if text.is_empty()
-        ));
-        assert!(matches!(
-            &scene.nodes()[3],
             UiNode::Image { bounds, .. }
-                if *bounds == Rect::new(6.0, 6.0, 24.0, 24.0)
+                if *bounds == Rect::new(11.0, 7.0, 22.0, 22.0)
         ));
         // The icon-only mark introduces the overview from the shared strip.
         assert_eq!(scene.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
@@ -698,9 +654,13 @@ mod tests {
             ],
         };
         let bar = UiScene::bar_with_snapshot(4, 1920.0, 36.0, Some(&snapshot));
-        assert!(matches!(&bar.nodes()[1], UiNode::Label { text, .. } if text == "Workspace 2"));
+        assert!(bar.nodes().iter().any(|node| matches!(node,
+            UiNode::Label { bounds, text, .. }
+                if *bounds == Rect::new(46.0, 7.0, 22.0, 22.0) && text == "2")));
         let overview = UiScene::overview_with_snapshot(4, 1920.0, 1080.0, Some(&snapshot));
-        assert!(overview.nodes().iter().any(|node| matches!(node, UiNode::Label { bounds, text, .. } if *bounds == Rect::new(46.0, 0.0, 1858.0, 36.0) && text == "Workspace 2")));
+        assert!(overview.nodes().iter().any(|node| matches!(node,
+            UiNode::Label { bounds, text, .. }
+                if *bounds == Rect::new(46.0, 7.0, 22.0, 22.0) && text == "2")));
         assert_eq!(overview.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
         assert_eq!(
             overview.hit_test(40.0, 420.0),
@@ -711,7 +671,7 @@ mod tests {
             Some(UiAction::RestoreWindow(WindowId(42)))
         );
         assert_eq!(
-            overview.hit_test(160.0, 15.0),
+            overview.hit_test(57.0, 15.0),
             Some(UiAction::FocusWorkspace(WorkspaceId(2)))
         );
         assert_eq!(overview.hit_test(40.0, 25.0), Some(UiAction::CloseOverview));
