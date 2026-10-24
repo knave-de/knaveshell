@@ -170,8 +170,7 @@ impl StatusBar {
                             && !window.minimized
                             && window.workspace == workspace.workspace
                     })
-                })
-                .filter(|window| !window.title.is_empty());
+                });
             if let Some(window) = focused.filter(|_| left + 22.0 <= right) {
                 let icon = crate::Rect::new(left, 7.0, 22.0, 22.0);
                 if let Some(image) = focused_icon {
@@ -183,14 +182,16 @@ impl StatusBar {
                 }
                 let text_left = icon.x + icon.width + 6.0;
                 let text_width = (right - text_left).max(0.0);
-                let text = ellipsize(&window.title.replace(['\n', '\r'], " "), text_width);
-                if !text.is_empty() {
-                    scene.push(crate::UiNode::Label {
-                        id: crate::NodeId(8),
-                        bounds: crate::Rect::new(text_left, 0.0, text_width, STATUS_BAR_HEIGHT),
-                        color: crate::Color::TEXT,
-                        text,
-                    });
+                if !window.title.is_empty() {
+                    let text = ellipsize(&window.title.replace(['\n', '\r'], " "), text_width);
+                    if !text.is_empty() {
+                        scene.push(crate::UiNode::Label {
+                            id: crate::NodeId(8),
+                            bounds: crate::Rect::new(text_left, 0.0, text_width, STATUS_BAR_HEIGHT),
+                            color: crate::Color::TEXT,
+                            text,
+                        });
+                    }
                 }
             }
         }
@@ -471,6 +472,26 @@ mod tests {
             narrow.scene.hit_test(340.0, 18.0),
             Some(UiAction::ToggleNotifications)
         );
+    }
+
+    #[test]
+    fn focused_app_icon_is_shown_when_window_title_is_empty() {
+        let image = crate::UiImage::from_rgba(1, 1, vec![1, 2, 3, 255]).unwrap();
+        let bar = StatusBar::with_focused_icon(
+            0,
+            500.0,
+            36.0,
+            Some(&desktop("")),
+            true,
+            None,
+            &[],
+            Some(&image),
+        );
+
+        assert!(node_label(&bar, 8).is_none());
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            crate::UiNode::Image { id, image: rendered, .. }
+                if id.0 == 9 && rendered == &image)));
     }
 
     #[test]
