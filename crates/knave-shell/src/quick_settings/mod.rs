@@ -19,6 +19,7 @@ const LIMIT: u64 = 8;
 const START: u64 = 9;
 const END: u64 = 10;
 const POWER: u64 = 11;
+const PROFILE: u64 = 15;
 const CONFIRMATION: u64 = 12;
 const CANCEL_CONFIRMATION: u64 = 13;
 const CONFIRM_ACTION: u64 = 14;
@@ -368,6 +369,20 @@ impl Application for QuickSettings {
         match result.action {
             Some(Action::Activated(id)) => self.activate(id),
             Some(Action::Selected(id, value)) if id.0 == POWER => self.select_power(value),
+            Some(Action::Selected(id, value)) if id.0 == PROFILE => {
+                if let Some(profile) = value
+                    .checked_sub(1)
+                    .and_then(|i| {
+                        self.state
+                            .power
+                            .as_ref()
+                            .and_then(|p| p.available.get(i as usize))
+                    })
+                    .cloned()
+                {
+                    self.send(QuickSettingsCommand::SetPowerProfile { profile });
+                }
+            }
             Some(Action::PopupClosed(_)) => self.dismiss_confirmation(),
             Some(Action::ValueChanged(id, v)) => self.value(id, v, !self.pressed),
             Some(Action::ValueCommitted(id, v)) => self.value(id, v, true),

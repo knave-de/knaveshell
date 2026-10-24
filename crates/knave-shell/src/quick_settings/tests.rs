@@ -222,3 +222,57 @@ fn trimmed_subtitles_keep_status_and_authentication_text() {
         knave_ui::DisplayCommand::Text { text, .. }
             if text.contains("administrator authentication"))));
 }
+
+#[test]
+fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
+    let mut app = app();
+    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    let panel = app.scene.bounds(PANEL).unwrap();
+    assert_eq!(panel.width, 340.0);
+    let target = |predicate: fn(&Target) -> bool| {
+        app.targets
+            .iter()
+            .find(|(_, t)| predicate(t))
+            .map(|(id, _)| app.scene.bounds(*id).unwrap())
+            .unwrap()
+    };
+    let network = target(|t| matches!(t, Target::Page(Page::Network)));
+    let bluetooth = target(|t| {
+        matches!(
+            t,
+            Target::Command(QuickSettingsCommand::SetBluetooth { .. })
+        )
+    });
+    assert_eq!(network.y, bluetooth.y);
+    assert!(network.x + network.width <= bluetooth.x);
+    assert!(app.scene.bounds(ElementId(PROFILE)).unwrap().y < network.y);
+    for rect in [
+        app.scene.bounds(ElementId(OUTPUT)).unwrap(),
+        app.scene.bounds(ElementId(INPUT)).unwrap(),
+        app.scene.bounds(ElementId(BRIGHTNESS)).unwrap(),
+        target(|t| matches!(t, Target::Page(Page::Battery))),
+    ] {
+        assert!(
+            rect.y >= panel.y && rect.y + rect.height <= panel.y + panel.height,
+            "{rect:?} outside {panel:?}"
+        );
+    }
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.fill==Some(Color::rgba(32,36,39,255)))));
+    click(&mut app, POWER);
+    assert!(app.scene.interaction(ElementId(POWER)).unwrap().expanded);
+}
+#[test]
+fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    assert!(
+        matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
+    );
+    for light in [false, true] {
+        let first = view::icon_image(view::Icon::Power, light);
+        let next = view::icon_image(view::Icon::Power, light);
+        assert_eq!(first.cache_key(), next.cache_key());
+        assert_eq!(first.pixels().len(), 24 * 24 * 4);
+        assert!(first.pixels().chunks_exact(4).any(|p| p[3] > 0));
+    }
+}
