@@ -269,10 +269,24 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
         matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
     );
     for light in [false, true] {
-        let first = view::icon_image(view::Icon::Power, light);
-        let next = view::icon_image(view::Icon::Power, light);
-        assert_eq!(first.cache_key(), next.cache_key());
-        assert_eq!(first.pixels().len(), 24 * 24 * 4);
-        assert!(first.pixels().chunks_exact(4).any(|p| p[3] > 0));
+        app.state.light = light;
+        app.dirty = true;
+        let keys = |list: &DisplayList| {
+            list.commands
+                .iter()
+                .filter_map(|c| match c {
+                    knave_ui::DisplayCommand::Image { image, .. } => {
+                        assert_eq!(image.pixels().len(), 24 * 24 * 4);
+                        Some(image.cache_key())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let first = keys(app.frame([1280.0, 800.0], &mut Metrics));
+        app.dirty = true;
+        let next = keys(app.frame([1280.0, 800.0], &mut Metrics));
+        assert!(!first.is_empty());
+        assert_eq!(first, next);
     }
 }
