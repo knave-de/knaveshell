@@ -2,7 +2,7 @@ use super::*;
 use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
 use std::sync::OnceLock;
 
-const NOTIFICATION_ICON_PNG: &[u8] = include_bytes!("../../../../knave-ui/assets/status-bell.png");
+const NOTIFICATION_ICON_PNG: &[u8] = include_bytes!("../../../knave-ui/assets/status-bell.png");
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
     static IMAGE: OnceLock<Option<knave_ui::UiImage>> = OnceLock::new();
@@ -171,7 +171,7 @@ fn short(s: &str, max: usize) -> String {
 }
 fn panel_geometry(width: f32) -> (f32, f32) {
     let gap = if width < 360.0 { 6.0 } else { 12.0 };
-    (gap, (width - gap * 2.0).clamp(1.0, 400.0))
+    (gap, (width - gap * 2.0).clamp(1.0, 340.0))
 }
 impl Notifications {
     pub(super) fn compose(&mut self) -> Element {

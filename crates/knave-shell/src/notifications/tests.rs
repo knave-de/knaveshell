@@ -201,7 +201,7 @@ fn notification_panel_uses_proposed_surface_and_a_real_dnd_toggle() {
         command,
         DisplayCommand::Text { text, .. } if text == "RECENT · 2"
     )));
-    assert!(panel.width < 400.0);
+    assert_eq!(panel.width, 340.0);
 }
 
 #[test]
