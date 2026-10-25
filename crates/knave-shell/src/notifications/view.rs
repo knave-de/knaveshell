@@ -367,6 +367,7 @@ impl Notifications {
             panel.children.push(scroll);
             let mut footer = p.panel(18).layout(Layout {
                 flow: Flow::Row,
+                align: Align::Center,
                 gap: 6.0,
                 ..Default::default()
             });
@@ -385,7 +386,7 @@ impl Notifications {
                 ),
                 true,
             );
-            page_label.layout.height = Length::Fill;
+            page_label.layout.height = Length::Auto;
             page_label.style.text.font_size = 10.0;
             page_label.style.text.line_height = 13.0;
             footer.children.push(page_label);
@@ -442,6 +443,7 @@ impl Notifications {
         });
         let mut head = p.panel(id + 1).layout(Layout {
             flow: Flow::Row,
+            align: Align::Center,
             gap: 8.0,
             ..Default::default()
         });
