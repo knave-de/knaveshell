@@ -1,8 +1,9 @@
 # Shell component boundaries
 
 This repository owns the desktop-facing shell implementation and its UI
-composition. The implementation is split into Rust crates for UI, rendering,
-Wayland, and the shell binary.
+composition. This workspace owns the shell binary, Wayland hosting, application
+discovery and icon resolution. The standalone Knave UI repository owns the UI
+toolkit and wgpu renderer; this workspace consumes both at one pinned Git revision.
 
 The shell:
 

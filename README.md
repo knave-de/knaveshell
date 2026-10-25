@@ -102,10 +102,15 @@ fractional scaling and multiple-output hosting remain future work.
 
 ## Workspace
 
-- knave-ui: renderer-independent scene and interaction primitives;
-- knave-renderer: render-list, bounded bitmap-text/image painter, and wgpu boundary;
-  and
-- knave-wayland: direct layer-shell client and bounded desktop-state bridge.
+- knave-shell: desktop surfaces and service integration;
+- knave-wayland: direct layer-shell client and bounded desktop-state bridge;
+- knave-apps and knave-icons: application discovery and icon resolution.
+
+The UI toolkit, assets and wgpu renderer live in the separate
+[Knave UI repository](https://github.com/knave-de/knave-ui). Both library dependencies
+are pinned to the same Git revision; a standalone Shell checkout fetches them through
+Cargo. Use Knave's managed workflow with `--change knave-ui --change knaveshell`
+for coordinated library/consumer changes.
 
 ### Native portal controls
 

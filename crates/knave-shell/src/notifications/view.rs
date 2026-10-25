@@ -1,34 +1,8 @@
 use super::*;
 use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
-use std::sync::OnceLock;
-
-const NOTIFICATION_ICON_PNG: &[u8] = include_bytes!("../../../knave-ui/assets/status-bell.png");
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
-    static IMAGE: OnceLock<Option<knave_ui::UiImage>> = OnceLock::new();
-    IMAGE
-        .get_or_init(|| {
-            let mut decoder = png::Decoder::new(std::io::Cursor::new(NOTIFICATION_ICON_PNG));
-            decoder.set_limits(png::Limits { bytes: 48 * 48 * 4 });
-            decoder
-                .set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-            let mut reader = decoder.read_info().ok()?;
-            let info = reader.info();
-            if info.width != 48 || info.height != 48 {
-                return None;
-            }
-            let mut buffer = vec![0; reader.output_buffer_size()?];
-            let info = reader.next_frame(&mut buffer).ok()?;
-            if info.color_type != png::ColorType::Rgba {
-                return None;
-            }
-            knave_ui::UiImage::from_rgba(
-                info.width,
-                info.height,
-                buffer[..info.buffer_size()].to_vec(),
-            )
-        })
-        .clone()
+    knave_ui::status_icons::bell()
 }
 
 pub(super) fn card_id(id: u64) -> u64 {

@@ -935,13 +935,11 @@ dependencies = [
 [[package]]
 name = "knave-renderer"
 version = "0.1.0"
+source = "git+https://github.com/knave-de/knave-ui.git?rev=5a49251f7efdbcf1dcb827435fc81b5645121ef9#5a49251f7efdbcf1dcb827435fc81b5645121ef9"
 dependencies = [
  "bytemuck",
  "glyphon",
- "knave-desktop-api",
  "knave-ui",
- "png",
- "pollster",
  "unicode-segmentation",
  "wgpu",
 ]
@@ -975,6 +973,7 @@ dependencies = [
 [[package]]
 name = "knave-ui"
 version = "0.1.0"
+source = "git+https://github.com/knave-de/knave-ui.git?rev=5a49251f7efdbcf1dcb827435fc81b5645121ef9#5a49251f7efdbcf1dcb827435fc81b5645121ef9"
 dependencies = [
  "knave-desktop-api",
  "png",
