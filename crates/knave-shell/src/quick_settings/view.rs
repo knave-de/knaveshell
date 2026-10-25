@@ -945,11 +945,11 @@ impl QuickSettings {
                             content.children.push(self.button(
                                 &p,
                                 if applying {
-                                    "Applying…".into()
+                                    "Applying…"
                                 } else if limit.enabled {
-                                    "Reapply charge-limit preset".into()
+                                    "Reapply charge-limit preset"
                                 } else {
-                                    "Enable charge-limit preset".into()
+                                    "Enable charge-limit preset"
                                 },
                                 Target::ApplyLimit(true),
                                 !applying,
