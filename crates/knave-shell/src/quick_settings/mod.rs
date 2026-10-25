@@ -19,6 +19,7 @@ const LIMIT: u64 = 8;
 const START: u64 = 9;
 const END: u64 = 10;
 const POWER: u64 = 11;
+const PROFILE: u64 = 15;
 const CONFIRMATION: u64 = 12;
 const CANCEL_CONFIRMATION: u64 = 13;
 const CONFIRM_ACTION: u64 = 14;
@@ -38,6 +39,14 @@ enum Target {
     Schedule,
     ApplyLimit,
 }
+#[derive(Default)]
+enum ChargeFeedback {
+    #[default]
+    Idle,
+    Applying(u8),
+    Applied(u8),
+    Failed(String),
+}
 pub struct QuickSettings {
     state: QuickSettingsSnapshot,
     client: Option<QuickSettingsClient>,
@@ -51,6 +60,7 @@ pub struct QuickSettings {
     connected: bool,
     closing: bool,
     authenticating: bool,
+    charge_feedback: ChargeFeedback,
     pressed: bool,
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
@@ -80,6 +90,7 @@ impl QuickSettings {
             connected: false,
             closing: false,
             authenticating: false,
+            charge_feedback: ChargeFeedback::Idle,
             pressed: false,
             pending: None,
             outside: false,
@@ -115,6 +126,7 @@ impl QuickSettings {
         if !self.state.open && state.open {
             self.page = Page::Main;
             self.confirmation = None;
+            self.charge_feedback = ChargeFeedback::Idle;
             self.focus_on_open = true;
             self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
         }
@@ -203,19 +215,54 @@ impl QuickSettings {
                 self.send(self.night_command());
                 self.dirty = true
             }
-            Some(Target::ApplyLimit) => {
-                self.error = None;
-                self.send(QuickSettingsCommand::SetChargeLimit {
-                    percent: self.limit,
-                });
-                self.authenticating = self
-                    .client
-                    .as_ref()
-                    .is_some_and(QuickSettingsClient::authentication_pending);
-                self.dirty = true;
-            }
+            Some(Target::ApplyLimit) => self.apply_charge_limit(),
             None => {}
         }
+    }
+    fn apply_charge_limit(&mut self) {
+        if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
+            return;
+        }
+        self.error = None;
+        let result = self
+            .client
+            .as_ref()
+            .ok_or_else(|| "Quick Settings service is unavailable".to_owned())
+            .and_then(|c| {
+                c.command(QuickSettingsCommand::SetChargeLimit {
+                    percent: self.limit,
+                })
+            });
+        self.charge_feedback = match result {
+            Ok(()) => ChargeFeedback::Applying(self.limit),
+            Err(e) => ChargeFeedback::Failed(e),
+        };
+        self.authenticating = self
+            .client
+            .as_ref()
+            .is_some_and(QuickSettingsClient::authentication_pending);
+        self.dirty = true;
+    }
+    fn finish_charge_limit(&mut self, result: Result<u8, String>) {
+        let ChargeFeedback::Applying(requested) = self.charge_feedback else {
+            return;
+        };
+        self.charge_feedback = match result {
+            Ok(applied) if applied == requested => {
+                if let Some(battery) = &mut self.state.battery {
+                    battery.limit = Some(applied);
+                }
+                self.limit = applied;
+                ChargeFeedback::Applied(applied)
+            }
+            Ok(applied) => ChargeFeedback::Failed(format!(
+                "Requested {requested}%, but system reports {applied}%"
+            )),
+            Err(e) => ChargeFeedback::Failed(e),
+        };
+        self.authenticating = false;
+        self.focus_on_open = self.state.open;
+        self.dirty = true;
     }
     fn value(&mut self, id: ElementId, value: f64, commit: bool) {
         let v = value.round() as u8;
@@ -290,12 +337,22 @@ impl Application for QuickSettings {
                     }
                 }
                 Err(e) => {
+                    if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
+                        self.finish_charge_limit(Err(e.clone()));
+                    }
                     self.connected = false;
                     self.state.open = false;
                     self.error = Some(e);
                     self.dirty = true
                 }
             }
+        }
+        if let Some(result) = self
+            .client
+            .as_ref()
+            .and_then(QuickSettingsClient::take_charge_result)
+        {
+            self.finish_charge_limit(result);
         }
         if let Some(error) = self.client.as_ref().and_then(QuickSettingsClient::error) {
             self.error = Some(error);
@@ -368,6 +425,20 @@ impl Application for QuickSettings {
         match result.action {
             Some(Action::Activated(id)) => self.activate(id),
             Some(Action::Selected(id, value)) if id.0 == POWER => self.select_power(value),
+            Some(Action::Selected(id, value)) if id.0 == PROFILE => {
+                if let Some(profile) = value
+                    .checked_sub(1)
+                    .and_then(|i| {
+                        self.state
+                            .power
+                            .as_ref()
+                            .and_then(|p| p.available.get(i as usize))
+                    })
+                    .cloned()
+                {
+                    self.send(QuickSettingsCommand::SetPowerProfile { profile });
+                }
+            }
             Some(Action::PopupClosed(_)) => self.dismiss_confirmation(),
             Some(Action::ValueChanged(id, v)) => self.value(id, v, !self.pressed),
             Some(Action::ValueCommitted(id, v)) => self.value(id, v, true),

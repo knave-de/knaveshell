@@ -136,7 +136,9 @@ disturb and clear/read controls. Escape or an outside click closes the center.
 Passive banners never request keyboard focus and leave the desktop outside their
 cards clickable. History is paged in groups of 20 to bound retained UI size.
 Long titles, bodies and action labels wrap; lengthy bodies have Show more/less.
-Light/dark and high-contrast colors use Knave's appearance settings.
+The center and banners use compact charcoal cards, muted metadata and a blue
+accent; Do not disturb is a switch above the history controls. Light/dark and
+high-contrast colors use Knave's appearance settings.
 
 The session service owns persistence and delivery. Expired banners remain in
 history; restored history has no stale actions. Transient notifications do not
@@ -164,12 +166,14 @@ XEmbed tray icons are not supported.
 
 ### Quick settings
 
-Click Settings beside the notification bell in the bar or Overview for a native,
-full-height panel. It combines Ethernet/Wi-Fi, Bluetooth, output/microphone mute
+Click the network/audio island beside the notification bell in the bar or
+Overview for a native, full-height panel with grouped controls and connection tiles. It combines Ethernet/Wi-Fi, Bluetooth, output/microphone mute
 and volume, brightness, power profiles, configurable battery charge limit, and
 manual/scheduled Night Light. Audio devices and application volumes open in
 pavucontrol; additional network profiles open in nm-connection-editor. Do not
 disturb remains in Notifications. Missing hardware/services are shown explicitly.
+Charge-limit Apply returns to the charging page with a verified result or an
+error; the current system threshold is shown separately from the selected value.
 
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,

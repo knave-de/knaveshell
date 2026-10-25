@@ -222,3 +222,151 @@ fn trimmed_subtitles_keep_status_and_authentication_text() {
         knave_ui::DisplayCommand::Text { text, .. }
             if text.contains("administrator authentication"))));
 }
+
+#[test]
+fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
+    let mut app = app();
+    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    let panel = app.scene.bounds(PANEL).unwrap();
+    assert_eq!(panel.width, 340.0);
+    let target = |predicate: fn(&Target) -> bool| {
+        app.targets
+            .iter()
+            .find(|(_, t)| predicate(t))
+            .map(|(id, _)| app.scene.bounds(*id).unwrap())
+            .unwrap()
+    };
+    let network = target(|t| matches!(t, Target::Page(Page::Network)));
+    let bluetooth = target(|t| {
+        matches!(
+            t,
+            Target::Command(QuickSettingsCommand::SetBluetooth { .. })
+        )
+    });
+    assert_eq!(network.y, bluetooth.y);
+    assert!(network.x + network.width <= bluetooth.x);
+    assert!(app.scene.bounds(ElementId(PROFILE)).unwrap().y < network.y);
+    for rect in [
+        app.scene.bounds(ElementId(OUTPUT)).unwrap(),
+        app.scene.bounds(ElementId(INPUT)).unwrap(),
+        app.scene.bounds(ElementId(BRIGHTNESS)).unwrap(),
+        target(|t| matches!(t, Target::Page(Page::Battery))),
+    ] {
+        assert!(
+            rect.y >= panel.y && rect.y + rect.height <= panel.y + panel.height,
+            "{rect:?} outside {panel:?}"
+        );
+    }
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.fill==Some(Color::rgba(32,36,39,255)))));
+    click(&mut app, POWER);
+    assert!(app.scene.interaction(ElementId(POWER)).unwrap().expanded);
+}
+#[test]
+fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    assert!(
+        matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
+    );
+    for light in [false, true] {
+        app.state.light = light;
+        app.dirty = true;
+        let keys = |list: &DisplayList| {
+            list.commands
+                .iter()
+                .filter_map(|c| match c {
+                    knave_ui::DisplayCommand::Image { image, .. } => {
+                        assert_eq!(image.pixels().len(), 24 * 24 * 4);
+                        Some(image.cache_key())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let first = keys(app.frame([1280.0, 800.0], &mut Metrics));
+        app.dirty = true;
+        let next = keys(app.frame([1280.0, 800.0], &mut Metrics));
+        assert!(!first.is_empty());
+        assert_eq!(first, next);
+    }
+}
+
+#[test]
+fn row_icons_are_vertically_centered() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    let tree = app.compose();
+    fn find(e: &Element, id: ElementId) -> Option<&Element> {
+        if e.id == id {
+            return Some(e);
+        }
+        e.children.iter().find_map(|c| find(c, id))
+    }
+    let network = *app
+        .targets
+        .iter()
+        .find(|(_, t)| matches!(t, Target::Page(Page::Network)))
+        .unwrap()
+        .0;
+    let bluetooth = *app
+        .targets
+        .iter()
+        .find(|(_, t)| {
+            matches!(
+                t,
+                Target::Command(QuickSettingsCommand::SetBluetooth { .. })
+            )
+        })
+        .unwrap()
+        .0;
+    for owner in [ElementId(POWER), network, bluetooth] {
+        let icon = find(&tree, owner)
+            .unwrap()
+            .children
+            .iter()
+            .find(|e| matches!(e.widget, Widget::Image(..)))
+            .unwrap();
+        let child = app.scene.bounds(icon.id).unwrap();
+        let parent = app.scene.bounds(owner).unwrap();
+        assert!(
+            (child.y + child.height / 2.0 - parent.y - parent.height / 2.0).abs() < 0.1,
+            "{owner:?}: {child:?} in {parent:?}"
+        );
+    }
+}
+
+#[test]
+fn charge_limit_completion_requires_verified_result_and_preserves_page() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.charge_feedback = ChargeFeedback::Applying(75);
+    app.authenticating = true;
+    app.finish_charge_limit(Ok(75));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Applied(75)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+    assert_eq!(app.limit, 75);
+    assert!(app.page == Page::Battery);
+    assert!(!app.authenticating);
+    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Confirmed by the system"))));
+    app.charge_feedback = ChargeFeedback::Applying(80);
+    app.authenticating = true;
+    app.finish_charge_limit(Err("Authentication cancelled".into()));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+    assert!(!app.authenticating);
+    assert!(app.surface_visible());
+    app.charge_feedback = ChargeFeedback::Applying(80);
+    app.finish_charge_limit(Ok(90));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+}
+#[test]
+fn charge_limit_without_service_never_claims_applied() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.apply_charge_limit();
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert!(!app.authenticating);
+    assert!(app.surface_visible());
+}

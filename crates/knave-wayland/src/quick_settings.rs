@@ -17,6 +17,7 @@ pub struct QuickSettingsClient {
     commands: mpsc::Sender<QuickSettingsCommand>,
     updates: Arc<Mutex<Option<Result<QuickSettingsSnapshot, String>>>>,
     errors: Arc<Mutex<Option<String>>>,
+    charge_result: Arc<Mutex<Option<Result<u8, String>>>>,
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -35,6 +36,8 @@ impl QuickSettingsClient {
         let output = updates.clone();
         let errors = Arc::new(Mutex::new(None));
         let failures = errors.clone();
+        let charge_result = Arc::new(Mutex::new(None));
+        let completed_charge = charge_result.clone();
         let (stop, mut stopped) = oneshot::channel();
         let thread = thread::spawn(move || {
             let runtime = match tokio::runtime::Builder::new_current_thread()
@@ -75,8 +78,24 @@ impl QuickSettingsClient {
                                 job=jobs.recv()=>{
                                     let Some(command)=job else {return Ok(())};
                                     let charge=matches!(command,QuickSettingsCommand::SetChargeLimit{..}|QuickSettingsCommand::Suspend|QuickSettingsCommand::Reboot|QuickSettingsCommand::PowerOff);
-                                    match proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await {
-                                        Ok(())=>{},Err(e)=>{*failures.lock().unwrap()=Some(e.to_string());waker.wake();}
+                                    let requested = match &command { QuickSettingsCommand::SetChargeLimit { percent } => Some(*percent), _ => None };
+                                    let result = proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await.map_err(|e|match e { zbus::Error::MethodError(_,Some(detail),_) => detail, e => e.to_string() });
+                                    if let Some(percent) = requested {
+                                        let verified = match result {
+                                            Ok(()) => match snapshot(&proxy,summary).await {
+                                                Ok(state) => {
+                                                    let actual = state.battery.as_ref().and_then(|b|b.limit);
+                                                    *output.lock().unwrap() = Some(Ok(state));
+                                                    if actual == Some(percent) { Ok(percent) } else { Err(format!("Charge limit was not confirmed: requested {percent}%, system reports {}",actual.map_or("unavailable".into(),|v|format!("{v}%")))) }
+                                                }
+                                                Err(e) => Err(format!("Could not verify charge limit: {e}")),
+                                            },
+                                            Err(e) => Err(e),
+                                        };
+                                        *completed_charge.lock().unwrap() = Some(verified);
+                                        waker.wake();
+                                    } else if let Err(e) = result {
+                                        *failures.lock().unwrap()=Some(e);waker.wake();
                                     }
                                     if charge{pending.store(false,Ordering::SeqCst);waker.wake();}
                                 }
@@ -99,6 +118,7 @@ impl QuickSettingsClient {
             commands,
             updates,
             errors,
+            charge_result,
             stop: Some(stop),
             thread: Some(thread),
         }
@@ -130,11 +150,16 @@ impl QuickSettingsClient {
     pub fn latest(&self) -> Option<Result<QuickSettingsSnapshot, String>> {
         self.updates.lock().unwrap().take()
     }
+    pub fn take_charge_result(&self) -> Option<Result<u8, String>> {
+        self.charge_result.lock().unwrap().take()
+    }
     pub fn error(&self) -> Option<String> {
         self.errors.lock().unwrap().take()
     }
     pub fn has_update(&self) -> bool {
-        self.updates.lock().unwrap().is_some() || self.errors.lock().unwrap().is_some()
+        self.updates.lock().unwrap().is_some()
+            || self.errors.lock().unwrap().is_some()
+            || self.charge_result.lock().unwrap().is_some()
     }
 }
 impl Drop for QuickSettingsClient {

@@ -57,6 +57,7 @@ pub struct Scene {
     viewport: Rect,
     focus: Option<ElementId>,
     surface_focused: bool,
+    focus_visible: bool,
     hover: Option<ElementId>,
     capture: Option<Capture>,
     key_pressed: Option<ElementId>,
@@ -80,6 +81,7 @@ impl Scene {
             viewport: Rect::default(),
             focus: None,
             surface_focused: true,
+            focus_visible: false,
             hover: None,
             capture: None,
             key_pressed: None,
@@ -260,7 +262,11 @@ impl Scene {
     pub fn replace(&mut self, root: Element) -> Result<(), UiError> {
         let next = Self::new(root)?;
         self.adopt(next);
-        if self.focus.is_some_and(|id| !self.indices.contains_key(&id)) {
+        if self.focus.is_some_and(|id| {
+            self.indices
+                .get(&id)
+                .is_none_or(|i| !self.eligible(*i) || !self.nodes[*i].element.widget.focusable())
+        }) {
             self.focus = None;
         }
         if self.hover.is_some_and(|id| !self.indices.contains_key(&id)) {
@@ -317,6 +323,7 @@ impl Scene {
         }
         next.focus = self.focus;
         next.surface_focused = self.surface_focused;
+        next.focus_visible = self.focus_visible;
         next.hover = self.hover;
         next.capture = self.capture;
         next.key_pressed = self.key_pressed;
