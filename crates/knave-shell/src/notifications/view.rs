@@ -280,8 +280,16 @@ impl Notifications {
             dnd.children.push(toggle);
             panel.children.push(dnd);
             let mut controls = p.panel(12).layout(Layout {
-                flow: Flow::Row,
-                align: Align::Center,
+                flow: if panel_width < 290.0 {
+                    Flow::Column
+                } else {
+                    Flow::Row
+                },
+                align: if panel_width < 290.0 {
+                    Align::Start
+                } else {
+                    Align::Center
+                },
                 gap: 8.0,
                 ..Default::default()
             });
@@ -296,9 +304,11 @@ impl Notifications {
             recent.layout.height = Length::Auto;
             controls.children.push(recent);
             let mut read = p.text_button(READ, "Mark all read");
+            read.layout.width = Length::Px(84.0);
             read.enabled = self.state.history().next().is_some();
             controls.children.push(read);
             let mut clear = p.text_button(CLEAR, "Clear all");
+            clear.layout.width = Length::Px(64.0);
             clear.enabled = self.state.history().next().is_some();
             controls.children.push(clear);
             panel.children.push(controls);
