@@ -295,14 +295,44 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
 fn row_icons_are_vertically_centered() {
     let mut app = app();
     app.frame([1280.0, 800.0], &mut Metrics);
-    let centered = |child: u64, parent: u64| {
-        let child = app.scene.bounds(ElementId(child)).unwrap();
-        let parent = app.scene.bounds(ElementId(parent)).unwrap();
-        assert!((child.y + child.height / 2.0 - parent.y - parent.height / 2.0).abs() < 0.1);
-    };
-    centered(101, POWER);
-    centered(109, 108);
-    centered(114, 113);
+    let tree = app.compose();
+    fn find(e: &Element, id: ElementId) -> Option<&Element> {
+        if e.id == id {
+            return Some(e);
+        }
+        e.children.iter().find_map(|c| find(c, id))
+    }
+    let network = *app
+        .targets
+        .iter()
+        .find(|(_, t)| matches!(t, Target::Page(Page::Network)))
+        .unwrap()
+        .0;
+    let bluetooth = *app
+        .targets
+        .iter()
+        .find(|(_, t)| {
+            matches!(
+                t,
+                Target::Command(QuickSettingsCommand::SetBluetooth { .. })
+            )
+        })
+        .unwrap()
+        .0;
+    for owner in [ElementId(POWER), network, bluetooth] {
+        let icon = find(&tree, owner)
+            .unwrap()
+            .children
+            .iter()
+            .find(|e| matches!(e.widget, Widget::Image(..)))
+            .unwrap();
+        let child = app.scene.bounds(icon.id).unwrap();
+        let parent = app.scene.bounds(owner).unwrap();
+        assert!(
+            (child.y + child.height / 2.0 - parent.y - parent.height / 2.0).abs() < 0.1,
+            "{owner:?}: {child:?} in {parent:?}"
+        );
+    }
 }
 
 #[test]
