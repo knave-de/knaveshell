@@ -79,7 +79,7 @@ impl QuickSettingsClient {
                                     let Some(command)=job else {return Ok(())};
                                     let charge=matches!(command,QuickSettingsCommand::SetChargeLimit{..}|QuickSettingsCommand::Suspend|QuickSettingsCommand::Reboot|QuickSettingsCommand::PowerOff);
                                     let requested = match &command { QuickSettingsCommand::SetChargeLimit { percent } => Some(*percent), _ => None };
-                                    let result = proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await.map_err(|e|e.to_string());
+                                    let result = proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await.map_err(|e|match e { zbus::Error::MethodError(_,Some(detail),_) => detail, e => e.to_string() });
                                     if let Some(percent) = requested {
                                         let verified = match result {
                                             Ok(()) => match snapshot(&proxy,summary).await {
