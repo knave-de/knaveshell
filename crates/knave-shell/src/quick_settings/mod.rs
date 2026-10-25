@@ -60,12 +60,14 @@ pub struct QuickSettings {
     connected: bool,
     closing: bool,
     authenticating: bool,
+    auth_unmap_focus_loss: bool,
     charge_feedback: ChargeFeedback,
     pressed: bool,
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
     focus_on_open: bool,
     limit: u8,
+    limit_edited: bool,
     night: NightLight,
     confirmation: Option<QuickSettingsCommand>,
     next: u64,
@@ -90,12 +92,14 @@ impl QuickSettings {
             connected: false,
             closing: false,
             authenticating: false,
+            auth_unmap_focus_loss: false,
             charge_feedback: ChargeFeedback::Idle,
             pressed: false,
             pending: None,
             outside: false,
             focus_on_open: false,
-            limit: 80,
+            limit: 100,
+            limit_edited: false,
             night: Default::default(),
             confirmation: None,
             next: 100,
@@ -128,13 +132,19 @@ impl QuickSettings {
             self.confirmation = None;
             self.charge_feedback = ChargeFeedback::Idle;
             self.focus_on_open = true;
-            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
+            self.limit_edited = false;
+        }
+        if !self.limit_edited
+            && let Some(battery) = &state.battery
+        {
+            self.limit = battery
+                .configured_limit
+                .or(battery.driver_limit)
+                .unwrap_or(100)
+                .clamp(50, 100);
         }
         if self.page != Page::Night {
             self.night = state.night
-        }
-        if self.page != Page::Battery {
-            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
         }
         self.state = state;
         self.connected = true;
@@ -223,6 +233,14 @@ impl QuickSettings {
         if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
             return;
         }
+        if !self
+            .state
+            .battery
+            .as_ref()
+            .is_some_and(|battery| battery.driver_limit.is_some())
+        {
+            return;
+        }
         self.error = None;
         let result = self
             .client
@@ -250,13 +268,14 @@ impl QuickSettings {
         self.charge_feedback = match result {
             Ok(applied) if applied == requested => {
                 if let Some(battery) = &mut self.state.battery {
-                    battery.limit = Some(applied);
+                    battery.configured_limit = Some(requested);
                 }
-                self.limit = applied;
+                self.limit = requested;
+                self.limit_edited = false;
                 ChargeFeedback::Applied(applied)
             }
             Ok(applied) => ChargeFeedback::Failed(format!(
-                "Requested {requested}%, but system reports {applied}%"
+                "Requested {requested}%, but driver reports {applied}%"
             )),
             Err(e) => ChargeFeedback::Failed(e),
         };
@@ -294,7 +313,8 @@ impl QuickSettings {
                 Some(self.night_command())
             }
             LIMIT => {
-                self.limit = v;
+                self.limit = v.clamp(50, 100);
+                self.limit_edited = true;
                 None
             }
             START => {
@@ -316,6 +336,11 @@ impl QuickSettings {
 impl Application for QuickSettings {
     fn set_waker(&mut self, w: knave_wayland::Waker) {
         self.client = Some(QuickSettingsClient::start(w))
+    }
+    fn surface_unmapped(&mut self) {
+        if self.authenticating {
+            self.auth_unmap_focus_loss = true;
+        }
     }
     fn update(&mut self) {
         if self.authenticating
@@ -409,8 +434,15 @@ impl Application for QuickSettings {
             }
             return;
         }
-        if matches!(event, Input::FocusLost) && self.state.open && !self.authenticating {
-            self.send(QuickSettingsCommand::Close)
+        if matches!(event, Input::FocusGained) {
+            self.auth_unmap_focus_loss = false;
+        }
+        if matches!(event, Input::FocusLost) {
+            if self.auth_unmap_focus_loss {
+                self.auth_unmap_focus_loss = false;
+            } else if self.state.open && !self.authenticating {
+                self.send(QuickSettingsCommand::Close)
+            }
         }
         if let Input::PointerDown(p) = &event {
             self.pressed = true;

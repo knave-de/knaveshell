@@ -1032,6 +1032,9 @@ impl Runtime {
                 self.layer.wl_surface().commit();
                 self.surface_buffer_attached = false;
                 self.frame_pending = false;
+                if let Some(app) = &mut self.app {
+                    app.surface_unmapped();
+                }
             }
             self.scene_dirty = false;
             self.notify_harness_ready();

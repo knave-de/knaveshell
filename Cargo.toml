@@ -25,10 +25,10 @@ knave-ui = { path = "crates/knave-ui" }
 base64 = "0.22"
 png = "0.18"
 wgpu = "30.0.1"
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "f1708b7bc1aaf5695c80106af51cc41149f565cd" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "ece467b47c942bdc0fe7e0dea73088a8c31ca98e" }
 # Consumes the typed wallpaper and notification projections. Bump together
 # with the knave-desktop-api revision.
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "f1708b7bc1aaf5695c80106af51cc41149f565cd" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "ece467b47c942bdc0fe7e0dea73088a8c31ca98e" }
 pollster = "1.0.1"
 thiserror = "2.0.21"
 smithay-client-toolkit = { version = "0.21.1", default-features = false, features = ["calloop", "xkbcommon"] }

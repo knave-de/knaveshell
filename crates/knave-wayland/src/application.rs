@@ -165,6 +165,8 @@ pub trait Application {
     fn surface_visible(&self) -> bool {
         true
     }
+    /// Called after the host detaches a mapped surface's buffer.
+    fn surface_unmapped(&mut self) {}
 }
 
 pub fn run_application(

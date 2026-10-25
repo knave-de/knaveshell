@@ -55,7 +55,7 @@ impl QuickSettingsClient {
                 let mut backoff=Duration::from_millis(250);
                 loop {
                     let run=async {
-                        let connection=zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(120)).build().await?;
+                        let connection=zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(210)).build().await?;
                         let proxy=zbus::Proxy::new(&connection,BUS_NAME,OBJECT_PATH,INTERFACE).await?;
                         let mut changes=proxy.receive_signal("Changed").await?;
                         let mut owners=proxy.receive_owner_changed().await?;
@@ -84,9 +84,10 @@ impl QuickSettingsClient {
                                         let verified = match result {
                                             Ok(()) => match snapshot(&proxy,summary).await {
                                                 Ok(state) => {
-                                                    let actual = state.battery.as_ref().and_then(|b|b.limit);
+                                                    let actual = state.battery.as_ref().and_then(|b|b.driver_limit);
+                                                    let preset_enabled = state.battery.as_ref().and_then(|b|b.charge_limit.as_ref()).is_some_and(|limit| limit.supported && limit.enabled);
                                                     *output.lock().unwrap() = Some(Ok(state));
-                                                    if actual == Some(percent) { Ok(percent) } else { Err(format!("Charge limit was not confirmed: requested {percent}%, system reports {}",actual.map_or("unavailable".into(),|v|format!("{v}%")))) }
+                                                    if preset_enabled { Err("UPower's preset is still active; the custom charge limit was not confirmed".into()) } else if actual == Some(percent) { Ok(percent) } else { Err(format!("Charge limit was not accepted: requested {percent}%, driver reports {}", actual.map_or("unavailable".into(), |value| format!("{value}%")))) }
                                                 }
                                                 Err(e) => Err(format!("Could not verify charge limit: {e}")),
                                             },

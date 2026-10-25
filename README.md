@@ -172,17 +172,21 @@ and volume, brightness, power profiles, configurable battery charge limit, and
 manual/scheduled Night Light. Audio devices and application volumes open in
 pavucontrol; additional network profiles open in nm-connection-editor. Do not
 disturb remains in Notifications. Missing hardware/services are shown explicitly.
-Charge-limit Apply returns to the charging page with a verified result or an
-error; the current system threshold is shown separately from the selected value.
+The charge slider covers 50–100% in one-percent steps. Apply sends the selected
+percentage and returns to the charging page with success or error feedback.
+The saved selection and read-only driver report are shown separately. Driver
+readback can be cached and does not prove physical charging enforcement.
 
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need kernel/firmware support and, when root-owned, pkexec. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
+thresholds need kernel/firmware support and pkexec for root-owned attributes.
+An active UPower preset is disabled before applying a custom percentage so it
+does not replace the selected value. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
 input while the prompt is active. Power lives in the main header and confirms in
 a modal popup; subpages contain no Power footer or Refresh button. Brightness
 supports 1–100%. There is no dependency on hyprsunset. Deploy matching
-Knave and Villain revisions; see Knave ADR 0013.
+Knave, Shell and Villain revisions; see Knave ADR 0013.
 
 ### Authentication
 
