@@ -208,7 +208,7 @@ fn brightness_home_reaches_one_percent_and_authentication_releases_input() {
 }
 
 #[test]
-fn trimmed_subtitles_keep_status_and_authentication_text() {
+fn trimmed_subtitles_keep_status_and_charge_policy_text() {
     let mut app = app();
     app.page = Page::Network;
     let network = app.frame([1280.0, 800.0], &mut Metrics).clone();
@@ -226,7 +226,7 @@ fn trimmed_subtitles_keep_status_and_authentication_text() {
             if text.contains("Stop charging at this level"))));
     assert!(battery.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text { text, .. }
-            if text.contains("administrator authentication"))));
+            if text.contains("UPower controls the preset state"))));
 }
 
 #[test]
@@ -344,6 +344,7 @@ fn row_icons_are_vertically_centered() {
 #[test]
 fn charge_limit_completion_reports_upower_state_and_preserves_page() {
     let mut app = app();
+    app.state.battery.as_mut().unwrap().driver_limit = Some(95);
     app.page = Page::Battery;
     app.charge_feedback = ChargeFeedback::Applying(true);
     app.authenticating = true;
