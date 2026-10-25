@@ -172,6 +172,8 @@ and volume, brightness, power profiles, configurable battery charge limit, and
 manual/scheduled Night Light. Audio devices and application volumes open in
 pavucontrol; additional network profiles open in nm-connection-editor. Do not
 disturb remains in Notifications. Missing hardware/services are shown explicitly.
+Charge-limit Apply returns to the charging page with a verified result or an
+error; the current system threshold is shown separately from the selected value.
 
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,

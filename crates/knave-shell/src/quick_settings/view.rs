@@ -650,7 +650,7 @@ impl QuickSettings {
                 let mut summary = self.row(&p);
                 summary
                     .children
-                    .push(if let Some(b) = self.state.battery.as_ref() {
+                    .push(if let Some(b) = self.state.battery.clone() {
                         self.battery_icon(b.percent, &b.status)
                     } else {
                         self.icon(Icon::Battery)
