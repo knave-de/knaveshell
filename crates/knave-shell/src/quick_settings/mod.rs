@@ -60,6 +60,7 @@ pub struct QuickSettings {
     connected: bool,
     closing: bool,
     authenticating: bool,
+    auth_unmap_focus_loss: bool,
     charge_feedback: ChargeFeedback,
     pressed: bool,
     pending: Option<QuickSettingsSnapshot>,
@@ -91,6 +92,7 @@ impl QuickSettings {
             connected: false,
             closing: false,
             authenticating: false,
+            auth_unmap_focus_loss: false,
             charge_feedback: ChargeFeedback::Idle,
             pressed: false,
             pending: None,
@@ -335,6 +337,11 @@ impl Application for QuickSettings {
     fn set_waker(&mut self, w: knave_wayland::Waker) {
         self.client = Some(QuickSettingsClient::start(w))
     }
+    fn surface_unmapped(&mut self) {
+        if self.authenticating {
+            self.auth_unmap_focus_loss = true;
+        }
+    }
     fn update(&mut self) {
         if self.authenticating
             && self
@@ -427,8 +434,15 @@ impl Application for QuickSettings {
             }
             return;
         }
-        if matches!(event, Input::FocusLost) && self.state.open && !self.authenticating {
-            self.send(QuickSettingsCommand::Close)
+        if matches!(event, Input::FocusGained) {
+            self.auth_unmap_focus_loss = false;
+        }
+        if matches!(event, Input::FocusLost) {
+            if self.auth_unmap_focus_loss {
+                self.auth_unmap_focus_loss = false;
+            } else if self.state.open && !self.authenticating {
+                self.send(QuickSettingsCommand::Close)
+            }
         }
         if let Input::PointerDown(p) = &event {
             self.pressed = true;

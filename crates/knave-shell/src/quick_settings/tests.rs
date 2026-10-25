@@ -209,6 +209,72 @@ fn brightness_home_reaches_one_percent_and_authentication_releases_input() {
 }
 
 #[test]
+fn authentication_unmap_suppresses_late_focus_loss_then_restores_normal_close() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.authenticating = true;
+    app.charge_feedback = ChargeFeedback::Applying(95);
+    app.surface_unmapped();
+
+    app.finish_charge_limit(Ok(95));
+    assert!(!app.authenticating);
+    app.input(Input::FocusLost);
+    assert!(app.state.open);
+    assert!(!app.auth_unmap_focus_loss);
+
+    app.input(Input::FocusGained);
+    app.input(Input::FocusLost);
+    assert!(!app.state.open);
+}
+
+#[test]
+fn fast_auth_result_without_unmap_does_not_suppress_real_focus_loss() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.authenticating = true;
+    app.charge_feedback = ChargeFeedback::Applying(95);
+
+    app.finish_charge_limit(Ok(95));
+    assert!(!app.auth_unmap_focus_loss);
+    app.input(Input::FocusLost);
+    assert!(!app.state.open);
+}
+
+#[test]
+fn focus_loss_during_auth_consumes_unmap_guard_without_closing() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.authenticating = true;
+    app.surface_unmapped();
+
+    app.input(Input::FocusLost);
+    assert!(app.state.open);
+    assert!(!app.auth_unmap_focus_loss);
+
+    app.authenticating = false;
+    app.input(Input::FocusGained);
+    app.input(Input::FocusLost);
+    assert!(!app.state.open);
+}
+
+#[test]
+fn focus_gained_clears_unconsumed_auth_unmap_guard() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    app.authenticating = true;
+    app.surface_unmapped();
+    app.authenticating = false;
+
+    app.input(Input::FocusGained);
+    assert!(!app.auth_unmap_focus_loss);
+    app.input(Input::FocusLost);
+    assert!(!app.state.open);
+}
+
+#[test]
 fn trimmed_subtitles_keep_status_and_charge_policy_text() {
     let mut app = app();
     app.page = Page::Network;
