@@ -804,3 +804,24 @@ fn tooltip_uses_readable_text_and_stays_inside_the_viewport() {
     assert!(tooltip.1.x + tooltip.1.width <= 400.0);
     assert!(tooltip.1.y + tooltip.1.height <= 400.0);
 }
+
+#[test]
+fn focus_outline_is_for_keyboard_and_disappears_when_control_is_disabled() {
+    let mut s = scene(vec![leaf(1, Widget::Button("Clear all".into()))]);
+    let outlined = |s: &mut Scene| {
+        s.display_list([400.0, 400.0], &mut Metrics).commands.iter().any(|c| matches!(c,
+            knave_ui::DisplayCommand::Shape { paint, .. }
+                if paint.border.is_some_and(|b| b.color == knave_ui::Color::ACCENT && b.width == 1.0)))
+    };
+    click(&mut s, [20.0, 20.0]);
+    assert!(s.interaction(ElementId(1)).unwrap().focused);
+    assert!(!outlined(&mut s));
+    key(&mut s, Key::Tab, false);
+    assert!(outlined(&mut s));
+    let mut disabled = leaf(1, Widget::Button("Clear all".into()));
+    disabled.enabled = false;
+    s.replace(Element::new(0, Widget::Panel).children(vec![disabled]))
+        .unwrap();
+    assert_eq!(s.focus(), None);
+    assert!(!outlined(&mut s));
+}

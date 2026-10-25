@@ -1,6 +1,6 @@
 use super::*;
 use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap, UiImage};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 struct Palette {
     surface: Color,
     card: Color,
@@ -80,6 +80,7 @@ impl Palette {
         e.layout.height = Length::Px(30.0);
         e.layout.padding = 0.0;
         e.layout.padding_edges = Some(Insets::all(0.0));
+        e.layout.align = Align::Center;
         e.style.text.align = TextAlign::Center;
         e
     }
@@ -107,7 +108,7 @@ fn profile_name(profile: &str) -> &str {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 enum Icon {
     Power,
     Close,
@@ -119,7 +120,7 @@ enum Icon {
     Battery,
 }
 
-fn raster_icon(icon: Icon, color: Color) -> UiImage {
+fn raster_icon(icon: Icon, color: Color, battery_percent: Option<u8>, charging: bool) -> UiImage {
     const SIZE: usize = 24;
     let mut pixels = vec![0; SIZE * SIZE * 4];
     let mut segments: Vec<([f32; 2], [f32; 2])> = Vec::new();
@@ -131,7 +132,7 @@ fn raster_icon(icon: Icon, color: Color) -> UiImage {
             let arc: Vec<_> = (0..=28)
                 .map(|i| {
                     let a = (-45.0 + (270.0 * i as f32 / 28.0)).to_radians();
-                    [12.0 + 8.0 * a.cos(), 12.0 + 8.0 * a.sin()]
+                    [12.0 + 8.5 * a.cos(), 12.0 + 8.5 * a.sin()]
                 })
                 .collect();
             add_path(&arc);
@@ -237,26 +238,73 @@ fn raster_icon(icon: Icon, color: Color) -> UiImage {
                 [4.0, 17.0],
                 [4.0, 7.0],
             ]);
-            segments.push(([7.0, 10.0], [7.0, 14.0]));
-            segments.push(([10.0, 10.0], [10.0, 14.0]));
         }
     }
-    for x in 0..SIZE {
-        for y in 0..SIZE {
-            let point = [x as f32 + 0.5, y as f32 + 0.5];
-            let covered = segments.iter().any(|(a, b)| distance(point, *a, *b) <= 0.8);
-            if covered {
+    const SAMPLES: usize = 4;
+    let bolt = [
+        [13.0, 8.5],
+        [10.5, 12.0],
+        [12.5, 12.0],
+        [11.0, 15.5],
+        [15.0, 11.0],
+        [13.0, 11.0],
+        [14.0, 8.5],
+    ];
+    let bolt_segments: Vec<_> = if icon == Icon::Battery && charging {
+        bolt.windows(2).map(|w| (w[0], w[1])).collect()
+    } else {
+        Vec::new()
+    };
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            let mut coverage = 0u16;
+            let mut fill = 0u16;
+            for sy in 0..SAMPLES {
+                for sx in 0..SAMPLES {
+                    let point = [
+                        x as f32 + (sx as f32 + 0.5) / SAMPLES as f32,
+                        y as f32 + (sy as f32 + 0.5) / SAMPLES as f32,
+                    ];
+                    let in_battery_fill = icon == Icon::Battery
+                        && battery_percent.is_some_and(|percent| {
+                            point[0] >= 5.5
+                                && point[0] <= 5.5 + battery_fill_width(percent)
+                                && point[1] >= 8.5
+                                && point[1] <= 15.5
+                        });
+                    let bolt_pixel = bolt_segments
+                        .iter()
+                        .any(|(a, b)| distance(point, *a, *b) <= 0.8);
+                    fill += u16::from(in_battery_fill && !bolt_pixel);
+                    coverage += u16::from(
+                        segments.iter().any(|(a, b)| distance(point, *a, *b) <= 0.8)
+                            || (bolt_pixel && !in_battery_fill),
+                    );
+                }
+            }
+            let coverage = coverage as f32 / (SAMPLES * SAMPLES) as f32;
+            let fill = fill as f32 / (SAMPLES * SAMPLES) as f32;
+            let alpha = (coverage + fill).min(1.0);
+            if alpha > 0.0 {
                 let i = (y * SIZE + x) * 4;
                 pixels[i..i + 4].copy_from_slice(&[
                     color.red,
                     color.green,
                     color.blue,
-                    color.alpha,
+                    (color.alpha as f32 * alpha).round() as u8,
                 ]);
             }
         }
     }
     UiImage::from_rgba(SIZE as u32, SIZE as u32, pixels).expect("icon dimensions are valid")
+}
+
+fn battery_fill_width(percent: u8) -> f32 {
+    11.0 * f32::from(percent.min(100)) / 100.0
+}
+
+fn is_charging(status: &str) -> bool {
+    status.eq_ignore_ascii_case("charging")
 }
 
 fn icon_image(icon: Icon, light: bool) -> UiImage {
@@ -279,8 +327,30 @@ fn icon_image(icon: Icon, light: bool) -> UiImage {
             Icon::Brightness,
             Icon::Battery,
         ]
-        .map(|i| raster_icon(i, color))
+        .map(|i| raster_icon(i, color, None, false))
     })[icon as usize]
+        .clone()
+}
+
+type BatteryIconCache = Mutex<std::collections::HashMap<(u8, bool, bool), UiImage>>;
+
+fn battery_image(percent: u8, status: &str, light: bool) -> UiImage {
+    // At most 101 levels × two charging states × two palettes.
+    static CACHE: OnceLock<BatteryIconCache> = OnceLock::new();
+    let key = (percent.min(100), is_charging(status), light);
+    CACHE
+        .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .entry(key)
+        .or_insert_with(|| {
+            let color = if light {
+                Color::rgba(65, 80, 100, 255)
+            } else {
+                Color::rgba(185, 192, 198, 255)
+            };
+            raster_icon(Icon::Battery, color, Some(key.0), key.1)
+        })
         .clone()
 }
 
@@ -349,12 +419,27 @@ impl QuickSettings {
     fn row(&mut self, p: &Palette) -> Element {
         let mut e = self.stack(p);
         e.layout.flow = Flow::Row;
+        e.layout.align = Align::Center;
         e
     }
     fn icon(&mut self, icon: Icon) -> Element {
         Element::new(
             self.id(),
             Widget::Image(icon_image(icon, self.state.light), Default::default()),
+        )
+        .layout(Layout {
+            width: Length::Px(18.0),
+            height: Length::Px(18.0),
+            ..Default::default()
+        })
+    }
+    fn battery_icon(&mut self, percent: u8, status: &str) -> Element {
+        Element::new(
+            self.id(),
+            Widget::Image(
+                battery_image(percent, status, self.state.light),
+                Default::default(),
+            ),
         )
         .layout(Layout {
             width: Length::Px(18.0),
@@ -399,6 +484,7 @@ impl QuickSettings {
         let mut b = self.button(p, "", target, enabled);
         b.tooltip = Some(format!("{title}: {subtitle}"));
         b.layout.flow = Flow::Row;
+        b.layout.align = Align::Center;
         b.layout.gap = 8.0;
         b.layout.height = Length::Px(64.0);
         b.children.push(self.icon(icon));
@@ -464,8 +550,8 @@ impl QuickSettings {
         );
         heading.children.push(mute);
         let mut name = self.label(p, title, false);
-        name.layout.height = Length::Px(30.0);
-        name.layout.padding_edges = Some(Insets::symmetric(7.0, 0.0));
+        name.layout.height = Length::Auto;
+        name.layout.padding_edges = Some(Insets::all(0.0));
         heading.children.push(name);
         let mut value = self.label(
             p,
@@ -475,8 +561,8 @@ impl QuickSettings {
             true,
         );
         value.layout.width = Length::Px(90.0);
-        value.layout.height = Length::Px(30.0);
-        value.layout.padding_edges = Some(Insets::symmetric(8.0, 0.0));
+        value.layout.height = Length::Auto;
+        value.layout.padding_edges = Some(Insets::all(0.0));
         value.style.text.align = TextAlign::End;
         heading.children.push(value);
         group.children.push(heading);
@@ -530,15 +616,15 @@ impl QuickSettings {
             Page::Battery => "Battery charging",
         };
         let mut title = self.label(&p, title, false);
-        title.layout.height = Length::Px(30.0);
-        title.layout.padding_edges = Some(Insets::symmetric(6.0, 0.0));
+        title.layout.height = Length::Auto;
+        title.layout.padding_edges = Some(Insets::all(0.0));
         title.style.text.font_size = 17.0;
         title.style.text.line_height = 22.0;
         header.children.push(title);
         if self.page == Page::Main {
             let mut power = p.header_button(POWER, "", 30.0);
             power.widget = Widget::Menu {
-                label: "⏻".into(),
+                label: String::new(),
                 items: vec![
                     MenuItem::option(1, "Suspend"),
                     MenuItem::option(2, "Restart…"),
@@ -562,7 +648,13 @@ impl QuickSettings {
         match self.page {
             Page::Main => {
                 let mut summary = self.row(&p);
-                summary.children.push(self.icon(Icon::Battery));
+                summary
+                    .children
+                    .push(if let Some(b) = self.state.battery.as_ref() {
+                        self.battery_icon(b.percent, &b.status)
+                    } else {
+                        self.icon(Icon::Battery)
+                    });
                 let mut battery = self.stack(&p);
                 battery.layout.gap = 2.0;
                 if let Some(b) = self.state.battery.clone() {
@@ -822,8 +914,16 @@ impl QuickSettings {
                     ));
                     content.children.push(self.label(
                         &p,
-                        format!("Charge limit · {}%", self.limit),
+                        format!("Selected limit · {}%", self.limit),
                         false,
+                    ));
+                    content.children.push(self.label(
+                        &p,
+                        format!(
+                            "Current system limit · {}",
+                            b.limit.map_or("Unsupported".into(), |v| format!("{v}%"))
+                        ),
+                        true,
                     ));
                     content.children.push(p.slider(
                         LIMIT,
@@ -831,19 +931,40 @@ impl QuickSettings {
                         100.0,
                         f64::from(self.limit),
                         5.0,
-                        b.limit.is_some(),
+                        b.limit.is_some()
+                            && !matches!(self.charge_feedback, ChargeFeedback::Applying(_)),
                     ));
                     content.children.push(self.label(
                         &p,
-                        "Applying a limit may request administrator authentication.",
+                        "Applying a limit may request administrator authentication. Changing it does not immediately lower the battery charge.",
                         true,
                     ));
                     content.children.push(self.button(
                         &p,
-                        format!("Apply {}% limit", self.limit),
+                        if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
+                            "Applying…".into()
+                        } else {
+                            format!("Apply {}% limit", self.limit)
+                        },
                         Target::ApplyLimit,
-                        b.limit.is_some(),
+                        b.limit.is_some()
+                            && !matches!(self.charge_feedback, ChargeFeedback::Applying(_)),
                     ));
+                    let feedback = match &self.charge_feedback {
+                        ChargeFeedback::Idle => None,
+                        ChargeFeedback::Applying(percent) => Some(format!(
+                            "Applying {percent}% limit… Complete authentication if requested."
+                        )),
+                        ChargeFeedback::Applied(percent) => Some(format!(
+                            "Charge limit set to {percent}% · Confirmed by the system"
+                        )),
+                        ChargeFeedback::Failed(error) => {
+                            Some(format!("Could not complete charge-limit change: {error}"))
+                        }
+                    };
+                    if let Some(feedback) = feedback {
+                        content.children.push(self.label(&p, feedback, false));
+                    }
                     if b.limit.is_none() {
                         content.children.push(self.label(
                             &p,
@@ -917,5 +1038,32 @@ impl QuickSettings {
         }
         root.children.push(dialog);
         root
+    }
+}
+
+#[cfg(test)]
+mod icon_tests {
+    use super::*;
+    #[test]
+    fn battery_fill_and_cache_follow_real_charge_state() {
+        assert_eq!(battery_fill_width(0), 0.0);
+        assert_eq!(battery_fill_width(100), 11.0);
+        assert_eq!(battery_fill_width(255), 11.0);
+        let empty = battery_image(0, "Not charging", false);
+        let full = battery_image(100, "Not charging", false);
+        let charging = battery_image(100, "Charging", false);
+        let filled_columns = |image: &UiImage| {
+            (6..17)
+                .filter(|x| image.pixels()[(12 * 24 + x) * 4 + 3] > 0)
+                .count()
+        };
+        assert_eq!(
+            empty.cache_key(),
+            battery_image(0, "Not charging", false).cache_key()
+        );
+        assert_eq!(filled_columns(&empty), 0);
+        assert_eq!(filled_columns(&full), 11);
+        assert_ne!(empty.pixels(), full.pixels());
+        assert_ne!(full.pixels(), charging.pixels());
     }
 }

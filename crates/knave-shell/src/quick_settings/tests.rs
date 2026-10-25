@@ -290,3 +290,53 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
         assert_eq!(first, next);
     }
 }
+
+#[test]
+fn row_icons_are_vertically_centered() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    let centered = |child: u64, parent: u64| {
+        let child = app.scene.bounds(ElementId(child)).unwrap();
+        let parent = app.scene.bounds(ElementId(parent)).unwrap();
+        assert!((child.y + child.height / 2.0 - parent.y - parent.height / 2.0).abs() < 0.1);
+    };
+    centered(101, POWER);
+    centered(109, 108);
+    centered(114, 113);
+}
+
+#[test]
+fn charge_limit_completion_requires_verified_result_and_preserves_page() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.charge_feedback = ChargeFeedback::Applying(75);
+    app.authenticating = true;
+    app.finish_charge_limit(Ok(75));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Applied(75)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+    assert_eq!(app.limit, 75);
+    assert!(app.page == Page::Battery);
+    assert!(!app.authenticating);
+    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Confirmed by the system"))));
+    app.charge_feedback = ChargeFeedback::Applying(80);
+    app.authenticating = true;
+    app.finish_charge_limit(Err("Authentication cancelled".into()));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+    assert!(!app.authenticating);
+    assert!(app.surface_visible());
+    app.charge_feedback = ChargeFeedback::Applying(80);
+    app.finish_charge_limit(Ok(90));
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+}
+#[test]
+fn charge_limit_without_service_never_claims_applied() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.apply_charge_limit();
+    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
+    assert!(!app.authenticating);
+    assert!(app.surface_visible());
+}

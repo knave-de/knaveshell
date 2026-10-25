@@ -108,6 +108,17 @@ impl Scene {
         Ok(())
     }
     pub fn event(&mut self, input: Input) -> EventResult {
+        let focus_visible = match &input {
+            Input::Key { pressed: true, .. } => Some(true),
+            Input::PointerDown(_) => Some(false),
+            _ => None,
+        };
+        if let Some(visible) = focus_visible
+            && self.focus_visible != visible
+        {
+            self.focus_visible = visible;
+            self.paint_dirty = true;
+        }
         let action = match input {
             Input::PointerMove(p) => self.motion(p),
             Input::PointerDown(p) => self.press(p),

@@ -105,10 +105,10 @@ impl Scene {
             if state.disabled {
                 paint.opacity *= 0.5;
             }
-            if state.focused {
+            if state.focused && self.focus_visible && !state.disabled {
                 paint.border = Some(Border {
                     color: style.focus,
-                    width: 2.0,
+                    width: 1.0,
                 });
             }
             shape(&mut self.list, b, clip, paint.clone());

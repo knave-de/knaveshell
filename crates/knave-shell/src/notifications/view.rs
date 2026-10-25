@@ -146,6 +146,8 @@ impl Palette {
     }
     fn text_button(&self, id: u64, value: &str) -> Element {
         let mut e = Element::new(id, Widget::Button(value.into())).layout(Layout {
+            width: Length::Auto,
+            height: Length::Px(26.0),
             padding: 4.0,
             ..Default::default()
         });
@@ -207,12 +209,13 @@ impl Notifications {
             });
             let mut heading = p.panel(10).layout(Layout {
                 flow: Flow::Row,
+                align: Align::Center,
                 height: Length::Auto,
                 gap: 8.0,
                 ..Default::default()
             });
             let mut title = p.text(11, "Notifications".into(), false);
-            title.layout.height = Length::Fill;
+            title.layout.height = Length::Auto;
             title.style.text.weight = 600;
             title.style.text.font_size = 17.0;
             title.style.text.line_height = 22.0;
@@ -223,6 +226,7 @@ impl Notifications {
             panel.children.push(heading);
             let mut dnd = p.panel(20).layout(Layout {
                 flow: Flow::Row,
+                align: Align::Center,
                 gap: 10.0,
                 padding: 12.0,
                 ..Default::default()
@@ -236,7 +240,7 @@ impl Notifications {
                 ..ShapePaint::fill(p.card)
             });
             let mut dnd_copy = p.panel(21).layout(Layout {
-                height: Length::Fill,
+                height: Length::Auto,
                 ..Default::default()
             });
             let mut dnd_title = p.text(22, "Do not disturb".into(), false);
@@ -277,7 +281,8 @@ impl Notifications {
             panel.children.push(dnd);
             let mut controls = p.panel(12).layout(Layout {
                 flow: Flow::Row,
-                gap: 4.0,
+                align: Align::Center,
+                gap: 8.0,
                 ..Default::default()
             });
             let mut recent = p.text(
@@ -288,7 +293,7 @@ impl Notifications {
             recent.style.text.font_size = 10.0;
             recent.style.text.line_height = 13.0;
             recent.style.text.weight = 600;
-            recent.layout.height = Length::Fill;
+            recent.layout.height = Length::Auto;
             controls.children.push(recent);
             let mut read = p.text_button(READ, "Mark all read");
             read.enabled = self.state.history().next().is_some();
