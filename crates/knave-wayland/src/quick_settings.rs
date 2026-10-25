@@ -17,7 +17,7 @@ pub struct QuickSettingsClient {
     commands: mpsc::Sender<QuickSettingsCommand>,
     updates: Arc<Mutex<Option<Result<QuickSettingsSnapshot, String>>>>,
     errors: Arc<Mutex<Option<String>>>,
-    charge_result: Arc<Mutex<Option<Result<ChargeLimit, String>>>>,
+    charge_result: Arc<Mutex<Option<Result<u8, String>>>>,
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -55,7 +55,7 @@ impl QuickSettingsClient {
                 let mut backoff=Duration::from_millis(250);
                 loop {
                     let run=async {
-                        let connection=zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(120)).build().await?;
+                        let connection=zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(210)).build().await?;
                         let proxy=zbus::Proxy::new(&connection,BUS_NAME,OBJECT_PATH,INTERFACE).await?;
                         let mut changes=proxy.receive_signal("Changed").await?;
                         let mut owners=proxy.receive_owner_changed().await?;
@@ -78,15 +78,16 @@ impl QuickSettingsClient {
                                 job=jobs.recv()=>{
                                     let Some(command)=job else {return Ok(())};
                                     let charge=matches!(command,QuickSettingsCommand::SetChargeLimit{..}|QuickSettingsCommand::Suspend|QuickSettingsCommand::Reboot|QuickSettingsCommand::PowerOff);
-                                    let requested = match &command { QuickSettingsCommand::SetChargeLimit { enabled } => Some(*enabled), _ => None };
+                                    let requested = match &command { QuickSettingsCommand::SetChargeLimit { percent } => Some(*percent), _ => None };
                                     let result = proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await.map_err(|e|match e { zbus::Error::MethodError(_,Some(detail),_) => detail, e => e.to_string() });
-                                    if let Some(enabled) = requested {
+                                    if let Some(percent) = requested {
                                         let verified = match result {
                                             Ok(()) => match snapshot(&proxy,summary).await {
                                                 Ok(state) => {
-                                                    let actual = state.battery.as_ref().and_then(|b|b.charge_limit.clone());
+                                                    let actual = state.battery.as_ref().and_then(|b|b.driver_limit);
+                                                    let preset_enabled = state.battery.as_ref().and_then(|b|b.charge_limit.as_ref()).is_some_and(|limit| limit.supported && limit.enabled);
                                                     *output.lock().unwrap() = Some(Ok(state));
-                                                    match actual { Some(limit) if limit.supported && limit.enabled == enabled => Ok(limit), _ => Err("UPower charge-limit state was unavailable or did not match the request".into()) }
+                                                    if preset_enabled { Err("UPower's preset is still active; the custom charge limit was not confirmed".into()) } else if actual == Some(percent) { Ok(percent) } else { Err(format!("Charge limit was not accepted: requested {percent}%, driver reports {}", actual.map_or("unavailable".into(), |value| format!("{value}%")))) }
                                                 }
                                                 Err(e) => Err(format!("Could not verify charge limit: {e}")),
                                             },
@@ -150,7 +151,7 @@ impl QuickSettingsClient {
     pub fn latest(&self) -> Option<Result<QuickSettingsSnapshot, String>> {
         self.updates.lock().unwrap().take()
     }
-    pub fn take_charge_result(&self) -> Option<Result<ChargeLimit, String>> {
+    pub fn take_charge_result(&self) -> Option<Result<u8, String>> {
         self.charge_result.lock().unwrap().take()
     }
     pub fn error(&self) -> Option<String> {

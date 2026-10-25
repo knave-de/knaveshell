@@ -168,19 +168,21 @@ XEmbed tray icons are not supported.
 
 Click the network/audio island beside the notification bell in the bar or
 Overview for a native, full-height panel with grouped controls and connection tiles. It combines Ethernet/Wi-Fi, Bluetooth, output/microphone mute
-and volume, brightness, power profiles, UPower battery charge-limit preset, and
+and volume, brightness, power profiles, configurable battery charge limit, and
 manual/scheduled Night Light. Audio devices and application volumes open in
 pavucontrol; additional network profiles open in nm-connection-editor. Do not
 disturb remains in Notifications. Missing hardware/services are shown explicitly.
-Charge-limit actions return to the charging page with UPower’s response or an
-error. The supported preset and read-only driver report are shown separately;
-neither is a measurement of the physical charging cutoff.
+The charge slider covers 50–100% in one-percent steps. Apply sends the selected
+percentage and returns to the charging page with success or error feedback.
+The saved selection and read-only driver report are shown separately. Driver
+readback can be cached and does not prove physical charging enforcement.
 
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need UPower and kernel/firmware support. UPower owns the supported
-preset, enable/disable state and persistence; an enabled preset can be reapplied. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
+thresholds need kernel/firmware support and pkexec for root-owned attributes.
+An active UPower preset is disabled before applying a custom percentage so it
+does not replace the selected value. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
 input while the prompt is active. Power lives in the main header and confirms in
 a modal popup; subpages contain no Power footer or Refresh button. Brightness
 supports 1–100%. There is no dependency on hyprsunset. Deploy matching

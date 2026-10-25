@@ -15,6 +15,7 @@ const OUTPUT: u64 = 4;
 const INPUT: u64 = 5;
 const BRIGHTNESS: u64 = 6;
 const TEMPERATURE: u64 = 7;
+const LIMIT: u64 = 8;
 const START: u64 = 9;
 const END: u64 = 10;
 const POWER: u64 = 11;
@@ -36,14 +37,14 @@ enum Target {
     Command(QuickSettingsCommand),
     NightToggle,
     Schedule,
-    ApplyLimit(bool),
+    ApplyLimit,
 }
 #[derive(Default)]
 enum ChargeFeedback {
     #[default]
     Idle,
-    Applying(bool),
-    Applied(ChargeLimit),
+    Applying(u8),
+    Applied(u8),
     Failed(String),
 }
 pub struct QuickSettings {
@@ -64,6 +65,8 @@ pub struct QuickSettings {
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
     focus_on_open: bool,
+    limit: u8,
+    limit_edited: bool,
     night: NightLight,
     confirmation: Option<QuickSettingsCommand>,
     next: u64,
@@ -93,6 +96,8 @@ impl QuickSettings {
             pending: None,
             outside: false,
             focus_on_open: false,
+            limit: 100,
+            limit_edited: false,
             night: Default::default(),
             confirmation: None,
             next: 100,
@@ -125,6 +130,16 @@ impl QuickSettings {
             self.confirmation = None;
             self.charge_feedback = ChargeFeedback::Idle;
             self.focus_on_open = true;
+            self.limit_edited = false;
+        }
+        if !self.limit_edited
+            && let Some(battery) = &state.battery
+        {
+            self.limit = battery
+                .configured_limit
+                .or(battery.driver_limit)
+                .unwrap_or(100)
+                .clamp(50, 100);
         }
         if self.page != Page::Night {
             self.night = state.night
@@ -208,12 +223,20 @@ impl QuickSettings {
                 self.send(self.night_command());
                 self.dirty = true
             }
-            Some(Target::ApplyLimit(enabled)) => self.apply_charge_limit(enabled),
+            Some(Target::ApplyLimit) => self.apply_charge_limit(),
             None => {}
         }
     }
-    fn apply_charge_limit(&mut self, enabled: bool) {
+    fn apply_charge_limit(&mut self) {
         if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
+            return;
+        }
+        if !self
+            .state
+            .battery
+            .as_ref()
+            .is_some_and(|battery| battery.driver_limit.is_some())
+        {
             return;
         }
         self.error = None;
@@ -221,9 +244,13 @@ impl QuickSettings {
             .client
             .as_ref()
             .ok_or_else(|| "Quick Settings service is unavailable".to_owned())
-            .and_then(|c| c.command(QuickSettingsCommand::SetChargeLimit { enabled }));
+            .and_then(|c| {
+                c.command(QuickSettingsCommand::SetChargeLimit {
+                    percent: self.limit,
+                })
+            });
         self.charge_feedback = match result {
-            Ok(()) => ChargeFeedback::Applying(enabled),
+            Ok(()) => ChargeFeedback::Applying(self.limit),
             Err(e) => ChargeFeedback::Failed(e),
         };
         self.authenticating = self
@@ -232,17 +259,22 @@ impl QuickSettings {
             .is_some_and(QuickSettingsClient::authentication_pending);
         self.dirty = true;
     }
-    fn finish_charge_limit(&mut self, result: Result<ChargeLimit, String>) {
-        let ChargeFeedback::Applying(_) = self.charge_feedback else {
+    fn finish_charge_limit(&mut self, result: Result<u8, String>) {
+        let ChargeFeedback::Applying(requested) = self.charge_feedback else {
             return;
         };
         self.charge_feedback = match result {
-            Ok(applied) => {
+            Ok(applied) if applied == requested => {
                 if let Some(battery) = &mut self.state.battery {
-                    battery.charge_limit = Some(applied.clone());
+                    battery.configured_limit = Some(requested);
                 }
+                self.limit = requested;
+                self.limit_edited = false;
                 ChargeFeedback::Applied(applied)
             }
+            Ok(applied) => ChargeFeedback::Failed(format!(
+                "Requested {requested}%, but driver reports {applied}%"
+            )),
             Err(e) => ChargeFeedback::Failed(e),
         };
         self.authenticating = false;
@@ -277,6 +309,11 @@ impl QuickSettings {
             TEMPERATURE => {
                 self.night.temperature = value.round() as u16;
                 Some(self.night_command())
+            }
+            LIMIT => {
+                self.limit = v.clamp(50, 100);
+                self.limit_edited = true;
+                None
             }
             START => {
                 self.night.start = Some(value.round() as u16);
