@@ -799,12 +799,15 @@ impl QuickSettings {
                 display.children.push(night);
                 content.children.push(display);
                 if let Some(b) = self.state.battery.clone() {
+                    let summary = match b.charge_limit.as_ref() {
+                        None => "Unavailable".to_owned(),
+                        Some(limit) if !limit.supported => "Unsupported".to_owned(),
+                        Some(limit) if limit.enabled => "On".to_owned(),
+                        Some(_) => "Off".to_owned(),
+                    };
                     content.children.push(self.button(
                         &p,
-                        format!(
-                            "Charge limit · {}    ›",
-                            b.limit.map_or("Unsupported".into(), |v| format!("{v}%"))
-                        ),
+                        format!("Charge limit · {summary}    ›"),
                         Target::Page(Page::Battery),
                         true,
                     ));
@@ -912,65 +915,101 @@ impl QuickSettings {
                         format!("Battery · {}% · {}", b.percent, b.status),
                         false,
                     ));
-                    content.children.push(self.label(
-                        &p,
-                        format!("Selected limit · {}%", self.limit),
-                        false,
-                    ));
-                    content.children.push(self.label(
-                        &p,
-                        format!(
-                            "Current system limit · {}",
-                            b.limit.map_or("Unsupported".into(), |v| format!("{v}%"))
-                        ),
-                        true,
-                    ));
-                    content.children.push(p.slider(
-                        LIMIT,
-                        50.0,
-                        100.0,
-                        f64::from(self.limit),
-                        5.0,
-                        b.limit.is_some()
-                            && !matches!(self.charge_feedback, ChargeFeedback::Applying(_)),
-                    ));
-                    content.children.push(self.label(
-                        &p,
-                        "Applying a limit may request administrator authentication. Changing it does not immediately lower the battery charge.",
-                        true,
-                    ));
-                    content.children.push(self.button(
-                        &p,
-                        if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
-                            "Applying…".into()
-                        } else {
-                            format!("Apply {}% limit", self.limit)
-                        },
-                        Target::ApplyLimit,
-                        b.limit.is_some()
-                            && !matches!(self.charge_feedback, ChargeFeedback::Applying(_)),
-                    ));
+                    match b.charge_limit.as_ref() {
+                        None => content.children.push(self.label(
+                            &p,
+                            "UPower charge-limit state is unavailable.",
+                            true,
+                        )),
+                        Some(limit) if !limit.supported => content.children.push(self.label(
+                            &p,
+                            "This battery does not support UPower charge-limit control.",
+                            true,
+                        )),
+                        Some(limit) => {
+                            let preset = match (limit.start_threshold, limit.end_threshold) {
+                                (Some(start), Some(end)) => {
+                                    format!("Start at {start}%, stop at {end}%")
+                                }
+                                (None, Some(end)) => format!("Stop at {end}%"),
+                                (Some(start), None) => format!("Start at {start}%"),
+                                (None, None) => "Threshold not reported".into(),
+                            };
+                            content.children.push(self.label(
+                                &p,
+                                format!("UPower preset · {preset}"),
+                                false,
+                            ));
+                            let applying =
+                                matches!(self.charge_feedback, ChargeFeedback::Applying(_));
+                            content.children.push(self.button(
+                                &p,
+                                if applying {
+                                    "Applying…".into()
+                                } else if limit.enabled {
+                                    "Reapply charge-limit preset".into()
+                                } else {
+                                    "Enable charge-limit preset".into()
+                                },
+                                Target::ApplyLimit(true),
+                                !applying,
+                            ));
+                            if limit.enabled {
+                                content.children.push(self.button(
+                                    &p,
+                                    "Turn charge limit off",
+                                    Target::ApplyLimit(false),
+                                    !applying,
+                                ));
+                            }
+                            content.children.push(self.label(
+                                &p,
+                                "UPower controls the preset state; this does not confirm physical charging behavior.",
+                                true,
+                            ));
+                        }
+                    }
+                    if let Some(driver_limit) = b.driver_limit {
+                        content.children.push(self.label(
+                            &p,
+                            format!("Driver-reported threshold · {driver_limit}%"),
+                            true,
+                        ));
+                        let expected_driver = b.charge_limit.as_ref().and_then(|limit| {
+                            if limit.supported {
+                                if limit.enabled {
+                                    limit.end_threshold
+                                } else {
+                                    Some(100)
+                                }
+                            } else {
+                                None
+                            }
+                        });
+                        if let Some(expected) = expected_driver.filter(|v| *v != driver_limit) {
+                            content.children.push(self.label(
+                                &p,
+                                format!("Driver report differs from UPower state ({expected}% expected)."),
+                                true,
+                            ));
+                        }
+                    }
                     let feedback = match &self.charge_feedback {
                         ChargeFeedback::Idle => None,
-                        ChargeFeedback::Applying(percent) => Some(format!(
-                            "Applying {percent}% limit… Complete authentication if requested."
+                        ChargeFeedback::Applying(enabled) => Some(format!(
+                            "Applying {} preset… Complete authentication if requested.",
+                            if *enabled { "enabled" } else { "disabled" }
                         )),
-                        ChargeFeedback::Applied(percent) => Some(format!(
-                            "Charge limit set to {percent}% · Confirmed by the system"
+                        ChargeFeedback::Applied(limit) => Some(format!(
+                            "UPower accepted the request; charge limit is {}.",
+                            if limit.enabled { "enabled" } else { "disabled" }
                         )),
                         ChargeFeedback::Failed(error) => {
-                            Some(format!("Could not complete charge-limit change: {error}"))
+                            Some(format!("Could not update charge-limit state: {error}"))
                         }
                     };
                     if let Some(feedback) = feedback {
                         content.children.push(self.label(&p, feedback, false));
-                    }
-                    if b.limit.is_none() {
-                        content.children.push(self.label(
-                            &p,
-                            "This battery does not expose a charge threshold.",
-                            true,
-                        ))
                     }
                 }
             }

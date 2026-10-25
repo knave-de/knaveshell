@@ -15,7 +15,6 @@ const OUTPUT: u64 = 4;
 const INPUT: u64 = 5;
 const BRIGHTNESS: u64 = 6;
 const TEMPERATURE: u64 = 7;
-const LIMIT: u64 = 8;
 const START: u64 = 9;
 const END: u64 = 10;
 const POWER: u64 = 11;
@@ -37,14 +36,14 @@ enum Target {
     Command(QuickSettingsCommand),
     NightToggle,
     Schedule,
-    ApplyLimit,
+    ApplyLimit(bool),
 }
 #[derive(Default)]
 enum ChargeFeedback {
     #[default]
     Idle,
-    Applying(u8),
-    Applied(u8),
+    Applying(bool),
+    Applied(ChargeLimit),
     Failed(String),
 }
 pub struct QuickSettings {
@@ -65,7 +64,6 @@ pub struct QuickSettings {
     pending: Option<QuickSettingsSnapshot>,
     outside: bool,
     focus_on_open: bool,
-    limit: u8,
     night: NightLight,
     confirmation: Option<QuickSettingsCommand>,
     next: u64,
@@ -95,7 +93,6 @@ impl QuickSettings {
             pending: None,
             outside: false,
             focus_on_open: false,
-            limit: 80,
             night: Default::default(),
             confirmation: None,
             next: 100,
@@ -128,13 +125,9 @@ impl QuickSettings {
             self.confirmation = None;
             self.charge_feedback = ChargeFeedback::Idle;
             self.focus_on_open = true;
-            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
         }
         if self.page != Page::Night {
             self.night = state.night
-        }
-        if self.page != Page::Battery {
-            self.limit = state.battery.as_ref().and_then(|b| b.limit).unwrap_or(80)
         }
         self.state = state;
         self.connected = true;
@@ -215,11 +208,11 @@ impl QuickSettings {
                 self.send(self.night_command());
                 self.dirty = true
             }
-            Some(Target::ApplyLimit) => self.apply_charge_limit(),
+            Some(Target::ApplyLimit(enabled)) => self.apply_charge_limit(enabled),
             None => {}
         }
     }
-    fn apply_charge_limit(&mut self) {
+    fn apply_charge_limit(&mut self, enabled: bool) {
         if matches!(self.charge_feedback, ChargeFeedback::Applying(_)) {
             return;
         }
@@ -228,13 +221,9 @@ impl QuickSettings {
             .client
             .as_ref()
             .ok_or_else(|| "Quick Settings service is unavailable".to_owned())
-            .and_then(|c| {
-                c.command(QuickSettingsCommand::SetChargeLimit {
-                    percent: self.limit,
-                })
-            });
+            .and_then(|c| c.command(QuickSettingsCommand::SetChargeLimit { enabled }));
         self.charge_feedback = match result {
-            Ok(()) => ChargeFeedback::Applying(self.limit),
+            Ok(()) => ChargeFeedback::Applying(enabled),
             Err(e) => ChargeFeedback::Failed(e),
         };
         self.authenticating = self
@@ -243,21 +232,17 @@ impl QuickSettings {
             .is_some_and(QuickSettingsClient::authentication_pending);
         self.dirty = true;
     }
-    fn finish_charge_limit(&mut self, result: Result<u8, String>) {
-        let ChargeFeedback::Applying(requested) = self.charge_feedback else {
+    fn finish_charge_limit(&mut self, result: Result<ChargeLimit, String>) {
+        let ChargeFeedback::Applying(_) = self.charge_feedback else {
             return;
         };
         self.charge_feedback = match result {
-            Ok(applied) if applied == requested => {
+            Ok(applied) => {
                 if let Some(battery) = &mut self.state.battery {
-                    battery.limit = Some(applied);
+                    battery.charge_limit = Some(applied.clone());
                 }
-                self.limit = applied;
                 ChargeFeedback::Applied(applied)
             }
-            Ok(applied) => ChargeFeedback::Failed(format!(
-                "Requested {requested}%, but system reports {applied}%"
-            )),
             Err(e) => ChargeFeedback::Failed(e),
         };
         self.authenticating = false;
@@ -292,10 +277,6 @@ impl QuickSettings {
             TEMPERATURE => {
                 self.night.temperature = value.round() as u16;
                 Some(self.night_command())
-            }
-            LIMIT => {
-                self.limit = v;
-                None
             }
             START => {
                 self.night.start = Some(value.round() as u16);

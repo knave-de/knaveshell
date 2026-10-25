@@ -17,7 +17,7 @@ pub struct QuickSettingsClient {
     commands: mpsc::Sender<QuickSettingsCommand>,
     updates: Arc<Mutex<Option<Result<QuickSettingsSnapshot, String>>>>,
     errors: Arc<Mutex<Option<String>>>,
-    charge_result: Arc<Mutex<Option<Result<u8, String>>>>,
+    charge_result: Arc<Mutex<Option<Result<ChargeLimit, String>>>>,
     stop: Option<oneshot::Sender<()>>,
     thread: Option<JoinHandle<()>>,
 }
@@ -78,15 +78,15 @@ impl QuickSettingsClient {
                                 job=jobs.recv()=>{
                                     let Some(command)=job else {return Ok(())};
                                     let charge=matches!(command,QuickSettingsCommand::SetChargeLimit{..}|QuickSettingsCommand::Suspend|QuickSettingsCommand::Reboot|QuickSettingsCommand::PowerOff);
-                                    let requested = match &command { QuickSettingsCommand::SetChargeLimit { percent } => Some(*percent), _ => None };
+                                    let requested = match &command { QuickSettingsCommand::SetChargeLimit { enabled } => Some(*enabled), _ => None };
                                     let result = proxy.call::<_,_,()>("Command",&(serde_json::to_string(&command).unwrap(),)).await.map_err(|e|match e { zbus::Error::MethodError(_,Some(detail),_) => detail, e => e.to_string() });
-                                    if let Some(percent) = requested {
+                                    if let Some(enabled) = requested {
                                         let verified = match result {
                                             Ok(()) => match snapshot(&proxy,summary).await {
                                                 Ok(state) => {
-                                                    let actual = state.battery.as_ref().and_then(|b|b.limit);
+                                                    let actual = state.battery.as_ref().and_then(|b|b.charge_limit.clone());
                                                     *output.lock().unwrap() = Some(Ok(state));
-                                                    if actual == Some(percent) { Ok(percent) } else { Err(format!("Charge limit was not confirmed: requested {percent}%, system reports {}",actual.map_or("unavailable".into(),|v|format!("{v}%")))) }
+                                                    match actual { Some(limit) if limit.supported && limit.enabled == enabled => Ok(limit), _ => Err("UPower charge-limit state was unavailable or did not match the request".into()) }
                                                 }
                                                 Err(e) => Err(format!("Could not verify charge limit: {e}")),
                                             },
@@ -150,7 +150,7 @@ impl QuickSettingsClient {
     pub fn latest(&self) -> Option<Result<QuickSettingsSnapshot, String>> {
         self.updates.lock().unwrap().take()
     }
-    pub fn take_charge_result(&self) -> Option<Result<u8, String>> {
+    pub fn take_charge_result(&self) -> Option<Result<ChargeLimit, String>> {
         self.charge_result.lock().unwrap().take()
     }
     pub fn error(&self) -> Option<String> {

@@ -168,21 +168,23 @@ XEmbed tray icons are not supported.
 
 Click the network/audio island beside the notification bell in the bar or
 Overview for a native, full-height panel with grouped controls and connection tiles. It combines Ethernet/Wi-Fi, Bluetooth, output/microphone mute
-and volume, brightness, power profiles, configurable battery charge limit, and
+and volume, brightness, power profiles, UPower battery charge-limit preset, and
 manual/scheduled Night Light. Audio devices and application volumes open in
 pavucontrol; additional network profiles open in nm-connection-editor. Do not
 disturb remains in Notifications. Missing hardware/services are shown explicitly.
-Charge-limit Apply returns to the charging page with a verified result or an
-error; the current system threshold is shown separately from the selected value.
+Charge-limit actions return to the charging page with UPower’s response or an
+error. The supported preset and read-only driver report are shown separately;
+neither is a measurement of the physical charging cutoff.
 
 The session starts the `quick-settings` role and its Knave-owned service. It needs
 NetworkManager/nmcli, wpctl (WirePlumber), pavucontrol, brightnessctl,
 powerprofilesctl and bluetoothctl for the corresponding controls. Battery charge
-thresholds need kernel/firmware support and, when root-owned, pkexec. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
+thresholds need UPower and kernel/firmware support. UPower owns the supported
+preset, enable/disable state and persistence; an enabled preset can be reapplied. Knave starts its native `polkit-agent` shell role for authentication and releases the panel's
 input while the prompt is active. Power lives in the main header and confirms in
 a modal popup; subpages contain no Power footer or Refresh button. Brightness
 supports 1–100%. There is no dependency on hyprsunset. Deploy matching
-Knave and Villain revisions; see Knave ADR 0013.
+Knave, Shell and Villain revisions; see Knave ADR 0013.
 
 ### Authentication
 

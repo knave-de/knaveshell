@@ -55,7 +55,13 @@ fn app() -> QuickSettings {
             name: "BAT1".into(),
             percent: 80,
             status: "Not charging".into(),
-            limit: Some(80),
+            driver_limit: Some(80),
+            charge_limit: Some(ChargeLimit {
+                supported: true,
+                enabled: true,
+                start_threshold: Some(75),
+                end_threshold: Some(80),
+            }),
         }),
         ..Default::default()
     });
@@ -336,37 +342,103 @@ fn row_icons_are_vertically_centered() {
 }
 
 #[test]
-fn charge_limit_completion_requires_verified_result_and_preserves_page() {
+fn charge_limit_completion_reports_upower_state_and_preserves_page() {
     let mut app = app();
     app.page = Page::Battery;
-    app.charge_feedback = ChargeFeedback::Applying(75);
+    app.charge_feedback = ChargeFeedback::Applying(true);
     app.authenticating = true;
-    app.finish_charge_limit(Ok(75));
-    assert!(matches!(app.charge_feedback, ChargeFeedback::Applied(75)));
-    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
-    assert_eq!(app.limit, 75);
+    let accepted = ChargeLimit {
+        supported: true,
+        enabled: true,
+        start_threshold: Some(75),
+        end_threshold: Some(80),
+    };
+    app.finish_charge_limit(Ok(accepted.clone()));
+    assert!(
+        matches!(app.charge_feedback, ChargeFeedback::Applied(ref state) if state == &accepted)
+    );
+    assert_eq!(
+        app.state.battery.as_ref().unwrap().charge_limit,
+        Some(accepted)
+    );
     assert!(app.page == Page::Battery);
     assert!(!app.authenticating);
     let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
-    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Confirmed by the system"))));
-    app.charge_feedback = ChargeFeedback::Applying(80);
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("UPower accepted the request"))));
+    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("differs from UPower state"))));
+    app.charge_feedback = ChargeFeedback::Applying(false);
     app.authenticating = true;
     app.finish_charge_limit(Err("Authentication cancelled".into()));
     assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
-    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
+    assert!(
+        app.state
+            .battery
+            .as_ref()
+            .unwrap()
+            .charge_limit
+            .as_ref()
+            .unwrap()
+            .enabled
+    );
     assert!(!app.authenticating);
     assert!(app.surface_visible());
-    app.charge_feedback = ChargeFeedback::Applying(80);
-    app.finish_charge_limit(Ok(90));
-    assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
-    assert_eq!(app.state.battery.as_ref().unwrap().limit, Some(75));
 }
 #[test]
 fn charge_limit_without_service_never_claims_applied() {
     let mut app = app();
     app.page = Page::Battery;
-    app.apply_charge_limit();
+    app.apply_charge_limit(true);
     assert!(matches!(app.charge_feedback, ChargeFeedback::Failed(_)));
     assert!(!app.authenticating);
     assert!(app.surface_visible());
+}
+
+#[test]
+fn charge_limit_unavailable_unsupported_and_pending_states_are_explicit() {
+    let mut app = app();
+    app.page = Page::Battery;
+    app.state.battery.as_mut().unwrap().charge_limit = None;
+    let unavailable = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(unavailable.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("state is unavailable"))));
+
+    app.state.battery.as_mut().unwrap().charge_limit = Some(ChargeLimit::default());
+    app.dirty = true;
+    let unsupported = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(unsupported.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("does not support UPower"))));
+
+    app.state.battery.as_mut().unwrap().charge_limit = Some(ChargeLimit {
+        supported: true,
+        enabled: false,
+        start_threshold: Some(75),
+        end_threshold: Some(80),
+    });
+    app.charge_feedback = ChargeFeedback::Applying(true);
+    app.dirty = true;
+    let pending = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(pending.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Applying enabled preset"))));
+    assert!(pending.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Driver-reported threshold"))));
+
+    app.charge_feedback = ChargeFeedback::Idle;
+    app.state
+        .battery
+        .as_mut()
+        .unwrap()
+        .charge_limit
+        .as_mut()
+        .unwrap()
+        .enabled = true;
+    app.dirty = true;
+    let enabled = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    assert!(enabled.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Reapply charge-limit preset"))));
+    assert!(enabled.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Text{text,..} if text.contains("Turn charge limit off"))));
+    assert!(
+        app.targets
+            .values()
+            .any(|target| matches!(target, Target::ApplyLimit(true)))
+    );
+    assert!(
+        app.targets
+            .values()
+            .any(|target| matches!(target, Target::ApplyLimit(false)))
+    );
 }
