@@ -227,7 +227,7 @@ fn trimmed_subtitles_keep_status_and_charge_policy_text() {
             if text.contains("Stop charging at this level"))));
     assert!(battery.commands.iter().any(|command| matches!(command,
         knave_ui::DisplayCommand::Text { text, .. }
-            if text.contains("UPower controls the preset state"))));
+            if text.contains("administrator authentication"))));
 }
 
 #[test]
