@@ -314,7 +314,7 @@ impl Overview {
             button.style.pressed = transparent;
             button.style.selected = transparent;
             button.style.focus = transparent;
-            if let knave_ui::UiAction::Applet(id) = action {
+            if let knave_shell_ui::UiAction::Applet(id) = action {
                 button.tooltip = self
                     .applets
                     .iter()

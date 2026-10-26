@@ -21,7 +21,7 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
 
 The bar is a top layer with a 36-pixel exclusive zone. Its left edge carries the
 icon-only bundled Knave mark; clicking it toggles Overview. Overview fills the
-output, so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
+output, so both surfaces render the same complete `knave_shell_ui::status_bar::StatusBar`
 component. Compact rounded groups place the logo, workspace chips, and focused
 application together on the left, with tray applets, notifications, and icon-only
 network/audio controls on the right. The network/audio group opens Quick Settings;
@@ -106,7 +106,7 @@ fractional scaling and multiple-output hosting remain future work.
 - knave-wayland: direct layer-shell client and bounded desktop-state bridge;
 - knave-apps and knave-icons: application discovery and icon resolution.
 
-The UI toolkit, assets and wgpu renderer live in the separate
+The UI toolkit and wgpu renderer live in the separate
 [Knave UI repository](https://github.com/knave-de/knave-ui). Both library dependencies
 are pinned to the same Git revision; a standalone Shell checkout fetches them through
 Cargo. Use Knave's managed workflow with `--change knave-ui --change knaveshell`
@@ -218,3 +218,6 @@ cached authorizations and their expiration without opening a dialog:
 An empty cache prints `No cached authorizations.` Read failures are errors,
 not an empty cache. The dialog shows retention information only when Polkit
 explicitly supplies it; missing information is never presented as “not cached”.
+
+Desktop scenes, actions, status-bar presentation and bundled desktop assets belong
+to the internal `knave-shell-ui` crate. The renderer consumes generic display lists.

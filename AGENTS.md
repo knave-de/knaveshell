@@ -80,7 +80,7 @@ that actually exist.
 ## Code quality
 
 Keep UI composition, rendering, Wayland integration, and desktop transport in
-explicit crates. The standalone `knave-ui` repository owns the UI toolkit, assets
+explicit crates. The standalone `knave-ui` repository owns the UI toolkit
 and renderer; consume those crates through their pinned Git revision. Do not mix rendering, transport, configuration, and
 compositor policy in one module.
 

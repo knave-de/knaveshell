@@ -5,8 +5,7 @@ use std::{
     process::ExitCode,
 };
 
-use knave_renderer::WgpuRenderer;
-use knave_ui::UiScene;
+use knave_shell_ui::UiScene;
 use knave_wayland::ShellRole;
 
 fn usage() -> &'static str {
@@ -22,11 +21,10 @@ fn check(role: ShellRole) {
         return;
     }
     let scene = match role {
-        ShellRole::Bar => UiScene::bar(1, 1920.0, knave_ui::status_bar::STATUS_BAR_HEIGHT),
+        ShellRole::Bar => UiScene::bar(1, 1920.0, knave_shell_ui::status_bar::STATUS_BAR_HEIGHT),
         ShellRole::Overview => UiScene::overview(1, 1920.0, 1080.0),
     };
-    let renderer = WgpuRenderer::new();
-    let render_list = renderer.prepare(&scene);
+    let render_list = scene.display_list();
     println!(
         "knave-shell role={} revision={} commands={}",
         match role {

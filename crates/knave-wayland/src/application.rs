@@ -120,7 +120,7 @@ pub trait Application {
     ) {
     }
     fn notifications_enabled(&mut self, _enabled: bool) {}
-    fn applets(&mut self, _applets: &[knave_ui::status_bar::Applet]) {}
+    fn applets(&mut self, _applets: &[knave_shell_ui::status_bar::Applet]) {}
     /// Opt into the host's bounded desktop snapshot, preview and action workers.
     fn uses_desktop(&self) -> bool {
         false
@@ -139,7 +139,7 @@ pub trait Application {
     fn desktop_unavailable(&mut self) {
         self.host_error("Desktop connection unavailable; retrying");
     }
-    fn workspace_previews(&mut self, _previews: &[knave_ui::WorkspacePreviewImage]) {}
+    fn workspace_previews(&mut self, _previews: &[knave_shell_ui::WorkspacePreviewImage]) {}
     fn desktop_action_finished(&mut self, _result: Result<(), String>) {}
 
     /// Queried after input and layout. Existing applications receive a visible arrow.
@@ -210,6 +210,8 @@ pub(super) fn key(raw: u32) -> knave_ui::toolkit::Key {
         0xff54 => Key::Down,
         0xff50 => Key::Home,
         0xff57 => Key::End,
+        0xff67 => Key::ContextMenu,
+        0xffc7 => Key::F10,
         0xff08 => Key::Backspace,
         0xffff => Key::Delete,
         0x61 | 0x41 => Key::A,
@@ -226,13 +228,13 @@ impl super::Runtime {
     pub(super) fn application_requests(&mut self, qh: &wayland_client::QueueHandle<Self>) {
         match self.app.as_mut().and_then(|app| app.take_request()) {
             Some(HostRequest::ToggleQuickSettings) => {
-                self.dispatch_ui_action(knave_ui::UiAction::ToggleQuickSettings)
+                self.dispatch_ui_action(knave_shell_ui::UiAction::ToggleQuickSettings)
             }
             Some(HostRequest::ToggleNotifications) => {
-                self.dispatch_ui_action(knave_ui::UiAction::ToggleNotifications)
+                self.dispatch_ui_action(knave_shell_ui::UiAction::ToggleNotifications)
             }
             Some(HostRequest::Applet(id)) => {
-                self.dispatch_ui_action(knave_ui::UiAction::Applet(id))
+                self.dispatch_ui_action(knave_shell_ui::UiAction::Applet(id))
             }
             Some(HostRequest::Copy(text)) => self.copy_text(text, qh),
             Some(HostRequest::Paste(target)) => self.request_paste(target, qh),

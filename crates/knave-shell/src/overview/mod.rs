@@ -13,7 +13,7 @@ use loader::{Done, Job, Loader};
 use std::collections::HashMap;
 
 const SEARCH: ElementId = ElementId(2);
-use knave_ui::status_bar::{STATUS_BAR_HEIGHT, StatusBar};
+use knave_shell_ui::status_bar::{STATUS_BAR_HEIGHT, StatusBar};
 const MAX_WINDOWS: usize = 1024;
 const MAX_WORKSPACES: usize = 128;
 const PAGE_SIZE: usize = 5;
@@ -23,7 +23,7 @@ const MAX_RESULTS: usize = 64;
 enum Target {
     Workspace(WorkspaceId),
     EnterWorkspace(WorkspaceId),
-    StatusBar(knave_ui::UiAction),
+    StatusBar(knave_shell_ui::UiAction),
     Window(WindowId),
     App(usize),
     Page(bool),
@@ -46,7 +46,7 @@ fn app_element(index: usize) -> ElementId {
 pub struct Overview {
     snapshot: Option<DesktopSnapshot>,
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
-    applets: Vec<knave_ui::status_bar::Applet>,
+    applets: Vec<knave_shell_ui::status_bar::Applet>,
     focused_icon: Option<knave_ui::UiImage>,
     notifications_enabled: bool,
     notifications_after_hide: bool,
@@ -227,26 +227,28 @@ impl Overview {
             Some(Target::EnterWorkspace(ws)) => {
                 self.dispatch(DesktopCommand::FocusWorkspace { workspace: ws })
             }
-            Some(Target::StatusBar(knave_ui::UiAction::FocusWorkspace(ws))) => self.browse(ws),
-            Some(Target::StatusBar(knave_ui::UiAction::OpenOverview)) => {
+            Some(Target::StatusBar(knave_shell_ui::UiAction::FocusWorkspace(ws))) => {
+                self.browse(ws)
+            }
+            Some(Target::StatusBar(knave_shell_ui::UiAction::OpenOverview)) => {
                 // The overview is visible here, so the shared brand control hides it.
                 if self.connected {
                     self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                 }
             }
-            Some(Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)) => {
+            Some(Target::StatusBar(knave_shell_ui::UiAction::ToggleQuickSettings)) => {
                 if self.connected {
                     self.quick_settings_after_hide = true;
                     self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                 }
             }
-            Some(Target::StatusBar(knave_ui::UiAction::ToggleNotifications)) => {
+            Some(Target::StatusBar(knave_shell_ui::UiAction::ToggleNotifications)) => {
                 if self.connected {
                     self.notifications_after_hide = true;
                     self.dispatch(DesktopCommand::SetOverviewVisible { visible: false });
                 }
             }
-            Some(Target::StatusBar(knave_ui::UiAction::Applet(id))) => {
+            Some(Target::StatusBar(knave_shell_ui::UiAction::Applet(id))) => {
                 self.request = Some(HostRequest::Applet(id));
             }
             Some(Target::StatusBar(_)) => {}
@@ -428,7 +430,7 @@ impl Overview {
     }
 }
 impl Application for Overview {
-    fn applets(&mut self, applets: &[knave_ui::status_bar::Applet]) {
+    fn applets(&mut self, applets: &[knave_shell_ui::status_bar::Applet]) {
         self.applets = applets.to_vec();
         self.dirty = true;
     }

@@ -65,10 +65,23 @@ impl Runtime {
                     proxy.enable();
                     self.ime.enabled = true;
                 }
-                proxy.set_content_type(
-                    zwp_text_input_v3::ContentHint::Completion,
-                    zwp_text_input_v3::ContentPurpose::Normal,
-                );
+                use knave_ui::toolkit::TextPurpose;
+                let (hint, purpose) = match state.purpose {
+                    TextPurpose::Password => (
+                        zwp_text_input_v3::ContentHint::HiddenText
+                            | zwp_text_input_v3::ContentHint::SensitiveData,
+                        zwp_text_input_v3::ContentPurpose::Password,
+                    ),
+                    TextPurpose::Number => (
+                        zwp_text_input_v3::ContentHint::None,
+                        zwp_text_input_v3::ContentPurpose::Number,
+                    ),
+                    _ => (
+                        zwp_text_input_v3::ContentHint::Completion,
+                        zwp_text_input_v3::ContentPurpose::Normal,
+                    ),
+                };
+                proxy.set_content_type(hint, purpose);
                 let (text, cursor, anchor) = surrounding(state);
                 proxy.set_surrounding_text(text, cursor as i32, anchor as i32);
                 let r = state.cursor_rectangle;
@@ -175,6 +188,7 @@ mod tests {
     fn surrounding_window_is_bounded_and_preserves_unicode_boundaries() {
         let text = "नेपाली".repeat(1000);
         let state = TextInputState {
+            purpose: knave_ui::toolkit::TextPurpose::Normal,
             id: knave_ui::toolkit::ElementId(1),
             cursor: text.len(),
             anchor: 0,
