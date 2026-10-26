@@ -36,7 +36,8 @@ use knave_desktop_api::{
     DesktopSnapshot, OverviewPane, WorkspaceId, WorkspacePreview,
 };
 use knave_renderer::{RenderList, WgpuPainter, WgpuRenderer};
-use knave_ui::{MAX_SEARCH_QUERY, UiAction, UiImage, UiScene, WorkspacePreviewImage};
+use knave_shell_ui::{MAX_SEARCH_QUERY, UiAction, UiScene, WorkspacePreviewImage};
+use knave_ui::UiImage;
 use smithay_client_toolkit::reexports::{
     calloop::{EventLoop, channel},
     calloop_wayland_source::WaylandSource,
@@ -108,7 +109,7 @@ impl ShellRole {
 
     fn requested_size(self) -> (u32, u32) {
         match self {
-            Self::Bar => (0, knave_ui::status_bar::STATUS_BAR_HEIGHT as u32),
+            Self::Bar => (0, knave_shell_ui::status_bar::STATUS_BAR_HEIGHT as u32),
             Self::Overview => (0, 0),
         }
     }
@@ -122,7 +123,7 @@ impl ShellRole {
 
     fn exclusive_zone(self) -> i32 {
         match self {
-            Self::Bar => knave_ui::status_bar::STATUS_BAR_HEIGHT as i32,
+            Self::Bar => knave_shell_ui::status_bar::STATUS_BAR_HEIGHT as i32,
             Self::Overview => -1,
         }
     }
@@ -729,7 +730,6 @@ fn run_internal(
         scale: 1,
         modifiers: KeyModifiers::default(),
         layer,
-        renderer,
         surface,
         adapter,
         device,
@@ -811,13 +811,12 @@ struct Runtime {
     quick_settings_client: Option<quick_settings::QuickSettingsClient>,
     notification_snapshot: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     tray_client: Option<tray::TrayClient>,
-    applets: Vec<knave_ui::status_bar::Applet>,
+    applets: Vec<knave_shell_ui::status_bar::Applet>,
     app_input_region: Option<Vec<knave_ui::Rect>>,
     app_keyboard_mode: Option<KeyboardMode>,
     scale: u32,
     modifiers: KeyModifiers,
     layer: LayerSurface,
-    renderer: WgpuRenderer,
     surface: wgpu::Surface<'static>,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
@@ -1085,7 +1084,7 @@ impl Runtime {
         }
         if self.app.is_none() && self.scene_dirty {
             if self.role == ShellRole::Bar {
-                let bar = knave_ui::status_bar::StatusBar::with_focused_icon(
+                let bar = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
                     self.revision,
                     self.width as f32,
                     self.height as f32,
@@ -1109,7 +1108,7 @@ impl Runtime {
                         previews: &self.previews,
                     },
                 );
-                self.render_list = self.renderer.prepare(&self.scene);
+                self.render_list = self.scene.display_list();
             }
             self.scene_dirty = false;
         }
@@ -1365,7 +1364,7 @@ impl Runtime {
     fn dispatch_ui_action(&mut self, action: UiAction) {
         let command = match action {
             UiAction::Applet(id) => {
-                let x = knave_ui::status_bar::applet_targets_with_notifications(
+                let x = knave_shell_ui::status_bar::applet_targets_with_notifications(
                     self.width as f32,
                     &self.applets,
                     self.notification_client.is_some(),
@@ -1645,7 +1644,7 @@ impl PointerHandler for Runtime {
                 self.clipboard.serial = Some(*serial);
             }
             let p = [event.position.0 as f32, event.position.1 as f32];
-            let applet = knave_ui::status_bar::applet_targets_with_notifications(
+            let applet = knave_shell_ui::status_bar::applet_targets_with_notifications(
                 self.width as f32,
                 &self.applets,
                 self.notification_client.is_some(),

@@ -6,6 +6,7 @@ license.workspace = true
 description = "Knave-owned Wayland layer-shell runtime"
 
 [dependencies]
+knave-shell-ui.workspace = true
 knave-apps.workspace = true
 knave-renderer.workspace = true
 knave-desktop-api.workspace = true

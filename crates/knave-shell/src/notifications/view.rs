@@ -2,7 +2,7 @@ use super::*;
 use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
-    knave_ui::status_icons::bell()
+    knave_shell_ui::status_icons::bell()
 }
 
 pub(super) fn card_id(id: u64) -> u64 {

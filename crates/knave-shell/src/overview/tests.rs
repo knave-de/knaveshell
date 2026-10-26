@@ -1,6 +1,7 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
-use knave_ui::{Color, TextSpan, TextStyle, UiNode};
+use knave_shell_ui::UiNode;
+use knave_ui::{Color, TextSpan, TextStyle};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
@@ -466,7 +467,10 @@ fn workspace_controls_switch_without_hiding() {
         ElementId(21),
         ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
-        bar_target(&app(), knave_ui::UiAction::FocusWorkspace(WorkspaceId(3))),
+        bar_target(
+            &app(),
+            knave_shell_ui::UiAction::FocusWorkspace(WorkspaceId(3)),
+        ),
     ] {
         let mut app = app();
         // A side card may be clipped; activating its target exercises the same action.
@@ -1069,7 +1073,7 @@ fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
 fn bar_element(node_id: u64) -> ElementId {
     ElementId(0x800_0000_0000 + node_id)
 }
-fn bar_target(app: &Overview, action: knave_ui::UiAction) -> ElementId {
+fn bar_target(app: &Overview, action: knave_shell_ui::UiAction) -> ElementId {
     *app.targets
         .iter()
         .find_map(|(id, target)| {
@@ -1104,17 +1108,16 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
     app.frame([1200.0, 800.0], &mut Metrics);
     // The bar component renders the active workspace, exactly as outside overview.
     assert_eq!(status_title(&app).as_deref(), Some("Window 1"));
-    assert!(
-        app.targets
-            .values()
-            .any(|target| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
-    );
+    assert!(app.targets.values().any(|target| matches!(
+        target,
+        Target::StatusBar(knave_shell_ui::UiAction::OpenOverview)
+    )));
     let shared = app.status_bar_component(1200.0);
     let chips: Vec<_> = shared
         .scene
         .hit_targets()
         .filter_map(|(bounds, action)| {
-            if let knave_ui::UiAction::FocusWorkspace(workspace) = action {
+            if let knave_shell_ui::UiAction::FocusWorkspace(workspace) = action {
                 Some((bounds, workspace))
             } else {
                 None
@@ -1131,13 +1134,16 @@ fn the_overview_routes_the_desktop_status_bar_targets() {
         assert_eq!(
             app.scene.bounds(bar_target(
                 &app,
-                knave_ui::UiAction::FocusWorkspace(workspace)
+                knave_shell_ui::UiAction::FocusWorkspace(workspace)
             )),
             Some(bounds)
         );
     }
     // A chip click switches that workspace directly, like the desktop bar.
-    let third = bar_target(&app, knave_ui::UiAction::FocusWorkspace(WorkspaceId(3)));
+    let third = bar_target(
+        &app,
+        knave_shell_ui::UiAction::FocusWorkspace(WorkspaceId(3)),
+    );
     click(&mut app, third);
     assert!(matches!(
         app.take_request(),
@@ -1175,7 +1181,7 @@ fn the_shared_bar_clears_the_title_when_the_focused_window_is_on_another_workspa
         app.scene
             .bounds(bar_target(
                 &app,
-                knave_ui::UiAction::FocusWorkspace(WorkspaceId(3))
+                knave_shell_ui::UiAction::FocusWorkspace(WorkspaceId(3))
             ))
             .is_some()
     );
@@ -1187,7 +1193,7 @@ fn the_shared_bar_clears_the_title_when_the_focused_window_is_on_another_workspa
 fn shared_bar_text_matches_the_desktop_bar_display_list() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
-    let bar = knave_ui::status_bar::StatusBar::with_focused_icon(
+    let bar = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
         0,
         1200.0,
         36.0,
@@ -1273,7 +1279,7 @@ fn without_a_snapshot_the_shared_bar_shows_the_brand_mark_without_a_wordmark() {
     assert!(image, "the bundled brand mark renders on the shared bar");
     assert!(!app.targets.values().any(|target| matches!(
         target,
-        Target::StatusBar(knave_ui::UiAction::FocusWorkspace(_))
+        Target::StatusBar(knave_shell_ui::UiAction::FocusWorkspace(_))
     )));
 }
 
@@ -1284,7 +1290,12 @@ fn the_brand_mark_toggles_the_visible_overview_off() {
     let id = *app
         .targets
         .iter()
-        .find(|(_, target)| matches!(target, Target::StatusBar(knave_ui::UiAction::OpenOverview)))
+        .find(|(_, target)| {
+            matches!(
+                target,
+                Target::StatusBar(knave_shell_ui::UiAction::OpenOverview)
+            )
+        })
         .unwrap()
         .0;
     click(&mut app, id);
@@ -1306,7 +1317,7 @@ fn overview_renders_the_complete_shared_bar_and_routes_its_bell() {
         .scene
         .hit_targets()
         .enumerate()
-        .find(|(_, (_, action))| *action == knave_ui::UiAction::ToggleNotifications)
+        .find(|(_, (_, action))| *action == knave_shell_ui::UiAction::ToggleNotifications)
         .unwrap();
     click(&mut app, bar_element(10 + index as u64));
     assert!(matches!(
@@ -1326,15 +1337,15 @@ fn overview_renders_the_complete_shared_bar_and_routes_its_bell() {
         !app.status_bar_component(1200.0)
             .scene
             .hit_targets()
-            .any(|(_, action)| action == knave_ui::UiAction::ToggleNotifications)
+            .any(|(_, action)| action == knave_shell_ui::UiAction::ToggleNotifications)
     );
     assert!(!app.targets.values().any(|target| matches!(
         target,
-        Target::StatusBar(knave_ui::UiAction::ToggleNotifications)
+        Target::StatusBar(knave_shell_ui::UiAction::ToggleNotifications)
     )));
     assert!(app.targets.values().any(|target| matches!(
         target,
-        Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)
+        Target::StatusBar(knave_shell_ui::UiAction::ToggleQuickSettings)
     )));
 }
 
@@ -1356,7 +1367,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     ];
     app.notification_snapshot(Some(&state));
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
+    let shared = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
         0,
         1200.0,
         36.0,
@@ -1373,7 +1384,7 @@ fn overview_tracks_shared_notification_indicators_on_updates_and_disconnect() {
     }
     app.notification_snapshot(None);
     app.frame([1200.0, 800.0], &mut Metrics);
-    let shared = knave_ui::status_bar::StatusBar::with_focused_icon(
+    let shared = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
         0,
         1200.0,
         36.0,
@@ -1398,7 +1409,7 @@ fn failed_overview_hide_does_not_open_notifications_behind_it() {
         .find_map(|(id, target)| {
             matches!(
                 target,
-                Target::StatusBar(knave_ui::UiAction::ToggleNotifications)
+                Target::StatusBar(knave_shell_ui::UiAction::ToggleNotifications)
             )
             .then_some(*id)
         })
@@ -1420,7 +1431,7 @@ fn quick_settings_hides_overview_before_transferring_focus() {
         .find(|(_, target)| {
             matches!(
                 target,
-                Target::StatusBar(knave_ui::UiAction::ToggleQuickSettings)
+                Target::StatusBar(knave_shell_ui::UiAction::ToggleQuickSettings)
             )
         })
         .unwrap()

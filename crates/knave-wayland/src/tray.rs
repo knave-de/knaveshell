@@ -3,7 +3,8 @@
 use crate::Waker;
 use futures_util::StreamExt;
 use knave_icons::IconLookup;
-use knave_ui::{UiImage, status_bar::Applet};
+use knave_shell_ui::status_bar::Applet;
+use knave_ui::UiImage;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
