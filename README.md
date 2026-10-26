@@ -21,7 +21,7 @@ Marker I/O failures propagate as typed runtime errors and a nonzero Shell exit.
 
 The bar is a top layer with a 36-pixel exclusive zone. Its left edge carries the
 icon-only bundled Knave mark; clicking it toggles Overview. Overview fills the
-output, so both surfaces render the same complete `knave_ui::status_bar::StatusBar`
+output, so both surfaces render the same complete `knave_shell_ui::status_bar::StatusBar`
 component. Compact rounded groups place the logo, workspace chips, and focused
 application together on the left, with tray applets, notifications, and icon-only
 network/audio controls on the right. The network/audio group opens Quick Settings;

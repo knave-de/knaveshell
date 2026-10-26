@@ -210,6 +210,8 @@ pub(super) fn key(raw: u32) -> knave_ui::toolkit::Key {
         0xff54 => Key::Down,
         0xff50 => Key::Home,
         0xff57 => Key::End,
+        0xff67 => Key::ContextMenu,
+        0xffc7 => Key::F10,
         0xff08 => Key::Backspace,
         0xffff => Key::Delete,
         0x61 | 0x41 => Key::A,

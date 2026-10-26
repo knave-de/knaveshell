@@ -17,3 +17,15 @@ It does not own compositor layout, focus, window-management, or input policy.
 It does not write the canonical user configuration or reach through a public
 contract into Villain internals. A shared contract change updates both sides in
 the same coordinated package change.
+
+The internal `knave-shell-ui` crate owns desktop snapshots projected into scenes,
+desktop actions, workspace previews, status-bar composition and bundled desktop
+assets. Both the Shell application and its Wayland host consume it. Generic UI
+and renderer crates have no desktop-service dependency; `UiScene::display_list()`
+is the Shell-owned adapter into generic drawing commands.
+
+Standalone and Wayland hosts adopt the shared text-input purpose and context-menu
+input contracts. Password surrounding text is withheld and the Wayland host sends
+standard password/sensitive content hints. These are unreleased Rust API changes;
+there is no Knave protocol, configuration or persisted-data migration. Keep the UI
+pin and its Shell consumers together when deploying or rolling back.

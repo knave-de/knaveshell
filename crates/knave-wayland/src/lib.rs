@@ -1689,6 +1689,9 @@ impl PointerHandler for Runtime {
                     PointerEventKind::Press { button, .. } if *button == BTN_LEFT => {
                         Some(Input::PointerDown(p))
                     }
+                    PointerEventKind::Press { button, .. } if *button == 0x111 => {
+                        Some(Input::ContextMenu(p))
+                    }
                     PointerEventKind::Release { button, .. } if *button == BTN_LEFT => {
                         Some(Input::PointerUp(p))
                     }
