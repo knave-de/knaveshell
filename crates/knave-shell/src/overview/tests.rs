@@ -545,6 +545,8 @@ fn search_is_unicode_editable_and_escape_hides_overview() {
 #[test]
 fn idle_frames_reuse_layout_and_panes_are_bounded_to_neighbors() {
     let mut app = app();
+    // The first frame queues icon loads; idleness is only defined once they land.
+    settle(&mut app, [1200.0, 800.0]);
     let stats = app.scene.stats();
     assert!(!app.needs_frame());
     app.frame([1200.0, 800.0], &mut Metrics);
