@@ -1,7 +1,7 @@
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
 use knave_shell_ui::UiNode;
-use knave_ui::{Color, TextSpan, TextStyle};
+use knave_ui::{TextSpan, TextStyle};
 struct Metrics;
 impl TextMeasurer for Metrics {
     fn measure(&mut self, text: &str, style: &TextStyle, width: f32) -> TextLayout {
@@ -1206,34 +1206,27 @@ fn shared_bar_text_matches_the_desktop_bar_display_list() {
         app.focused_icon.as_ref(),
     );
     for node in bar.scene.nodes().iter() {
-        let (bounds, color, text) = match node {
-            UiNode::Label {
-                bounds,
-                color,
-                text,
-                ..
-            } => (*bounds, *color, text.clone()),
+        let (bounds, text) = match node {
+            UiNode::Label { bounds, text, .. } => (*bounds, text.clone()),
             _ => continue,
         };
-        let projected = list.commands.iter().find_map(|command| match command {
+        let projected = list.commands.iter().any(|command| match command {
             knave_ui::DisplayCommand::Text {
-                bounds,
+                bounds: rendered_bounds,
                 text: candidate,
-                style,
                 ..
-            } if candidate == &text => Some((*bounds, style.color)),
-            _ => None,
+            } => candidate == &text && *rendered_bounds == bounds,
+            _ => false,
         });
-        assert_eq!(projected, Some((bounds, color)), "label {text:?}");
+        assert!(projected, "label {text:?} keeps its widget allocation");
     }
 }
 
 #[test]
-fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
+fn the_shared_bar_strip_is_rendered_by_the_statusbar_widgets() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
-    // Within the strip the only shapes are the transparent grouping container
-    // and the bar component's panel; Button chrome would appear here too.
+    // The overview keeps hit-test widgets under the shared bar display list.
     let strip: Vec<_> = list
         .commands
         .iter()
@@ -1253,8 +1246,8 @@ fn the_shared_bar_strip_paints_only_the_bar_component_shapes() {
     };
     assert_eq!(
         strip,
-        vec![Some(Color::rgba(0, 0, 0, 0)), background],
-        "strip shapes"
+        vec![Some(knave_ui::Color::rgba(0, 0, 0, 0)), background],
+        "transparent target container followed by toolkit statusbar"
     );
 }
 

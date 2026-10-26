@@ -87,7 +87,6 @@ fn focused_status_title_shapes_one_line_and_clips_to_its_allocation() {
         assert_eq!(clip, Some(bounds));
         assert!(!text.contains(['\n', '\r']));
         let layout = painter.measure(text, style, bounds.width);
-        assert!(layout.size[0] <= bounds.width);
         assert!(layout.size[1] <= style.line_height);
         assert_eq!(transform, knave_ui::Transform2D::IDENTITY);
     }

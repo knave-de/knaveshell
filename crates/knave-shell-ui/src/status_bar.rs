@@ -1,6 +1,13 @@
 //! Complete status bar presentation shared by desktop and overview hosts.
 use crate::{DisplayList, UiScene};
 use knave_desktop_api::{DesktopSnapshot, notifications::NotificationSnapshot};
+use knave_ui::{
+    Color, Rect, TextStyle,
+    toolkit::{
+        Element, ElementId, Flow, Layout, Length, Scene as ToolkitScene, TextLayout, TextMeasurer,
+        Widget,
+    },
+};
 
 pub const STATUS_BAR_HEIGHT: f32 = 36.0;
 
@@ -73,6 +80,35 @@ pub fn applet_targets_with_notifications(
 pub struct StatusBar {
     pub scene: UiScene,
     pub display: DisplayList,
+    toolkit_scene: ToolkitScene,
+    size: [f32; 2],
+}
+
+impl StatusBar {
+    /// Apply a replacement stylesheet to the standard toolkit widgets in this bar.
+    pub fn set_stylesheet(
+        &mut self,
+        source: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.toolkit_scene.set_stylesheet(source)?;
+        self.refresh_toolkit_output();
+        Ok(())
+    }
+
+    fn refresh_toolkit_output(&mut self) {
+        let mut metrics = StatusTextMetrics;
+        self.toolkit_scene.layout(self.size, &mut metrics);
+        for (index, target) in self.scene.targets.iter_mut().enumerate() {
+            if let Some(bounds) = self.toolkit_scene.bounds(ElementId(50_000 + index as u64)) {
+                target.bounds = bounds;
+            }
+        }
+        self.display = self
+            .toolkit_scene
+            .display_list(self.size, &mut metrics)
+            .clone();
+        self.display.revision = self.scene.revision();
+    }
 }
 
 impl StatusBar {
@@ -109,9 +145,6 @@ impl StatusBar {
         focused_icon: Option<&knave_ui::UiImage>,
     ) -> Self {
         let mut scene = UiScene::bar(revision, width, height);
-        if let Some(crate::UiNode::Panel { color, .. }) = scene.nodes.first_mut() {
-            *color = knave_ui::Color::rgba(21, 24, 27, 255);
-        }
         scene.targets.clear();
         scene.target(
             knave_ui::Rect::new(EDGE, ISLAND_Y, 28.0, ISLAND_HEIGHT),
@@ -137,36 +170,28 @@ impl StatusBar {
         let workspaces = visible_workspaces(desktop, workspace_start, workspace_limit);
         if !workspaces.is_empty() {
             let group_x = workspace_start;
-            let group_width = 8.0
-                + workspaces.len() as f32 * WORKSPACE_WIDTH
-                + workspaces.len().saturating_sub(1) as f32 * WORKSPACE_GAP;
             for (index, workspace) in workspaces.iter().enumerate() {
                 let x = group_x + 4.0 + index as f32 * (WORKSPACE_WIDTH + WORKSPACE_GAP);
                 let bounds = knave_ui::Rect::new(x, ISLAND_Y + 3.0, WORKSPACE_WIDTH, 22.0);
                 scene.push(crate::UiNode::Label {
                     id: crate::NodeId(10 + u64::from(workspace.workspace.0)),
                     bounds,
-                    color: if workspace.active {
-                        knave_ui::Color::rgba(186, 213, 255, 255)
-                    } else if workspace.window_count > 0 {
-                        knave_ui::Color::rgba(185, 192, 198, 255)
-                    } else {
-                        knave_ui::Color::rgba(125, 133, 140, 255)
-                    },
+                    color: Color::TEXT,
                     text: if workspace.workspace.0 == 10 {
                         "0".into()
                     } else {
                         workspace.workspace.0.to_string()
                     },
                 });
+                if workspace.window_count > 0 {
+                    scene.push(crate::UiNode::Panel {
+                        id: crate::NodeId(5_000 + u64::from(workspace.workspace.0)),
+                        bounds: knave_ui::Rect::new(x + 9.5, ISLAND_Y + 22.0, 3.0, 3.0),
+                        color: knave_ui::Color::ACCENT,
+                    });
+                }
                 scene.target(bounds, crate::UiAction::FocusWorkspace(workspace.workspace));
             }
-            // The pill is painted by the display list; this transparent panel gives the group a stable id.
-            scene.push(crate::UiNode::Panel {
-                id: crate::NodeId(4_999),
-                bounds: knave_ui::Rect::new(group_x, ISLAND_Y, group_width, ISLAND_HEIGHT),
-                color: knave_ui::Color::rgba(0, 0, 0, 0),
-            });
         }
 
         let workspace_group_width = if workspaces.is_empty() {
@@ -187,7 +212,6 @@ impl StatusBar {
             .map_or(controls_left, |(rect, _)| rect.x - 4.0 - GROUP_GAP);
         let focus = desktop.and_then(focused_window);
         let focus_available = focus_right - focus_x;
-        let mut focus_island = None;
         // Focus is the first optional section to give way to workspace and control targets.
         if let Some(window) = focus.filter(|window| {
             focus_available >= 34.0 && (!window.title.is_empty() || focused_icon.is_some())
@@ -208,16 +232,10 @@ impl StatusBar {
             };
             let max_text_width = if focused_icon.is_some() { 203.0 } else { 226.0 };
             let text_width = (focus_right - text_x - 6.0).clamp(0.0, max_text_width);
-            let mut content_right = if focused_icon.is_some() {
-                icon_bounds.x + icon_bounds.width
-            } else {
-                content_start
-            };
             if !window.title.is_empty() && text_width > 0.0 {
-                let text = ellipsize(&window.title.replace(['\n', '\r'], " "), text_width);
+                let text = window.title.replace(['\n', '\r'], " ");
                 if !text.is_empty() {
-                    let rendered_width = (estimated_text_width(&text) + 2.0).min(text_width);
-                    content_right = text_x + rendered_width;
+                    let rendered_width = text_width;
                     scene.push(crate::UiNode::Label {
                         id: crate::NodeId(8),
                         bounds: knave_ui::Rect::new(text_x, 0.0, rendered_width, STATUS_BAR_HEIGHT),
@@ -226,37 +244,9 @@ impl StatusBar {
                     });
                 }
             }
-            let island = knave_ui::Rect::new(
-                focus_x,
-                ISLAND_Y,
-                (content_right + 6.0 - focus_x)
-                    .max(28.0)
-                    .min(focus_right - focus_x),
-                ISLAND_HEIGHT,
-            );
-            if island.width >= 28.0 {
-                scene.push(crate::UiNode::Panel {
-                    id: crate::NodeId(7_000),
-                    bounds: island,
-                    color: knave_ui::Color::rgba(0, 0, 0, 0),
-                });
-                focus_island = Some(island);
-            }
         }
 
         if !applets.is_empty() {
-            let first = applets.first().unwrap().0;
-            let last = applets.last().unwrap().0;
-            scene.push(crate::UiNode::Panel {
-                id: crate::NodeId(6_000),
-                bounds: knave_ui::Rect::new(
-                    first.x - 4.0,
-                    ISLAND_Y,
-                    last.x + last.width - first.x + 8.0,
-                    ISLAND_HEIGHT,
-                ),
-                color: knave_ui::Color::rgba(0, 0, 0, 0),
-            });
             for (bounds, item) in &applets {
                 scene.target(*bounds, crate::UiAction::Applet(item.id));
                 if let Some(image) = &item.image {
@@ -307,106 +297,18 @@ impl StatusBar {
             append_system_icons(&mut scene, system_x);
         }
 
-        let mut display = scene.display_list();
-        let mut islands =
-            knave_ui::DisplayListBuilder::new(revision, knave_ui::Color::rgba(0, 0, 0, 0));
-        let pill = |color: knave_ui::Color| knave_ui::ShapePaint {
-            radii: knave_ui::CornerRadii::uniform(6.0),
-            ..knave_ui::ShapePaint::fill(color)
+        if bell_visible {
+            append_bell(&mut scene, bell_x + BELL_WIDTH / 2.0, notifications);
+        }
+        let toolkit_scene = build_toolkit_scene(&scene, desktop);
+        let mut result = Self {
+            scene,
+            display: DisplayList::new(revision, Color::BACKGROUND),
+            toolkit_scene,
+            size: [width, height],
         };
-        islands.shape(
-            knave_ui::Rect::new(EDGE, ISLAND_Y, 28.0, ISLAND_HEIGHT),
-            pill(knave_ui::Color::rgba(32, 38, 43, 255)),
-        );
-        if !workspaces.is_empty() {
-            let group_width = 8.0
-                + workspaces.len() as f32 * WORKSPACE_WIDTH
-                + workspaces.len().saturating_sub(1) as f32 * WORKSPACE_GAP;
-            islands.shape(
-                knave_ui::Rect::new(workspace_start, ISLAND_Y, group_width, ISLAND_HEIGHT),
-                pill(knave_ui::Color::rgba(32, 38, 43, 255)),
-            );
-            for (index, _) in workspaces.iter().enumerate().filter(|(_, w)| w.active) {
-                let x = workspace_start + 4.0 + index as f32 * (WORKSPACE_WIDTH + WORKSPACE_GAP);
-                islands.shape(
-                    knave_ui::Rect::new(x, ISLAND_Y + 3.0, WORKSPACE_WIDTH, 22.0),
-                    knave_ui::ShapePaint {
-                        radii: knave_ui::CornerRadii::uniform(4.0),
-                        ..knave_ui::ShapePaint::fill(knave_ui::Color::rgba(49, 60, 73, 255))
-                    },
-                );
-            }
-            for (index, workspace) in workspaces
-                .iter()
-                .enumerate()
-                .filter(|(_, workspace)| workspace.window_count > 0)
-            {
-                let x = workspace_start + 4.0 + index as f32 * (WORKSPACE_WIDTH + WORKSPACE_GAP);
-                islands.shape(
-                    knave_ui::Rect::new(x + 9.5, ISLAND_Y + 22.0, 3.0, 3.0),
-                    knave_ui::ShapePaint {
-                        radii: knave_ui::CornerRadii::uniform(1.5),
-                        ..knave_ui::ShapePaint::fill(if workspace.active {
-                            knave_ui::Color::rgba(255, 255, 255, 255)
-                        } else {
-                            knave_ui::Color::ACCENT
-                        })
-                    },
-                );
-            }
-        }
-        if let Some(bounds) = focus_island {
-            islands.shape(bounds, pill(knave_ui::Color::rgba(32, 38, 43, 255)));
-        }
-        if !applets.is_empty() {
-            let first = applets.first().unwrap().0;
-            let last = applets.last().unwrap().0;
-            islands.shape(
-                knave_ui::Rect::new(
-                    first.x - 4.0,
-                    ISLAND_Y,
-                    last.x + last.width - first.x + 8.0,
-                    ISLAND_HEIGHT,
-                ),
-                pill(knave_ui::Color::rgba(32, 38, 43, 255)),
-            );
-        }
-        if controls_visible {
-            islands.shape(
-                knave_ui::Rect::new(system_x, ISLAND_Y, SYSTEM_WIDTH, ISLAND_HEIGHT),
-                pill(knave_ui::Color::rgba(32, 38, 43, 255)),
-            );
-        }
-        if bell_visible {
-            islands.shape(
-                knave_ui::Rect::new(bell_x, ISLAND_Y, BELL_WIDTH, ISLAND_HEIGHT),
-                pill(knave_ui::Color::rgba(32, 38, 43, 255)),
-            );
-        }
-        let mut island_commands = islands
-            .finish()
-            .expect("status bar geometry is valid")
-            .commands;
-        // Paint island backplates above the opaque strip and below its contents.
-        let insert_at = display
-            .commands
-            .iter()
-            .position(|command| matches!(command, knave_ui::DisplayCommand::Shape { .. }))
-            .map_or(1, |index| index + 1);
-        display
-            .commands
-            .splice(insert_at..insert_at, island_commands.drain(..));
-        set_status_text_style(&mut display);
-        if bell_visible {
-            append_bell(&mut display, bell_x + BELL_WIDTH / 2.0, notifications);
-        }
-        if let Some(knave_ui::DisplayCommand::Shape { bounds, clip, .. }) =
-            display.commands.first_mut()
-        {
-            *bounds = knave_ui::Rect::new(-2.0, -2.0, width + 4.0, height + 4.0);
-            *clip = Some(knave_ui::Rect::new(0.0, 0.0, width, height));
-        }
-        Self { scene, display }
+        result.refresh_toolkit_output();
+        result
     }
 }
 
@@ -453,26 +355,6 @@ fn focused_window(snapshot: &DesktopSnapshot) -> Option<&knave_desktop_api::Wind
     })
 }
 
-fn set_status_text_style(display: &mut DisplayList) {
-    for command in &mut display.commands {
-        if let knave_ui::DisplayCommand::Text {
-            bounds,
-            style,
-            clip,
-            ..
-        } = command
-        {
-            style.font_size = 11.0;
-            style.line_height = 14.0;
-            style.wrap = knave_ui::TextWrap::None;
-            if bounds.width <= WORKSPACE_WIDTH {
-                style.align = knave_ui::TextAlign::Center;
-            }
-            *clip = Some(*bounds);
-        }
-    }
-}
-
 fn append_system_icons(scene: &mut UiScene, x: f32) {
     if let Some(image) = crate::status_icons::wifi() {
         scene.push(crate::UiNode::Image {
@@ -490,56 +372,174 @@ fn append_system_icons(scene: &mut UiScene, x: f32) {
     }
 }
 
-fn ellipsize(text: &str, width: f32) -> String {
-    const ELLIPSIS_WIDTH: f32 = 12.0;
-    if estimated_text_width(text) <= width {
-        return text.to_owned();
+fn element_at(id: u64, widget: Widget, bounds: Rect, class: &str, style_id: &str) -> Element {
+    Element::new(id, widget)
+        .class(class)
+        .style_id(style_id)
+        .layout(Layout {
+            width: Length::Px(bounds.width),
+            height: Length::Px(bounds.height),
+            flow: Flow::Overlay,
+            align: knave_ui::toolkit::Align::Start,
+            offset: [bounds.x, bounds.y],
+            ..Layout::default()
+        })
+}
+
+fn action_class(action: crate::UiAction) -> &'static str {
+    match action {
+        crate::UiAction::OpenOverview => "statusbar__overview-action",
+        crate::UiAction::FocusWorkspace(_) => "statusbar__workspace-action",
+        crate::UiAction::ToggleNotifications => "statusbar__notifications-action",
+        crate::UiAction::ToggleQuickSettings => "statusbar__quick-settings-action",
+        crate::UiAction::Applet(_) => "statusbar__applet-action",
+        _ => "statusbar__action",
     }
-    if width < ELLIPSIS_WIDTH {
-        return String::new();
-    }
-    let mut result = String::new();
-    let mut used = 0.0;
-    for character in text.chars() {
-        let next = estimated_glyph_width(character);
-        if used + next + ELLIPSIS_WIDTH > width {
-            break;
+}
+
+fn node_class(node: &crate::UiNode) -> &'static str {
+    match node {
+        crate::UiNode::Panel { id, bounds, .. }
+            if id.0 >= 5_000 && bounds.width == 3.0 && bounds.height == 3.0 =>
+        {
+            "statusbar__workspace-occupancy"
         }
-        used += next;
-        result.push(character);
-    }
-    result.push('…');
-    result
-}
-
-fn estimated_text_width(text: &str) -> f32 {
-    text.chars().map(estimated_glyph_width).sum()
-}
-
-fn estimated_glyph_width(character: char) -> f32 {
-    // Conservative bounds for the 11px bar font; the renderer also clips the line.
-    match character {
-        ' ' | 'i' | 'l' | '.' | ',' | ':' | ';' => 4.0,
-        '!' | '|' | '(' | ')' | '[' | ']' => 5.0,
-        'm' | 'w' | 'M' | 'W' | '@' | '%' | '&' | '…' => 12.0,
-        'A'..='Z' => 9.0,
-        '0'..='9' => 7.5,
-        _ if character.is_ascii() => 7.0,
-        _ => 12.0,
+        crate::UiNode::Panel { .. } => "statusbar__applet-attention",
+        crate::UiNode::Label { id, .. } => match id.0 {
+            8 => "statusbar__focused-title",
+            40_011 => "statusbar__unread-count",
+            40_012 => "statusbar__dnd-marker",
+            40_013 => "statusbar__notification-state",
+            10..=9_999 => "statusbar__workspace-label",
+            20_000.. => "statusbar__applet-label",
+            _ => "statusbar__content",
+        },
+        crate::UiNode::Image { id, .. } => match id.0 {
+            3 => "statusbar__brand",
+            9 => "statusbar__focused-icon",
+            40_000 => "statusbar__notification-icon",
+            40_001 => "statusbar__network-icon",
+            40_002 => "statusbar__volume-icon",
+            20_000.. => "statusbar__applet-icon",
+            _ => "statusbar__content",
+        },
     }
 }
 
-/// Stable right-edge bell and count. Counts describe unread history, independent of banner lifetime.
-fn append_bell(
-    list: &mut knave_ui::DisplayList,
-    midpoint: f32,
-    snapshot: Option<&NotificationSnapshot>,
-) {
-    use knave_ui::{
-        Color, CornerRadii, DisplayListBuilder, Rect, ShapePaint, TextAlign, TextStyle,
-    };
+fn build_toolkit_scene(scene: &UiScene, desktop: Option<&DesktopSnapshot>) -> ToolkitScene {
+    let children = scene
+        .targets
+        .iter()
+        .enumerate()
+        .map(|(index, target)| {
+            let element_id = 50_000 + index as u64;
+            let class = action_class(target.action);
+            let widget = if let crate::UiAction::FocusWorkspace(workspace_id) = target.action {
+                let selected = desktop.is_some_and(|snapshot| {
+                    snapshot
+                        .workspaces
+                        .iter()
+                        .any(|workspace| workspace.workspace == workspace_id && workspace.active)
+                });
+                Widget::Selectable {
+                    label: String::new(),
+                    selected,
+                }
+            } else {
+                Widget::Button(String::new())
+            };
+            element_at(element_id, widget, target.bounds, class, class)
+        })
+        .chain(scene.nodes.iter().filter_map(|node| match node {
+            crate::UiNode::Panel { id, .. } if id.0 == 1 => None,
+            crate::UiNode::Panel { id, bounds, .. } => Some(element_at(
+                60_000 + id.0,
+                Widget::Panel,
+                *bounds,
+                node_class(node),
+                node_class(node),
+            )),
+            crate::UiNode::Label {
+                id, bounds, text, ..
+            } => {
+                let mut element = element_at(
+                    60_000 + id.0,
+                    Widget::Text(text.clone()),
+                    *bounds,
+                    node_class(node),
+                    node_class(node),
+                )
+                .text_wrap(knave_ui::TextWrap::None);
+                if (10..=9_999).contains(&id.0)
+                    && let Some(workspace) = desktop.and_then(|snapshot| {
+                        snapshot
+                            .workspaces
+                            .iter()
+                            .find(|workspace| workspace.workspace.0 == (id.0 - 10) as u32)
+                    })
+                {
+                    if workspace.active {
+                        element = element.class("statusbar__workspace-label--active");
+                    }
+                    if workspace.window_count > 0 {
+                        element = element.class("statusbar__workspace-label--occupied");
+                    }
+                }
+                Some(element)
+            }
+            crate::UiNode::Image { id, bounds, image } => Some(element_at(
+                60_000 + id.0,
+                Widget::Image(image.clone(), knave_ui::ImageStyle::default()),
+                *bounds,
+                node_class(node),
+                node_class(node),
+            )),
+        }))
+        .collect();
+    let root = Element::new(1, Widget::Panel)
+        .class("statusbar")
+        .style_id("statusbar")
+        .layout(Layout {
+            width: Length::Fill,
+            height: Length::Fill,
+            flow: Flow::Overlay,
+            align: knave_ui::toolkit::Align::Start,
+            clip: knave_ui::toolkit::ClipMode::Visible,
+            gap: 0.0,
+            ..Layout::default()
+        })
+        .children(children);
+    ToolkitScene::new(root).expect("status bar element identities are unique")
+}
+
+struct StatusTextMetrics;
+
+impl TextMeasurer for StatusTextMetrics {
+    fn measure(&mut self, _: &str, style: &TextStyle, _: f32) -> TextLayout {
+        // Status-bar text has fixed bounds and never participates in intrinsic sizing.
+        TextLayout {
+            size: [0.0, style.line_height],
+            carets: Vec::new(),
+        }
+    }
+
+    fn measure_spans(
+        &mut self,
+        spans: &[knave_ui::TextSpan],
+        style: &TextStyle,
+        width: f32,
+    ) -> TextLayout {
+        let text = spans
+            .iter()
+            .map(|span| span.text.as_str())
+            .collect::<String>();
+        self.measure(&text, style, width)
+    }
+}
+
+/// Notification data remains in the shared scene; widget classes own its presentation.
+fn append_bell(scene: &mut UiScene, midpoint: f32, snapshot: Option<&NotificationSnapshot>) {
     let x = midpoint - 14.0;
-    let mut b = DisplayListBuilder::new(list.revision, Color::rgba(0, 0, 0, 0));
     let count = snapshot
         .filter(|s| s.owned)
         .map_or(0, NotificationSnapshot::unread);
@@ -550,49 +550,33 @@ fn append_bell(
             count.to_string()
         };
         let w = if count > 99 { 16.0 } else { 14.0 };
-        b.shape(
-            Rect::new(x + 14.0, 4.0, w, 14.0),
-            ShapePaint {
-                radii: CornerRadii::uniform(8.0),
-                ..ShapePaint::fill(Color::rgba(174, 220, 242, 255))
-            },
-        );
-        b.text(
-            Rect::new(x + 14.0, 4.0, w, 14.0),
+        scene.push(crate::UiNode::Panel {
+            id: crate::NodeId(40_010),
+            bounds: Rect::new(x + 14.0, 4.0, w, 14.0),
+            color: Color::ACCENT,
+        });
+        scene.push(crate::UiNode::Label {
+            id: crate::NodeId(40_011),
+            bounds: Rect::new(x + 14.0, 4.0, w, 14.0),
+            color: Color::TEXT,
             text,
-            TextStyle {
-                color: Color::rgba(21, 24, 27, 255),
-                font_size: 8.0,
-                line_height: 10.0,
-                align: TextAlign::Center,
-                ..Default::default()
-            },
-        );
+        });
     }
     if snapshot.is_some_and(|s| s.dnd) {
-        b.text(
-            Rect::new(x + 1.0, 22.0, 5.0, 10.0),
-            "z".into(),
-            TextStyle {
-                color: Color::ACCENT,
-                font_size: 8.0,
-                line_height: 10.0,
-                ..Default::default()
-            },
-        );
+        scene.push(crate::UiNode::Label {
+            id: crate::NodeId(40_012),
+            bounds: Rect::new(x + 1.0, 22.0, 5.0, 10.0),
+            color: Color::ACCENT,
+            text: "z".into(),
+        });
     } else if snapshot.is_none_or(|s| !s.owned) {
-        b.text(
-            Rect::new(x + 22.0, 22.0, 6.0, 10.0),
-            if snapshot.is_some() { "E" } else { "!" }.into(),
-            TextStyle {
-                color: Color::rgba(174, 220, 242, 255),
-                font_size: 8.0,
-                line_height: 10.0,
-                ..Default::default()
-            },
-        );
+        scene.push(crate::UiNode::Label {
+            id: crate::NodeId(40_013),
+            bounds: Rect::new(x + 22.0, 22.0, 6.0, 10.0),
+            color: Color::ACCENT,
+            text: if snapshot.is_some() { "E" } else { "!" }.into(),
+        });
     }
-    list.commands.extend(b.finish().unwrap().commands);
 }
 
 #[cfg(test)]
@@ -644,6 +628,7 @@ mod tests {
     fn compact_bar_orders_workspaces_applets_bell_and_system_controls() {
         let applets = applets(3);
         let bar = StatusBar::new(1, 1280.0, 36.0, Some(&desktop()), true, None, &applets);
+        assert_eq!(bar.display.revision, bar.scene.revision());
         let workspace = bar
             .scene
             .hit_targets()
@@ -652,6 +637,11 @@ mod tests {
             })
             .unwrap();
         let tray = applet_targets(1280.0, &applets).next().unwrap().0;
+        let applet_action = bar
+            .scene
+            .hit_targets()
+            .find(|(_, action)| *action == UiAction::Applet(1))
+            .expect("first applet remains actionable");
         let bell = bar
             .scene
             .hit_targets()
@@ -670,6 +660,7 @@ mod tests {
         assert_eq!(system.x, 1224.0);
         assert_eq!(bell.x, 1190.0);
         assert_eq!(system.width, 48.0);
+        assert_eq!(applet_action.0, tray);
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Image { id, bounds, .. } if id.0 == 40_001 && bounds.width == 16.0)));
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
@@ -685,15 +676,18 @@ mod tests {
         let bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Label { text, .. } if text == "0")));
-        assert!(bar.display.commands.iter().any(|command| matches!(command,
-            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
-                if bounds.width == 3.0 && bounds.height == 3.0 && paint.radii.top_left == 1.5)));
-        assert!(bar.display.commands.iter().any(|command| matches!(command,
-            knave_ui::DisplayCommand::Shape { paint, .. } if paint.radii.top_left >= 4.0)));
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Panel { id, bounds, .. } if id.0 == 5_001 && bounds.width == 3.0)));
+        assert!(
+            bar.display
+                .commands
+                .iter()
+                .any(|command| matches!(command, knave_ui::DisplayCommand::Shape { .. }))
+        );
     }
 
     #[test]
-    fn focused_title_uses_a_bounded_clipped_island_and_one_line_text() {
+    fn focused_title_keeps_its_widget_allocation_and_single_line_clip() {
         let mut desktop = desktop();
         desktop.windows.push(knave_desktop_api::WindowSummary {
             id: knave_desktop_api::WindowId(9),
@@ -728,13 +722,11 @@ mod tests {
                 _ => None,
             })
             .expect("focused title");
-        assert!(text.ends_with('…'));
-        assert!(estimated_text_width(text) <= bounds.width);
         assert!(bounds.width <= 205.0);
         assert!(bar.display.commands.iter().any(|command| matches!(command,
             knave_ui::DisplayCommand::Text { bounds: clip_bounds, style, clip: Some(clip), text: rendered, .. }
                 if clip_bounds == &bounds && clip == &bounds && rendered == text
-                    && style.wrap == knave_ui::TextWrap::None && style.font_size == 11.0)));
+                    && style.wrap == knave_ui::TextWrap::None)));
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Image { id, bounds, .. } if id.0 == 9 && bounds.width == 16.0)));
     }
@@ -828,5 +820,115 @@ mod tests {
             UiNode::Image { id, .. } if id.0 == 9)));
         assert!(!bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Panel { id, .. } if id.0 == 7_000)));
+    }
+
+    #[test]
+    fn statusbar_classes_resolve_widget_styles_and_interaction_states() {
+        let mut snapshot = desktop();
+        snapshot.windows.push(knave_desktop_api::WindowSummary {
+            id: knave_desktop_api::WindowId(9),
+            title: "CSS styled focus".into(),
+            app_id: "org.example.Editor".into(),
+            workspace: WorkspaceId(1),
+            focused: true,
+            minimized: false,
+            floating: false,
+            fullscreen: false,
+            maximized: false,
+        });
+        let mut bar = StatusBar::new(1, 600.0, 36.0, Some(&snapshot), true, None, &[]);
+        let active_index = bar
+            .scene
+            .targets
+            .iter()
+            .position(|target| target.action == UiAction::FocusWorkspace(WorkspaceId(1)))
+            .unwrap();
+        let idle_index = bar
+            .scene
+            .targets
+            .iter()
+            .position(|target| target.action == UiAction::FocusWorkspace(WorkspaceId(2)))
+            .unwrap();
+        let sheet = ".statusbar__workspace-action { margin: 1px; padding: 2px; border-radius: 3px; } \
+            .statusbar__workspace-action:selected { background-color: #123456; } \
+            .statusbar__workspace-action:hover { background-color: #abcdef; } \
+            .statusbar__focused-title { font-size: 17px; }";
+        bar.set_stylesheet(sheet).unwrap();
+        let styled = bar.scene.targets[active_index].bounds;
+        assert_eq!(
+            bar.scene.hit_test(
+                styled.x + styled.width / 2.0,
+                styled.y + styled.height / 2.0
+            ),
+            Some(UiAction::FocusWorkspace(WorkspaceId(1)))
+        );
+        for (index, target) in bar.scene.targets.iter().enumerate() {
+            assert_eq!(
+                bar.toolkit_scene.bounds(ElementId(50_000 + index as u64)),
+                Some(target.bounds),
+                "action target follows its toolkit element"
+            );
+        }
+        let active = bar
+            .toolkit_scene
+            .computed_style(ElementId(50_000 + active_index as u64))
+            .unwrap();
+        assert_eq!(active.padding, knave_ui::toolkit::Insets::all(2.0));
+        assert_eq!(active.margin, knave_ui::toolkit::Insets::all(1.0));
+        assert_eq!(active.style.radius, 3.0);
+        assert_eq!(active.style.selected, Color::rgba(0x12, 0x34, 0x56, 255));
+        let hover = bar
+            .toolkit_scene
+            .computed_style_for(
+                ElementId(50_000 + idle_index as u64),
+                knave_ui::toolkit::InteractionState {
+                    hovered: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(hover.style.hover, Color::rgba(0xab, 0xcd, 0xef, 255));
+        assert_eq!(
+            bar.toolkit_scene
+                .computed_style(ElementId(60_008))
+                .unwrap()
+                .style
+                .text
+                .font_size,
+            17.0
+        );
+    }
+
+    #[test]
+    fn notification_count_and_dnd_state_remain_in_the_styled_scene() {
+        let mut notifications = NotificationSnapshot {
+            owned: true,
+            dnd: true,
+            ..Default::default()
+        };
+        notifications
+            .notifications
+            .push(knave_desktop_api::notifications::Notification {
+                unread: true,
+                ..Default::default()
+            });
+        let bar = StatusBar::new(
+            1,
+            800.0,
+            36.0,
+            Some(&desktop()),
+            true,
+            Some(&notifications),
+            &[],
+        );
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Label { id, text, .. } if id.0 == 40_011 && text == "1")));
+        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Label { id, text, .. } if id.0 == 40_012 && text == "z")));
+        assert!(
+            bar.scene
+                .hit_targets()
+                .any(|(_, action)| action == UiAction::ToggleNotifications)
+        );
     }
 }
