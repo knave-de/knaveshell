@@ -80,7 +80,8 @@ that actually exist.
 ## Code quality
 
 Keep UI composition, rendering, Wayland integration, and desktop transport in
-explicit crates. Do not mix rendering, transport, configuration, and
+explicit crates. The standalone `knave-ui` repository owns the UI toolkit, assets
+and renderer; consume those crates through their pinned Git revision. Do not mix rendering, transport, configuration, and
 compositor policy in one module.
 
 Use typed errors and honest unavailable/disconnected states. Do not fabricate
