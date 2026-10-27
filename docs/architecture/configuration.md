@@ -8,8 +8,8 @@ competing shell configuration file, parse Villain's root-level file, or persist
 runtime state as user settings. Knave owns migration and supplies the
 compositor/session/shell projections through typed APIs.
 
-The shell reads `appearance.theme` from that same canonical file when each
-surface process starts. `dark` and `light` select the corresponding embedded
+The shell reads the `appearance.theme.mode` value from that same canonical file
+when each surface process starts. `dark` and `light` select the corresponding embedded
 toolkit stylesheet. `system` uses dark CSS deterministically until Knave has an
 authoritative system color preference source. Theme changes take effect after
 restarting the shell; reconstructed status-bar and overview scenes retain the
