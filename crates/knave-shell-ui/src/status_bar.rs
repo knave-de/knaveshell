@@ -886,7 +886,14 @@ mod tests {
         assert_eq!(active.padding, knave_ui::toolkit::Insets::all(2.0));
         assert_eq!(active.margin, knave_ui::toolkit::Insets::all(1.0));
         assert_eq!(active.style.radius, 3.0);
-        assert_eq!(active.style.selected, Color::rgba(0x12, 0x34, 0x56, 255));
+        assert_eq!(
+            active
+                .style
+                .background
+                .as_ref()
+                .and_then(|paint| paint.fill),
+            Some(Color::rgba(0x12, 0x34, 0x56, 255))
+        );
         let hover = bar
             .toolkit_scene
             .computed_style_for(
@@ -897,7 +904,10 @@ mod tests {
                 },
             )
             .unwrap();
-        assert_eq!(hover.style.hover, Color::rgba(0xab, 0xcd, 0xef, 255));
+        assert_eq!(
+            hover.style.background.as_ref().and_then(|paint| paint.fill),
+            Some(Color::rgba(0xab, 0xcd, 0xef, 255))
+        );
         assert_eq!(
             bar.toolkit_scene
                 .computed_style(ElementId(60_008))
@@ -928,8 +938,10 @@ mod tests {
                 .computed_style(ElementId(50_000 + active_index as u64))
                 .unwrap()
                 .style
-                .selected,
-            Color::rgba(0x12, 0x34, 0x56, 255),
+                .background
+                .as_ref()
+                .and_then(|paint| paint.fill),
+            Some(Color::rgba(0x12, 0x34, 0x56, 255)),
             "theme changes keep the application stylesheet override"
         );
     }
