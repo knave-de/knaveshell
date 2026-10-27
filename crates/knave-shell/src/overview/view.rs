@@ -5,7 +5,6 @@ use knave_ui::{
 };
 
 const INK: Color = Color::rgba(17, 23, 33, 255);
-const PANEL: Color = Color::rgba(32, 42, 56, 255);
 const MUTED: Color = Color::rgba(165, 180, 200, 255);
 const BLUE: Color = Color::rgba(139, 184, 255, 255);
 
@@ -42,9 +41,8 @@ fn text(id: u64, value: impl Into<String>, r: Rect, size: f32, color: Color) -> 
 }
 fn control(id: u64, value: impl Into<String>, r: Rect) -> Element {
     let mut e = placed(Element::new(id, Widget::Button(value.into())), r);
-    e.style.background = Some(paint(PANEL, 12.0, Some(Color::rgba(66, 80, 99, 255))));
-    e.style.hover = Color::rgba(47, 64, 87, 255);
-    e.style.focus = BLUE;
+    // Let the bundled CSS own surface, hover, pressed and keyboard-focus paint.
+    e.style.radius = 12.0;
     e.layout = e.layout.with_padding(Insets::symmetric(10.0, 14.0));
     e
 }
@@ -310,10 +308,6 @@ impl Overview {
             let mut button = placed(Element::new(id, Widget::Button(String::new())), bounds);
             let transparent = Color::rgba(0, 0, 0, 0);
             button.style.background = Some(ShapePaint::fill(transparent));
-            button.style.hover = transparent;
-            button.style.pressed = transparent;
-            button.style.selected = transparent;
-            button.style.focus = transparent;
             if let knave_shell_ui::UiAction::Applet(id) = action {
                 button.tooltip = self
                     .applets
@@ -348,9 +342,6 @@ impl Overview {
                 Color::rgba(77, 94, 115, 255)
             }),
         ));
-        card.style.hover = Color::rgba(0, 0, 0, 0);
-        card.style.pressed = Color::rgba(0, 0, 0, 0);
-        card.style.focus = BLUE;
         card.layout.clip = ClipMode::Bounds;
         self.targets.insert(
             ElementId(id),
@@ -425,8 +416,6 @@ impl Overview {
                     Rect::new(6.0 + n as f32 * pitch, 6.0, icon_size, icon_size),
                 );
                 icon.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
-                icon.style.hover = Color::rgba(149, 185, 238, 32);
-                icon.style.focus = BLUE;
                 icon.style.radii = Some(CornerRadii::uniform(7.0));
                 // Hover and accessibility name the exact window, not its application.
                 icon.tooltip = Some(format!("Restore {}", short(title, 120)));
