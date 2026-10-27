@@ -1,7 +1,7 @@
 //! Small bundled status symbols; decode once so bar rebuilds stay allocation-light.
 use std::sync::OnceLock;
 
-use knave_ui::UiImage;
+use knave_ui::{Color, UiImage};
 
 const ICON_PIXELS: u64 = 48 * 48;
 const ICON_BYTES: usize = (ICON_PIXELS * 4) as usize;
@@ -32,6 +32,16 @@ fn decode(bytes: &[u8]) -> Option<UiImage> {
         info.height,
         buffer[..info.buffer_size()].to_vec(),
     )
+}
+
+pub(super) fn tint(image: &UiImage, color: Color) -> UiImage {
+    let mut pixels = image.pixels().to_vec();
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel[0] = color.red;
+        pixel[1] = color.green;
+        pixel[2] = color.blue;
+    }
+    UiImage::from_rgba(image.width(), image.height(), pixels).unwrap_or_else(|| image.clone())
 }
 
 pub fn wifi() -> Option<UiImage> {

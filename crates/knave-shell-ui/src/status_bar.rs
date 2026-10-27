@@ -82,6 +82,7 @@ pub struct StatusBar {
     pub display: DisplayList,
     toolkit_scene: ToolkitScene,
     size: [f32; 2],
+    tinted_status_icons: Option<(Color, [Option<knave_ui::UiImage>; 3])>,
 }
 
 impl StatusBar {
@@ -117,6 +118,53 @@ impl StatusBar {
             .toolkit_scene
             .display_list(self.size, &mut metrics)
             .clone();
+        let icon_color = [40_001, 40_002, 40_000]
+            .into_iter()
+            .find_map(|id| {
+                self.toolkit_scene
+                    .computed_style(ElementId(60_000 + id))
+                    .map(|style| style.style.text.color)
+            })
+            .unwrap_or(Color::TEXT);
+        if self
+            .tinted_status_icons
+            .as_ref()
+            .is_none_or(|(cached_color, _)| *cached_color != icon_color)
+        {
+            self.tinted_status_icons = Some((
+                icon_color,
+                [
+                    crate::status_icons::bell()
+                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                    crate::status_icons::wifi()
+                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                    crate::status_icons::volume()
+                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                ],
+            ));
+        }
+        let originals = [
+            crate::status_icons::bell(),
+            crate::status_icons::wifi(),
+            crate::status_icons::volume(),
+        ];
+        let (_, tinted) = self
+            .tinted_status_icons
+            .as_ref()
+            .expect("icon tint initialized");
+        for command in &mut self.display.commands {
+            let knave_ui::DisplayCommand::Image { image, .. } = command else {
+                continue;
+            };
+            if let Some((_, replacement)) = originals.iter().zip(tinted).find(|(original, _)| {
+                original
+                    .as_ref()
+                    .is_some_and(|source| source.cache_key() == image.cache_key())
+            }) && let Some(replacement) = replacement
+            {
+                *image = replacement.clone();
+            }
+        }
         self.display.revision = self.scene.revision();
     }
 }
@@ -316,6 +364,7 @@ impl StatusBar {
             display: DisplayList::new(revision, Color::BACKGROUND),
             toolkit_scene,
             size: [width, height],
+            tinted_status_icons: None,
         };
         result.refresh_toolkit_output();
         result
@@ -790,6 +839,88 @@ mod tests {
                 .hit_targets()
                 .any(|(_, action)| action == UiAction::ToggleQuickSettings)
         );
+    }
+
+    #[test]
+    fn bundled_status_symbols_follow_theme_text_color_without_tinting_applets() {
+        let applet_image =
+            knave_ui::UiImage::from_rgba(48, 48, [7, 11, 13, 255].repeat(48 * 48)).unwrap();
+        let applet = Applet {
+            id: 7,
+            title: "Third-party applet".into(),
+            image: Some(applet_image.clone()),
+            attention: false,
+        };
+        let mut bar = StatusBar::new(1, 800.0, 36.0, None, true, None, &[applet]);
+
+        fn symbols<'a>(
+            bar: &'a StatusBar,
+            applet_image: &knave_ui::UiImage,
+        ) -> Vec<&'a knave_ui::UiImage> {
+            bar.display
+                .commands
+                .iter()
+                .filter_map(|command| match command {
+                    knave_ui::DisplayCommand::Image { image, .. }
+                        if image.width() == 48 && image.height() == 48 && image != applet_image =>
+                    {
+                        Some(image)
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+        let check_color = |bar: &StatusBar, expected: [u8; 3]| {
+            let symbols = symbols(bar, &applet_image);
+            assert_eq!(symbols.len(), 3);
+            for image in symbols {
+                let visible_pixel = image
+                    .pixels()
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .find(|pixel| pixel[3] > 200)
+                    .expect("symbol contains an opaque pixel");
+                assert_eq!(&visible_pixel[..3], &expected);
+            }
+            assert!(bar.display.commands.iter().any(|command| matches!(command,
+                knave_ui::DisplayCommand::Image { image, .. } if image == &applet_image)));
+        };
+
+        check_color(&bar, [240, 243, 246]);
+        bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
+        check_color(&bar, [23, 35, 45]);
+        bar.set_theme(knave_ui::toolkit::Theme::Dark).unwrap();
+        check_color(&bar, [240, 243, 246]);
+
+        let mut notifications_disabled = StatusBar::new(2, 800.0, 36.0, None, false, None, &[]);
+        notifications_disabled
+            .set_theme(knave_ui::toolkit::Theme::Light)
+            .unwrap();
+        let symbols = notifications_disabled
+            .display
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                knave_ui::DisplayCommand::Image { image, .. }
+                    if image.width() == 48 && image.height() == 48 =>
+                {
+                    Some(image)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(symbols.len(), 2);
+        for image in symbols {
+            let visible_pixel = image
+                .pixels()
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .find(|pixel| pixel[3] > 200)
+                .expect("symbol contains an opaque pixel");
+            assert_eq!(&visible_pixel[..3], &[23, 35, 45]);
+        }
     }
 
     #[test]
