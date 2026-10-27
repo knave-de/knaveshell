@@ -39,6 +39,7 @@ const FIELD: ElementId = ElementId(4);
 const CANCEL: ElementId = ElementId(5);
 const CONFIRM: ElementId = ElementId(6);
 struct Agent {
+    theme: Theme,
     shared: Arc<Mutex<Shared>>,
     commands: Option<async_channel::Sender<Command>>,
     worker: Option<std::thread::JoinHandle<()>>,
@@ -50,15 +51,18 @@ struct Agent {
     focus_field: bool,
 }
 impl Agent {
-    fn new() -> Self {
+    fn with_theme(theme: Theme) -> Self {
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
+        scene.set_theme(theme).expect("built-in theme is valid");
         Self {
+            theme,
             shared: Arc::new(Mutex::new(Shared::default())),
             commands: None,
             worker: None,
             state: State::default(),
             secret: Zeroizing::new(String::new()),
             selected_all: false,
-            scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
+            scene,
             dirty: true,
             focus_field: false,
         }
@@ -262,6 +266,9 @@ impl Application for Agent {
             self.scene
                 .replace(self.compose())
                 .expect("bounded authentication scene");
+            self.scene
+                .set_theme(self.theme)
+                .expect("built-in theme is valid");
             self.scene.layout(size, text);
             if self.focus_field {
                 let _ = self.scene.set_focus(Some(FIELD));
@@ -281,6 +288,9 @@ impl Drop for Agent {
     }
 }
 pub fn run() -> Result<(), String> {
+    run_with_theme(Theme::Dark)
+}
+pub fn run_with_theme(theme: Theme) -> Result<(), String> {
     knave_wayland::run_application(
         SurfaceOptions {
             size: Some([360, 220]),
@@ -289,7 +299,7 @@ pub fn run() -> Result<(), String> {
             namespace: "knave-shell-polkit".into(),
             ..Default::default()
         },
-        Agent::new(),
+        Agent::with_theme(theme),
     )
     .map_err(|e| e.to_string())
 }

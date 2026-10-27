@@ -28,6 +28,7 @@ impl Mode {
     }
 }
 pub struct Picker {
+    theme: Theme,
     workspace_frozen: bool,
     mode: Mode,
     request: Request,
@@ -46,6 +47,10 @@ impl Picker {
     }
 
     pub fn new(request: Request) -> Result<Self, String> {
+        Self::with_theme(request, Theme::Dark)
+    }
+
+    pub fn with_theme(request: Request, theme: Theme) -> Result<Self, String> {
         request.validate()?;
         let images = request
             .sources
@@ -69,7 +74,10 @@ impl Picker {
                 UiImage::from_rgba(info.width, info.height, pixels)
             })
             .collect();
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).map_err(|e| e.to_string())?;
+        scene.set_theme(theme).map_err(|e| e.to_string())?;
         Ok(Self {
+            theme,
             workspace_frozen: false,
             mode: if request
                 .sources
@@ -89,7 +97,7 @@ impl Picker {
             request,
             images,
             selected: BTreeSet::new(),
-            scene: Scene::new(Element::new(0, Widget::Panel)).map_err(|e| e.to_string())?,
+            scene,
             dirty: true,
             closed: false,
             size: [0.0; 2],
@@ -480,6 +488,9 @@ impl Application for Picker {
         if self.dirty || self.size != size {
             let focus = self.scene.focus();
             if let Ok(mut scene) = Scene::new(self.compose()) {
+                scene
+                    .set_theme(self.theme)
+                    .expect("built-in theme is valid");
                 scene.layout(size, text);
                 let initial = (self.request.operation != Operation::Sharing).then_some(CANCEL);
                 let _ = scene.set_focus(focus.or(initial));
@@ -518,6 +529,10 @@ fn surface_options(sharing: bool) -> SurfaceOptions {
 }
 
 pub fn run() -> Result<(), String> {
+    run_with_theme(Theme::Dark)
+}
+
+pub fn run_with_theme(theme: Theme) -> Result<(), String> {
     let mut bytes = Vec::new();
     io::stdin()
         .take(MAX_REQUEST as u64 + 1)
@@ -528,8 +543,11 @@ pub fn run() -> Result<(), String> {
     }
     let request: Request = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let sharing = request.operation == Operation::Sharing;
-    knave_wayland::run_application(surface_options(sharing), Picker::new(request)?)
-        .map_err(|e| e.to_string())
+    knave_wayland::run_application(
+        surface_options(sharing),
+        Picker::with_theme(request, theme)?,
+    )
+    .map_err(|e| e.to_string())
 }
 #[cfg(test)]
 mod tests {

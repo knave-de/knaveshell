@@ -8,6 +8,12 @@ use std::{
 use knave_shell_ui::UiScene;
 use knave_wayland::ShellRole;
 
+fn configured_theme() -> Result<knave_ui::toolkit::Theme, String> {
+    let config = knave_config::ConfigDocument::at_default_path()
+        .map_err(|error| format!("could not load Knave appearance preference: {error}"))?;
+    Ok(knave_shell::toolkit_theme(config.config().appearance.theme))
+}
+
 fn usage() -> &'static str {
     "usage: knave-shell [--check] [bar|overview|portal-picker|polkit-agent|polkit-cache]\n       knave-shell --supports-overview-service"
 }
@@ -44,10 +50,10 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if std::env::args().skip(1).eq(["polkit-agent"]) {
-        return knave_shell::polkit::run();
+        return knave_shell::polkit::run_with_theme(configured_theme()?);
     }
     if std::env::args().skip(1).eq(["quick-settings"]) {
-        return knave_shell::quick_settings::run();
+        return knave_shell::quick_settings::run_with_theme(configured_theme()?);
     }
     if std::env::args().nth(1).as_deref() == Some("tray-menu") {
         let args: Vec<_> = std::env::args().skip(2).collect();
@@ -61,7 +67,7 @@ fn run() -> Result<(), String> {
         );
     }
     if std::env::args().skip(1).eq(["notifications"]) {
-        return knave_shell::notifications::run();
+        return knave_shell::notifications::run_with_theme(configured_theme()?);
     }
     if std::env::args().nth(1).as_deref() == Some("wallpaper") {
         let args: Vec<_> = std::env::args().skip(2).collect();
@@ -79,7 +85,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     if std::env::args().skip(1).eq(["portal-picker"]) {
-        return knave_shell::portal::run();
+        return knave_shell::portal::run_with_theme(configured_theme()?);
     }
     if std::env::args().skip(1).eq(["--supports-overview-service"]) {
         return Ok(());
@@ -116,11 +122,11 @@ fn run() -> Result<(), String> {
                 namespace: "knave-shell-overview".into(),
                 ..Default::default()
             },
-            knave_shell::overview::Overview::new(),
+            knave_shell::overview::Overview::with_theme(configured_theme()?),
         )
         .map_err(|error| error.to_string())
     } else {
-        knave_wayland::run(role).map_err(|error| error.to_string())
+        knave_wayland::run_with_theme(role, configured_theme()?).map_err(|error| error.to_string())
     }
 }
 

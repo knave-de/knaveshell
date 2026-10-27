@@ -21,7 +21,7 @@ impl TextMeasurer for Metrics {
     }
 }
 fn agent(echo: bool) -> Agent {
-    let mut a = Agent::new();
+    let mut a = Agent::with_theme(Theme::Dark);
     a.state = State {
         generation: 42,
         visible: true,

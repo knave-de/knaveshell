@@ -174,7 +174,11 @@ pub fn run_application(
     app: impl Application + 'static,
 ) -> Result<(), super::WaylandError> {
     validate_options(&options)?;
-    super::run_internal(super::ShellRole::Overview, Some((options, Box::new(app))))
+    super::run_internal(
+        super::ShellRole::Overview,
+        Some((options, Box::new(app))),
+        knave_ui::toolkit::Theme::Dark,
+    )
 }
 
 fn validate_options(options: &SurfaceOptions) -> Result<(), super::WaylandError> {

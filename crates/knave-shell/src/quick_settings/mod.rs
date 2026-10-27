@@ -48,6 +48,7 @@ enum ChargeFeedback {
     Failed(String),
 }
 pub struct QuickSettings {
+    theme: Theme,
     state: QuickSettingsSnapshot,
     client: Option<QuickSettingsClient>,
     scene: Scene,
@@ -79,10 +80,16 @@ impl Default for QuickSettings {
 }
 impl QuickSettings {
     pub fn new() -> Self {
+        Self::with_theme(Theme::Dark)
+    }
+    pub fn with_theme(theme: Theme) -> Self {
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
+        scene.set_theme(theme).expect("built-in theme is valid");
         Self {
+            theme,
             state: Default::default(),
             client: None,
-            scene: Scene::new(Element::new(0, Widget::Panel)).unwrap(),
+            scene,
             display: Default::default(),
             size: [0.0; 2],
             dirty: true,
@@ -502,6 +509,9 @@ impl Application for QuickSettings {
             if let Err(e) = self.scene.replace(tree) {
                 self.error = Some(e.to_string())
             }
+            if let Err(e) = self.scene.set_theme(self.theme) {
+                self.error = Some(e.to_string())
+            }
             if self.confirmation.is_some() {
                 let _ = self.scene.open_popup(ElementId(CONFIRMATION));
             }
@@ -521,6 +531,9 @@ fn contains(r: Rect, p: [f32; 2]) -> bool {
     p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
 }
 pub fn run() -> Result<(), String> {
+    run_with_theme(Theme::Dark)
+}
+pub fn run_with_theme(theme: Theme) -> Result<(), String> {
     knave_wayland::run_application(
         SurfaceOptions {
             keyboard: KeyboardMode::None,
@@ -528,7 +541,7 @@ pub fn run() -> Result<(), String> {
             namespace: "knave-shell-quick-settings".into(),
             ..Default::default()
         },
-        QuickSettings::new(),
+        QuickSettings::with_theme(theme),
     )
     .map_err(|e| e.to_string())
 }
