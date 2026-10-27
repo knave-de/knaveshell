@@ -68,6 +68,27 @@ fn app() -> QuickSettings {
     });
     app
 }
+
+#[test]
+fn selected_theme_survives_quick_settings_scene_recomposition() {
+    let mut light = QuickSettings::with_theme(Theme::Light);
+    assert_eq!(light.scene.theme(), Theme::Light);
+    light.apply(QuickSettingsSnapshot {
+        open: true,
+        ..Default::default()
+    });
+    light.frame([1280.0, 800.0], &mut Metrics);
+    assert_eq!(light.scene.theme(), Theme::Light);
+
+    let mut dark = QuickSettings::new();
+    assert_eq!(dark.scene.theme(), Theme::Dark);
+    dark.apply(QuickSettingsSnapshot {
+        open: true,
+        ..Default::default()
+    });
+    dark.frame([1280.0, 800.0], &mut Metrics);
+    assert_eq!(dark.scene.theme(), Theme::Dark);
+}
 #[test]
 fn all_pages_fit_narrow_and_short_outputs() {
     for size in [[320.0, 240.0], [320.0, 568.0], [1280.0, 800.0]] {

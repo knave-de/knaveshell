@@ -30,6 +30,7 @@ enum Target {
     Expand(u64),
 }
 pub struct Notifications {
+    theme: Theme,
     pub(super) state: NotificationSnapshot,
     client: Option<NotificationClient>,
     loader: Option<Loader>,
@@ -59,13 +60,19 @@ impl Default for Notifications {
 }
 impl Notifications {
     pub fn new() -> Self {
+        Self::with_theme(Theme::Dark)
+    }
+    pub fn with_theme(theme: Theme) -> Self {
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
+        scene.set_theme(theme).expect("built-in theme is valid");
         Self {
+            theme,
             state: NotificationSnapshot::default(),
             client: None,
             loader: None,
             icons: Icons::default(),
             previews: HashMap::new(),
-            scene: Scene::new(Element::new(0, Widget::Panel)).unwrap(),
+            scene,
             display: DisplayList::default(),
             targets: HashMap::new(),
             size: [0.0; 2],
@@ -321,6 +328,9 @@ impl Application for Notifications {
             if let Err(error) = self.scene.replace(tree) {
                 self.error = Some(error.to_string());
             }
+            if let Err(error) = self.scene.set_theme(self.theme) {
+                self.error = Some(error.to_string());
+            }
             self.scene.layout(size, text);
             if newly_open {
                 let _ = self.scene.set_focus(Some(ElementId(CLOSE)));
@@ -350,6 +360,9 @@ fn contains(r: Rect, p: [f32; 2]) -> bool {
     p[0] >= r.x && p[0] < r.x + r.width && p[1] >= r.y && p[1] < r.y + r.height
 }
 pub fn run() -> Result<(), String> {
+    run_with_theme(Theme::Dark)
+}
+pub fn run_with_theme(theme: Theme) -> Result<(), String> {
     knave_wayland::run_application(
         SurfaceOptions {
             keyboard: KeyboardMode::None,
@@ -357,7 +370,7 @@ pub fn run() -> Result<(), String> {
             namespace: "knave-shell-notifications".into(),
             ..Default::default()
         },
-        Notifications::new(),
+        Notifications::with_theme(theme),
     )
     .map_err(|e| e.to_string())
 }
