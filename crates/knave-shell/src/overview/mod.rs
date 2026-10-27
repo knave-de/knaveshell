@@ -338,7 +338,9 @@ impl Overview {
     pub fn check(&mut self, size: [f32; 2]) -> Result<(), UiError> {
         self.size = size;
         let mut scene = Scene::new(self.compose())?;
-        scene.set_theme(self.theme)?;
+        scene
+            .set_theme(self.theme)
+            .expect("bundled shell theme stylesheet is valid");
         Ok(())
     }
     fn loader(&mut self) -> &Loader {
