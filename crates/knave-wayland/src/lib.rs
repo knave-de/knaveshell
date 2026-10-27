@@ -562,12 +562,21 @@ fn dispatch_action(
 }
 
 pub fn run(role: ShellRole) -> Result<(), WaylandError> {
-    run_internal(role, None)
+    run_with_theme(role, knave_ui::toolkit::Theme::Dark)
+}
+
+/// Run a shell surface with the canonical Knave appearance preference applied.
+pub fn run_with_theme(
+    role: ShellRole,
+    theme: knave_ui::toolkit::Theme,
+) -> Result<(), WaylandError> {
+    run_internal(role, None, theme)
 }
 
 fn run_internal(
     role: ShellRole,
     application: Option<(SurfaceOptions, Box<dyn Application>)>,
+    theme: knave_ui::toolkit::Theme,
 ) -> Result<(), WaylandError> {
     let (options, mut app) = match application {
         Some((options, app)) => (Some(options), Some(app)),
@@ -715,6 +724,7 @@ fn run_internal(
         keyboard: None,
         pointer: None,
         role,
+        theme,
         app,
         options,
         notification_client: notification_bar.then(|| {
@@ -805,6 +815,7 @@ struct Runtime {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<ThemedPointer>,
     role: ShellRole,
+    theme: knave_ui::toolkit::Theme,
     app: Option<Box<dyn Application>>,
     options: Option<SurfaceOptions>,
     notification_client: Option<notifications::NotificationClient>,
@@ -1084,7 +1095,7 @@ impl Runtime {
         }
         if self.app.is_none() && self.scene_dirty {
             if self.role == ShellRole::Bar {
-                let bar = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
+                let mut bar = knave_shell_ui::status_bar::StatusBar::with_focused_icon(
                     self.revision,
                     self.width as f32,
                     self.height as f32,
@@ -1094,6 +1105,8 @@ impl Runtime {
                     &self.applets,
                     self.focused_app_icon.as_ref(),
                 );
+                bar.set_theme(self.theme)
+                    .expect("bundled shell theme stylesheet is valid");
                 self.scene = bar.scene;
                 self.render_list = bar.display;
             } else {

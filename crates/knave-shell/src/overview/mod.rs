@@ -48,6 +48,7 @@ pub struct Overview {
     notifications: Option<knave_desktop_api::notifications::NotificationSnapshot>,
     applets: Vec<knave_shell_ui::status_bar::Applet>,
     focused_icon: Option<knave_ui::UiImage>,
+    theme: knave_ui::toolkit::Theme,
     notifications_enabled: bool,
     notifications_after_hide: bool,
     quick_settings_after_hide: bool,
@@ -88,7 +89,7 @@ impl Default for Overview {
 }
 impl Overview {
     fn status_bar_component(&self, width: f32) -> StatusBar {
-        StatusBar::with_focused_icon(
+        let mut bar = StatusBar::with_focused_icon(
             0,
             width,
             STATUS_BAR_HEIGHT,
@@ -97,21 +98,32 @@ impl Overview {
             self.notifications.as_ref(),
             &self.applets,
             self.focused_icon.as_ref(),
-        )
+        );
+        bar.set_theme(self.theme)
+            .expect("bundled shell theme stylesheet is valid");
+        bar
     }
     pub fn new() -> Self {
+        Self::with_theme(knave_ui::toolkit::Theme::Dark)
+    }
+    pub fn with_theme(theme: knave_ui::toolkit::Theme) -> Self {
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
+        scene
+            .set_theme(theme)
+            .expect("bundled shell theme stylesheet is valid");
         Self {
             display: DisplayList::default(),
             snapshot: None,
             notifications: None,
             applets: Vec::new(),
             focused_icon: None,
+            theme,
             notifications_enabled: true,
             notifications_after_hide: false,
             quick_settings_after_hide: false,
             panes: Vec::new(),
             workspace: None,
-            scene: Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene"),
+            scene,
             targets: HashMap::new(),
             window_ids: HashMap::new(),
             next_id: 100_000,
@@ -297,6 +309,9 @@ impl Overview {
         // Drop the old text widget and its captured input as well as the model,
         // so a late key release cannot copy the old query back into state.
         self.scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
+        self.scene
+            .set_theme(self.theme)
+            .expect("bundled shell theme stylesheet is valid");
         self.targets.clear();
         self.panes.clear();
         self.workspace = None;
@@ -322,7 +337,9 @@ impl Overview {
     /// Validate the composition without a Wayland connection or GPU.
     pub fn check(&mut self, size: [f32; 2]) -> Result<(), UiError> {
         self.size = size;
-        Scene::new(self.compose()).map(|_| ())
+        let mut scene = Scene::new(self.compose())?;
+        scene.set_theme(self.theme)?;
+        Ok(())
     }
     fn loader(&mut self) -> &Loader {
         if self.loader.is_none() {
@@ -400,6 +417,10 @@ impl Overview {
         let root = self.compose();
         match Scene::new(root) {
             Ok(mut scene) => {
+                if let Err(error) = scene.set_theme(self.theme) {
+                    self.host_error(&format!("Could not apply appearance theme: {error}"));
+                    return;
+                }
                 scene.layout(self.size, text);
                 if !self.surface_focused {
                     scene.event(Input::FocusLost);

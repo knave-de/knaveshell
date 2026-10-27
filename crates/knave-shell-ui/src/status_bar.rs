@@ -85,6 +85,16 @@ pub struct StatusBar {
 }
 
 impl StatusBar {
+    /// Apply the selected bundled toolkit palette to the widgets in this bar.
+    pub fn set_theme(
+        &mut self,
+        theme: knave_ui::toolkit::Theme,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.toolkit_scene.set_theme(theme)?;
+        self.refresh_toolkit_output();
+        Ok(())
+    }
+
     /// Apply a replacement stylesheet to the standard toolkit widgets in this bar.
     pub fn set_stylesheet(
         &mut self,
@@ -896,6 +906,31 @@ mod tests {
                 .text
                 .font_size,
             17.0
+        );
+        let dark_idle_background = bar
+            .toolkit_scene
+            .computed_style(ElementId(50_000 + idle_index as u64))
+            .unwrap()
+            .style
+            .background;
+        bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
+        assert_eq!(bar.toolkit_scene.theme(), knave_ui::toolkit::Theme::Light);
+        assert_ne!(
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + idle_index as u64))
+                .unwrap()
+                .style
+                .background,
+            dark_idle_background
+        );
+        assert_eq!(
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + active_index as u64))
+                .unwrap()
+                .style
+                .selected,
+            Color::rgba(0x12, 0x34, 0x56, 255),
+            "theme changes keep the application stylesheet override"
         );
     }
 
