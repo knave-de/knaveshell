@@ -887,11 +887,11 @@ mod tests {
                 knave_ui::DisplayCommand::Image { image, .. } if image == &applet_image)));
         };
 
-        check_color(&bar, [240, 243, 246]);
+        check_color(&bar, [232, 235, 239]);
         bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
-        check_color(&bar, [23, 35, 45]);
+        check_color(&bar, [23, 24, 28]);
         bar.set_theme(knave_ui::toolkit::Theme::Dark).unwrap();
-        check_color(&bar, [240, 243, 246]);
+        check_color(&bar, [232, 235, 239]);
 
         let mut notifications_disabled = StatusBar::new(2, 800.0, 36.0, None, false, None, &[]);
         notifications_disabled
@@ -919,7 +919,7 @@ mod tests {
                 .iter()
                 .find(|pixel| pixel[3] > 200)
                 .expect("symbol contains an opaque pixel");
-            assert_eq!(&visible_pixel[..3], &[23, 35, 45]);
+            assert_eq!(&visible_pixel[..3], &[23, 24, 28]);
         }
     }
 
