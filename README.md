@@ -44,13 +44,16 @@ compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume
 Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
-Shell-specific CSS in `crates/knave-shell-ui/src/styles/` restores the compact
-charcoal cards, rounded bar groups and blue highlights over Knave UI widgets.
-`common.css` owns the scoped dark/light palette; component files target named
-classes such as `statusbar__workspace-action`, `overview-search`,
-`notifications-card` and `quick-settings-active`. CSS stays below application
-overrides. Layout and hit targets remain in the Rust compositions; fullscreen
-dismissal hosts and compositor preview regions stay transparent.
+Knave UI supplies the shell's colors, surfaces, typography, control states
+and keyboard focus treatment. CSS in
+`crates/knave-shell-ui/src/styles/` is limited to shell-specific layout details,
+selected and error states, and the unread-count badge. User theme CSS layers over
+these shell rules, from `$XDG_DATA_HOME/knave/themes/<theme-name>/dark.css` or
+`light.css` (default data directory: `~/.local/share`). Configured theme and CSS
+file changes apply live. Invalid edits retain the last valid theme; missing files
+use the toolkit defaults. Application CSS overrides remain the final layer.
+Layout and hit targets remain in the Rust compositions;
+fullscreen structural roots and compositor preview regions stay transparent.
 
 ## Build
 

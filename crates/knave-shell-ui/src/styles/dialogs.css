@@ -1,10 +1,5 @@
-.portal-picker { background-color: var(--shell-portal); }
-.portal-card { background-color: var(--shell-portal-card); border-radius: 8px; }
-.portal-selected { background-color: var(--shell-portal-selected); }
-.portal-sharing { color: var(--shell-badge); }
+.portal-selected { background-color: var(--surface-selected); }
+.portal-sharing { color: var(--accent); }
 .portal-frozen { color: var(--warning); }
-.polkit-dialog { background-color: var(--shell-dialog); }
-.polkit-field { background-color: var(--shell-field); }
-.tray-menu-panel { background-color: var(--shell-card); border-radius: 7px; }
-.tray-menu-action { text-align: left; border-radius: 6px; }
-.tray-menu-status { color: var(--shell-muted); font-size: 12px; line-height: 16px; }
+.tray-menu-action { text-align: left; }
+.tray-menu-status { color: var(--text-secondary); }

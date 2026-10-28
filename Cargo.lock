@@ -998,6 +998,7 @@ dependencies = [
  "base64",
  "futures-util",
  "knave-apps",
+ "knave-config",
  "knave-desktop-api",
  "knave-icons",
  "knave-renderer",

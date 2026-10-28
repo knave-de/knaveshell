@@ -98,14 +98,7 @@ fn all_pages_fit_narrow_and_short_outputs() {
             app.page = page;
             let list = app.frame(size, &mut Metrics).clone();
             assert_eq!(list.clear_color.alpha, 0);
-            assert_eq!(
-                app.theme,
-                if app.state.light {
-                    Theme::Light
-                } else {
-                    Theme::Dark
-                }
-            );
+            assert_eq!(app.scene.theme(), app.theme);
             assert_eq!(
                 app.scene
                     .computed_style(ElementId(0))
@@ -391,6 +384,8 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
         matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
     );
     for light in [false, true] {
+        app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+            .expect("quick-settings theme should apply");
         app.state.light = light;
         app.apply(app.state.clone());
         let keys = |list: &DisplayList| {
@@ -609,4 +604,17 @@ fn custom_limit_summary_and_support_do_not_follow_upower_preset_toggle() {
     app.frame([1280.0, 800.0], &mut Metrics);
     let tree = app.compose();
     assert!(find(&tree, ElementId(LIMIT)).unwrap().enabled);
+}
+
+#[test]
+fn shell_panels_do_not_add_decorative_outlines() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    for id in [PANEL, ElementId(CLOSE)] {
+        let computed = app.scene.computed_style(id).unwrap();
+        assert!(
+            computed.outline.is_none_or(|outline| outline.width == 0.0),
+            "idle shell element {id:?} must use the toolkit's borderless presentation"
+        );
+    }
 }

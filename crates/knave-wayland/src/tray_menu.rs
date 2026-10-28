@@ -362,6 +362,12 @@ impl Menu {
     }
 }
 impl Application for Menu {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.dirty = true;
+        Ok(())
+    }
     fn set_waker(&mut self, waker: Waker) {
         self.client = Some(Client::start(
             self.owner.clone(),

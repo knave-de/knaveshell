@@ -41,6 +41,11 @@ impl Palette {
         e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }
+    fn surface_panel(&self, id: u64) -> Element {
+        let mut e = Element::new(id, Widget::Panel);
+        e.style.text.wrap = TextWrap::WordOrGlyph;
+        e
+    }
     fn button(&self, id: u64, label: impl Into<String>, enabled: bool) -> Element {
         let mut e = self.element(id, Widget::Button(label.into()));
         e.layout.padding = 8.0;
@@ -279,62 +284,63 @@ fn is_charging(status: &str) -> bool {
     status.eq_ignore_ascii_case("charging")
 }
 
-fn text_color(theme: Theme) -> Color {
-    static DARK: OnceLock<Color> = OnceLock::new();
-    static LIGHT: OnceLock<Color> = OnceLock::new();
-    let cache = if theme == Theme::Light { &LIGHT } else { &DARK };
-    *cache.get_or_init(|| {
-        let mut scene = Scene::new(knave_shell_ui::styles::root(
-            Element::new(1, Widget::Text(String::new())).class("quick-settings-icon"),
-            theme,
-        ))
-        .expect("icon text style scene is valid");
-        scene
-            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
-            .expect("shell stylesheet is valid");
-        scene
-            .computed_style(ElementId(1))
-            .map(|style| style.style.text.color)
-            .unwrap_or(Color::TEXT)
-    })
+pub(super) fn text_color(theme: Theme, user_theme_css: &str) -> Result<Color, StylesheetError> {
+    let mut scene = Scene::new(knave_shell_ui::styles::root(
+        Element::new(
+            1,
+            Widget::Icon(knave_ui::toolkit::Icon {
+                image: UiImage::from_rgba(1, 1, vec![0; 4]).expect("transparent sample icon"),
+                name: "quick settings".into(),
+            }),
+        )
+        .class("quick-settings-icon"),
+        theme,
+    ))
+    .expect("icon text style scene is valid");
+    scene.set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, user_theme_css)?;
+    Ok(scene
+        .computed_style(ElementId(1))
+        .map(|style| style.style.text.color)
+        .unwrap_or(Color::TEXT))
 }
 
-fn icon_image(icon: Icon, theme: Theme) -> UiImage {
-    static DARK: OnceLock<[UiImage; 8]> = OnceLock::new();
-    static LIGHT: OnceLock<[UiImage; 8]> = OnceLock::new();
-    let cache = if theme == Theme::Light { &LIGHT } else { &DARK };
-    cache.get_or_init(|| {
-        let color = text_color(theme);
-        [
-            Icon::Power,
-            Icon::Close,
-            Icon::Network,
-            Icon::Bluetooth,
-            Icon::Speaker,
-            Icon::Microphone,
-            Icon::Brightness,
-            Icon::Battery,
-        ]
-        .map(|i| raster_icon(i, color, None, false))
-    })[icon as usize]
+fn color_key(color: Color) -> [u8; 4] {
+    [color.red, color.green, color.blue, color.alpha]
+}
+
+fn icon_image(icon: Icon, color: Color) -> UiImage {
+    type IconCache = Mutex<std::collections::HashMap<([u8; 4], usize), UiImage>>;
+    static CACHE: OnceLock<IconCache> = OnceLock::new();
+    let key = (color_key(color), icon as usize);
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !cache.contains_key(&key) && cache.len() >= 128 {
+        cache.clear();
+    }
+    cache
+        .entry(key)
+        .or_insert_with(|| raster_icon(icon, color, None, false))
         .clone()
 }
 
-type BatteryIconCache = Mutex<std::collections::HashMap<(u8, bool, bool), UiImage>>;
+type BatteryIconCache = Mutex<std::collections::HashMap<(u8, bool, [u8; 4]), UiImage>>;
 
-fn battery_image(percent: u8, status: &str, theme: Theme) -> UiImage {
-    // At most 101 levels × two charging states × two palettes.
+fn battery_image(percent: u8, status: &str, color: Color) -> UiImage {
+    // Bound cached raster memory across user-theme color changes.
     static CACHE: OnceLock<BatteryIconCache> = OnceLock::new();
-    let key = (percent.min(100), is_charging(status), theme == Theme::Light);
-    CACHE
+    let key = (percent.min(100), is_charging(status), color_key(color));
+    let mut cache = CACHE
         .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !cache.contains_key(&key) && cache.len() >= 256 {
+        cache.clear();
+    }
+    cache
         .entry(key)
-        .or_insert_with(|| {
-            let color = text_color(if key.2 { Theme::Light } else { Theme::Dark });
-            raster_icon(Icon::Battery, color, Some(key.0), key.1)
-        })
+        .or_insert_with(|| raster_icon(Icon::Battery, color, Some(key.0), key.1))
         .clone()
 }
 
@@ -378,11 +384,14 @@ impl QuickSettings {
     }
     fn group(&mut self, p: &Palette) -> Element {
         let id = self.id();
-        let mut group = p.panel(id).component(ComponentKind::Card).layout(Layout {
-            padding: 12.0,
-            gap: 8.0,
-            ..Default::default()
-        });
+        let mut group = p
+            .surface_panel(id)
+            .component(ComponentKind::Card)
+            .layout(Layout {
+                padding: 12.0,
+                gap: 8.0,
+                ..Default::default()
+            });
         group = group.class("quick-settings-card");
         group.style.background = None;
         group
@@ -403,7 +412,7 @@ impl QuickSettings {
     fn icon(&mut self, icon: Icon) -> Element {
         Element::new(
             self.id(),
-            Widget::Image(icon_image(icon, self.theme), Default::default()),
+            Widget::Image(icon_image(icon, self.icon_color), Default::default()),
         )
         .layout(Layout {
             width: Length::Px(18.0),
@@ -415,7 +424,7 @@ impl QuickSettings {
         Element::new(
             self.id(),
             Widget::Image(
-                battery_image(percent, status, self.theme),
+                battery_image(percent, status, self.icon_color),
                 Default::default(),
             ),
         )
@@ -554,7 +563,7 @@ impl QuickSettings {
         if self.state.high_contrast {
             root.classes.push("high-contrast".into());
         }
-        let mut panel = p.panel(PANEL.0).layout(Layout {
+        let mut panel = p.surface_panel(PANEL.0).layout(Layout {
             width: Length::Px(width),
             height: Length::Px((self.size[1] - top - gap).max(1.0)),
             offset: [(self.size[0] - width - gap).max(0.0), top],
@@ -1036,13 +1045,30 @@ impl QuickSettings {
 mod icon_tests {
     use super::*;
     #[test]
+    fn user_theme_icon_color_updates_and_invalid_css_is_atomic() {
+        let mut app = QuickSettings::new();
+        app.theme_changed(Theme::Light, "icon { color: #123456; }")
+            .expect("valid user icon color");
+        assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
+        assert_eq!(app.scene.theme(), Theme::Light);
+
+        assert!(
+            app.theme_changed(Theme::Dark, "icon { color: invalid; }")
+                .is_err()
+        );
+        assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
+        assert_eq!(app.scene.theme(), Theme::Light);
+    }
+
+    #[test]
     fn battery_fill_and_cache_follow_real_charge_state() {
         assert_eq!(battery_fill_width(0), 0.0);
         assert_eq!(battery_fill_width(100), 11.0);
         assert_eq!(battery_fill_width(255), 11.0);
-        let empty = battery_image(0, "Not charging", Theme::Dark);
-        let full = battery_image(100, "Not charging", Theme::Dark);
-        let charging = battery_image(100, "Charging", Theme::Dark);
+        let color = text_color(Theme::Dark, "").expect("default theme is valid");
+        let empty = battery_image(0, "Not charging", color);
+        let full = battery_image(100, "Not charging", color);
+        let charging = battery_image(100, "Charging", color);
         let filled_columns = |image: &UiImage| {
             (6..17)
                 .filter(|x| image.pixels()[(12 * 24 + x) * 4 + 3] > 0)
@@ -1050,7 +1076,7 @@ mod icon_tests {
         };
         assert_eq!(
             empty.cache_key(),
-            battery_image(0, "Not charging", Theme::Dark).cache_key()
+            battery_image(0, "Not charging", color).cache_key()
         );
         assert_eq!(filled_columns(&empty), 0);
         assert_eq!(filled_columns(&full), 11);

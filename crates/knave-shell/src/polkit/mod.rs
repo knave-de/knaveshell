@@ -171,6 +171,13 @@ impl Agent {
     }
 }
 impl Application for Agent {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn set_waker(&mut self, waker: Waker) {
         self.shared.lock().unwrap().waker = Some(waker);
         let (sender, receiver) = async_channel::bounded(1);
@@ -271,9 +278,6 @@ impl Application for Agent {
             self.scene
                 .replace(self.compose())
                 .expect("bounded authentication scene");
-            self.scene
-                .set_theme(self.theme)
-                .expect("built-in theme is valid");
             self.scene.layout(size, text);
             if self.focus_field {
                 let _ = self.scene.set_focus(Some(FIELD));

@@ -101,6 +101,21 @@ impl StatusBar {
         Ok(())
     }
 
+    /// Apply the shell theme and user theme CSS while retaining any bar-level overrides.
+    pub fn set_user_theme(
+        &mut self,
+        theme: knave_ui::toolkit::Theme,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.toolkit_scene
+            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
+            .expect("status bar element identities are unique");
+        self.toolkit_scene
+            .set_theme_stylesheets(theme, crate::styles::STYLESHEET, css)?;
+        self.refresh_toolkit_output();
+        Ok(())
+    }
+
     /// Apply a replacement stylesheet to the standard toolkit widgets in this bar.
     pub fn set_stylesheet(
         &mut self,
@@ -992,11 +1007,11 @@ mod tests {
                 knave_ui::DisplayCommand::Image { image, .. } if image == &applet_image)));
         };
 
-        check_color(&bar, [185, 192, 198]);
+        check_color(&bar, [232, 235, 239]);
         bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
-        check_color(&bar, [65, 80, 100]);
+        check_color(&bar, [23, 24, 28]);
         bar.set_theme(knave_ui::toolkit::Theme::Dark).unwrap();
-        check_color(&bar, [185, 192, 198]);
+        check_color(&bar, [232, 235, 239]);
         bar.set_stylesheet(
             ".statusbar__notification-icon { color: #123456; } \
              .statusbar__network-icon { color: #234567; } \
@@ -1039,7 +1054,7 @@ mod tests {
                 .iter()
                 .find(|pixel| pixel[3] > 200)
                 .expect("symbol contains an opaque pixel");
-            assert_eq!(&visible_pixel[..3], &[65, 80, 100]);
+            assert_eq!(&visible_pixel[..3], &[23, 24, 28]);
         }
     }
 
@@ -1203,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_styles_restore_status_islands_workspace_chips_and_badges() {
+    fn status_bar_uses_toolkit_palette_and_an_accent_notification_badge() {
         let mut snapshot = desktop();
         snapshot.workspaces[0].window_count = 1;
         snapshot.windows.push(knave_desktop_api::WindowSummary {
@@ -1251,53 +1266,38 @@ mod tests {
                 .background
                 .and_then(|paint| paint.fill)
         }
-        assert_eq!(fill(&bar, 1), Some(Color::rgba(21, 24, 27, 255)));
-        assert_eq!(fill(&bar, 64_000), Some(Color::rgba(32, 38, 43, 255)));
-        assert_eq!(fill(&bar, 64_999), Some(Color::rgba(32, 38, 43, 255)));
-        assert_eq!(fill(&bar, 66_000), Some(Color::rgba(32, 38, 43, 255)));
-        assert_eq!(fill(&bar, 68_000), Some(Color::rgba(32, 38, 43, 255)));
-        assert_eq!(fill(&bar, 64_001), Some(Color::rgba(32, 38, 43, 255)));
-        assert_eq!(fill(&bar, 50_002), Some(Color::rgba(49, 60, 73, 255)));
-        assert_eq!(fill(&bar, 100_010), Some(Color::rgba(174, 220, 242, 255)));
-        let active_text = bar
-            .toolkit_scene
-            .computed_style(ElementId(60_011))
-            .unwrap()
-            .style
-            .text;
-        assert_eq!(active_text.color, Color::rgba(186, 213, 255, 255));
-        assert_eq!(active_text.font_size, 11.0);
-        let occupied_text = bar
-            .toolkit_scene
-            .computed_style(ElementId(60_010))
-            .unwrap()
-            .style
-            .text;
-        assert_eq!(occupied_text.color, Color::rgba(185, 192, 198, 255));
-        assert_eq!(occupied_text.font_size, 11.0);
-        let badge_text = bar
-            .toolkit_scene
-            .computed_style(ElementId(100_011))
-            .unwrap()
-            .style
-            .text;
-        assert_eq!(badge_text.color, Color::rgba(21, 24, 27, 255));
-        assert_eq!(badge_text.font_size, 8.0);
-
-        bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
-        assert_eq!(fill(&bar, 1), Some(Color::rgba(238, 242, 246, 255)));
-        assert_eq!(fill(&bar, 64_000), Some(Color::rgba(225, 232, 239, 255)));
-        assert_eq!(fill(&bar, 64_999), Some(Color::rgba(225, 232, 239, 255)));
-        assert_eq!(fill(&bar, 100_010), Some(Color::rgba(18, 91, 158, 255)));
-        assert_eq!(
-            bar.toolkit_scene
-                .computed_style(ElementId(60_011))
+        fn palette(theme: knave_ui::toolkit::Theme, token: &str) -> Color {
+            let mut scene = ToolkitScene::new(Element::new(1, Widget::Panel)).unwrap();
+            scene.set_theme(theme).unwrap();
+            scene
+                .set_stylesheet(&format!("panel {{ background-color: var({token}); }}"))
+                .unwrap();
+            scene
+                .computed_style(ElementId(1))
                 .unwrap()
                 .style
-                .text
-                .color,
-            Color::rgba(18, 91, 158, 255)
-        );
+                .background
+                .unwrap()
+                .fill
+                .unwrap()
+        }
+        for theme in [
+            knave_ui::toolkit::Theme::Dark,
+            knave_ui::toolkit::Theme::Light,
+        ] {
+            bar.set_theme(theme).unwrap();
+            assert_eq!(fill(&bar, 1), Some(palette(theme, "--panel-surface")));
+            assert_eq!(fill(&bar, 100_010), Some(palette(theme, "--accent")));
+            let badge = bar
+                .toolkit_scene
+                .computed_style(ElementId(100_011))
+                .unwrap();
+            assert_eq!(badge.style.text.color, palette(theme, "--on-accent"));
+            for id in [1, 64_000, 64_999, 66_000, 68_000, 64_001] {
+                let style = bar.toolkit_scene.computed_style(ElementId(id)).unwrap();
+                assert!(style.outline.is_none_or(|outline| outline.width == 0.0));
+            }
+        }
     }
 
     #[test]

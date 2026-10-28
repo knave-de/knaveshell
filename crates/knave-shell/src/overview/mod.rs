@@ -99,8 +99,8 @@ impl Overview {
             &self.applets,
             self.focused_icon.as_ref(),
         );
-        bar.set_theme(self.theme)
-            .expect("bundled shell theme stylesheet is valid");
+        bar.set_user_theme(self.theme, self.scene.user_theme_stylesheet())
+            .expect("selected shell theme stylesheet is valid");
         bar
     }
     pub fn new() -> Self {
@@ -308,10 +308,15 @@ impl Overview {
         self.query = TextEdit::new("").expect("empty text");
         // Drop the old text widget and its captured input as well as the model,
         // so a late key release cannot copy the old query back into state.
+        let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
         self.scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
         self.scene
-            .set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
-            .expect("bundled shell theme stylesheet is valid");
+            .set_theme_stylesheets(
+                self.theme,
+                knave_shell_ui::styles::STYLESHEET,
+                &user_theme_css,
+            )
+            .expect("selected shell theme stylesheet is valid");
         self.targets.clear();
         self.panes.clear();
         self.workspace = None;
@@ -339,8 +344,12 @@ impl Overview {
         self.size = size;
         let mut scene = Scene::new(self.compose())?;
         scene
-            .set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
-            .expect("bundled shell theme stylesheet is valid");
+            .set_theme_stylesheets(
+                self.theme,
+                knave_shell_ui::styles::STYLESHEET,
+                self.scene.user_theme_stylesheet(),
+            )
+            .expect("selected shell theme stylesheet is valid");
         Ok(())
     }
     fn loader(&mut self) -> &Loader {
@@ -417,11 +426,14 @@ impl Overview {
     fn rebuild(&mut self, text: &mut dyn TextMeasurer) {
         let focus = self.scene.focus();
         let root = self.compose();
+        let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
         match Scene::new(root) {
             Ok(mut scene) => {
-                if let Err(error) =
-                    scene.set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
-                {
+                if let Err(error) = scene.set_theme_stylesheets(
+                    self.theme,
+                    knave_shell_ui::styles::STYLESHEET,
+                    &user_theme_css,
+                ) {
                     self.host_error(&format!("Could not apply appearance theme: {error}"));
                     return;
                 }
@@ -455,6 +467,17 @@ impl Overview {
     }
 }
 impl Application for Overview {
+    fn theme_changed(
+        &mut self,
+        theme: knave_ui::toolkit::Theme,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn applets(&mut self, applets: &[knave_shell_ui::status_bar::Applet]) {
         self.applets = applets.to_vec();
         self.dirty = true;

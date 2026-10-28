@@ -25,6 +25,11 @@ impl Palette {
         e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }
+    fn surface_panel(&self, id: u64) -> Element {
+        let mut e = Element::new(id, Widget::Panel);
+        self.style(&mut e);
+        e
+    }
     fn text(&self, id: u64, value: String, muted: bool) -> Element {
         let mut e = if muted {
             Element::subtitle(id, value)
@@ -113,7 +118,7 @@ impl Notifications {
         if self.state.high_contrast {
             root.classes.push("high-contrast".into());
         }
-        let mut panel = p.panel(PANEL.0).layout(Layout {
+        let mut panel = p.surface_panel(PANEL.0).layout(Layout {
             width: Length::Px(panel_width),
             height: if self.state.center_open {
                 Length::Px((height - top - gap).max(1.0))
@@ -144,7 +149,7 @@ impl Notifications {
             close.tooltip = Some("Close notification center".into());
             heading.children.push(close);
             panel.children.push(heading);
-            let mut dnd = p.panel(20).layout(Layout {
+            let mut dnd = p.surface_panel(20).layout(Layout {
                 flow: Flow::Row,
                 align: Align::Center,
                 gap: 10.0,
@@ -332,11 +337,14 @@ impl Notifications {
     }
     fn card(&mut self, n: &Notification, p: &Palette, banner: bool) -> Element {
         let id = card_id(n.id);
-        let mut card = p.panel(id).component(ComponentKind::Card).layout(Layout {
-            padding: 12.0,
-            gap: 7.0,
-            ..Default::default()
-        });
+        let mut card = p
+            .surface_panel(id)
+            .component(ComponentKind::Card)
+            .layout(Layout {
+                padding: 12.0,
+                gap: 7.0,
+                ..Default::default()
+            });
         card.style.background = None;
         card = card.class("notifications-card");
         if n.unread {

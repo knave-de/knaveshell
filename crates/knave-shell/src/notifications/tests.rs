@@ -80,6 +80,8 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
         for light in [false, true] {
             for contrast in [false, true] {
                 let mut app = app(500);
+                app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+                    .expect("notification theme should apply");
                 app.state.light = light;
                 app.state.high_contrast = contrast;
                 app.apply(app.state.clone());
@@ -211,7 +213,7 @@ fn notification_panel_uses_proposed_surface_and_a_real_dnd_toggle() {
     assert!(list.commands.iter().any(|command| matches!(
         command,
         DisplayCommand::Text { text, style, .. }
-            if text == "Notifications" && style.font_size == 17.0
+            if text == "Notifications" && style.font_size == TextStyle::default().font_size
     )));
     assert!(list.commands.iter().any(|command| matches!(
         command,
@@ -405,6 +407,8 @@ fn missing_notification_icon_uses_app_identity_without_recoloring() {
     ] {
         for light in [false, true] {
             let mut app = app(1);
+            app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+                .expect("notification theme should apply");
             app.state.light = light;
             app.state.notifications[0].icon = icon.into();
             app.state.notifications[0].app_id = app_id.into();
@@ -450,6 +454,8 @@ fn image_previews_fit_cards_preserve_pixels_and_release_on_replace_or_dismiss() 
             for light in [false, true] {
                 for (width, height) in [(320, 160), (80, 320), (320, 1), (1, 320)] {
                     let mut app = app(1);
+                    app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+                        .expect("notification theme should apply");
                     app.state.light = light;
                     app.state.center_open = !banner;
                     app.state.notifications[0].banner = banner;
@@ -506,4 +512,17 @@ fn image_previews_fit_cards_preserve_pixels_and_release_on_replace_or_dismiss() 
     app.apply(state);
     app.frame([400.0, 800.0], &mut Metrics);
     assert!(app.previews.is_empty());
+}
+
+#[test]
+fn shell_panels_do_not_add_decorative_outlines() {
+    let mut app = app(1);
+    app.frame([1280.0, 800.0], &mut Metrics);
+    for id in [PANEL, ElementId(CLOSE)] {
+        let computed = app.scene.computed_style(id).unwrap();
+        assert!(
+            computed.outline.is_none_or(|outline| outline.width == 0.0),
+            "idle shell element {id:?} must use the toolkit's borderless presentation"
+        );
+    }
 }

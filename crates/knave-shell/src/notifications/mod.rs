@@ -65,7 +65,7 @@ impl Notifications {
     pub fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
         scene
-            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, "")
             .expect("panel accessibility stylesheet is valid");
         Self {
             theme,
@@ -101,11 +101,6 @@ impl Notifications {
         }
     }
     fn apply(&mut self, state: NotificationSnapshot) {
-        self.theme = if state.light {
-            Theme::Light
-        } else {
-            Theme::Dark
-        };
         if !self.state.center_open && state.center_open {
             self.focus_on_open = true;
             self.keyboard_focus_visible = false;
@@ -202,6 +197,13 @@ impl Notifications {
     }
 }
 impl Application for Notifications {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn set_waker(&mut self, waker: knave_wayland::Waker) {
         self.loader = Some(Loader::start(
             knave_icons::IconLookup::from_process(),
@@ -333,9 +335,6 @@ impl Application for Notifications {
             self.size = size;
             let tree = self.compose();
             if let Err(error) = self.scene.replace(tree) {
-                self.error = Some(error.to_string());
-            }
-            if let Err(error) = self.scene.set_theme(self.theme) {
                 self.error = Some(error.to_string());
             }
             self.scene.layout(size, text);

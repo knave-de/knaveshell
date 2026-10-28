@@ -414,6 +414,13 @@ impl Picker {
     }
 }
 impl Application for Picker {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn uses_desktop(&self) -> bool {
         self.request.operation == Operation::Sharing
             && self
@@ -491,9 +498,14 @@ impl Application for Picker {
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
             let focus = self.scene.focus();
+            let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
             if let Ok(mut scene) = Scene::new(self.compose()) {
                 scene
-                    .set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
+                    .set_theme_stylesheets(
+                        self.theme,
+                        knave_shell_ui::styles::STYLESHEET,
+                        &user_theme_css,
+                    )
                     .expect("portal stylesheet is valid");
                 scene.layout(size, text);
                 let initial = (self.request.operation != Operation::Sharing).then_some(CANCEL);
@@ -651,15 +663,36 @@ mod tests {
         let mut picker = Picker::with_theme(request(), Theme::Light).unwrap();
         picker.frame([820.0, 640.0], &mut Metrics);
 
-        let root = picker.scene.computed_style(ElementId(0)).unwrap();
+        let mut defaults = Scene::new(Element::new(0, Widget::Panel)).unwrap();
+        defaults.set_theme(Theme::Light).unwrap();
         assert_eq!(
-            root.style.background.and_then(|paint| paint.fill),
-            Some(knave_ui::Color::rgba(244, 247, 251, 255))
+            picker
+                .scene
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background,
+            defaults
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background
         );
-        let selected_tab = picker.scene.computed_style(ElementId(TAB)).unwrap();
+        defaults
+            .set_stylesheet("panel { background-color: var(--surface-selected); }")
+            .unwrap();
         assert_eq!(
-            selected_tab.style.background.and_then(|paint| paint.fill),
-            Some(knave_ui::Color::rgba(220, 232, 248, 255))
+            picker
+                .scene
+                .computed_style(ElementId(TAB))
+                .unwrap()
+                .style
+                .background,
+            defaults
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background
         );
     }
     #[test]

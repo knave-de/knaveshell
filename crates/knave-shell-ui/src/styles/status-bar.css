@@ -1,91 +1,25 @@
-.statusbar {
-    color: var(--shell-bar-text);
-    background-color: var(--shell-bar);
-}
-
-.statusbar__overview-island,
-.statusbar__workspace-island,
-.statusbar__focus-island,
-.statusbar__applet-island,
-.statusbar__system-island,
-.statusbar__notification-island {
-    background-color: var(--shell-island);
-    border-width: 0px;
-    border-radius: 6px;
-    outline-width: 0px;
-}
-
-.statusbar__overview-action,
-.statusbar__workspace-action,
-.statusbar__notifications-action,
-.statusbar__quick-settings-action,
-.statusbar__applet-action {
-    margin: 0px;
-    padding: 0px;
-    border-width: 0px;
-    border-radius: 4px;
-    outline-width: 0px;
-    color: var(--shell-bar-text);
-    background-color: transparent;
-}
-
-.statusbar__overview-action:hover,
-.statusbar__workspace-action:hover,
-.statusbar__notifications-action:hover,
-.statusbar__quick-settings-action:hover,
-.statusbar__applet-action:hover {
-    background-color: var(--shell-hover);
-}
-
-.statusbar__workspace-action:selected {
-    color: var(--shell-workspace-active);
-    background-color: var(--shell-workspace-selected);
-}
-
+/* Keep the compact status text within the fixed-height bar. */
 .statusbar__workspace-label {
-    color: var(--shell-workspace-idle);
     font-size: 11px;
     line-height: 14px;
     text-align: center;
 }
 
-.statusbar__workspace-label--occupied {
-    color: var(--shell-bar-text);
-}
-
-.statusbar__workspace-label--active {
-    color: var(--shell-workspace-active);
-}
-
 .statusbar__focused-title,
 .statusbar__applet-label,
 .statusbar__content {
-    color: var(--shell-bar-text);
     font-size: 11px;
     line-height: 14px;
 }
 
-.statusbar__network-icon,
-.statusbar__volume-icon,
-.statusbar__notification-icon {
-    color: var(--shell-bar-text);
-}
-
-.statusbar__workspace-occupancy,
-.statusbar__applet-attention {
-    background-color: var(--shell-accent);
-    border-radius: 2px;
-}
-
 .statusbar__unread-badge {
-    background-color: var(--shell-badge);
-    border-width: 0px;
+    color: var(--on-accent);
+    background-color: var(--accent);
     border-radius: 8px;
-    outline-width: 0px;
 }
 
 .statusbar__unread-count {
-    color: var(--shell-on-accent);
+    color: var(--on-accent);
     font-size: 8px;
     line-height: 10px;
     text-align: center;
@@ -93,7 +27,6 @@
 
 .statusbar__dnd-marker,
 .statusbar__notification-state {
-    color: var(--shell-accent);
     font-size: 8px;
     line-height: 10px;
 }
