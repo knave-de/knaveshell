@@ -430,17 +430,27 @@ impl Application for Menu {
         if self.dirty || size != self.size {
             self.size = size;
             let width = 280.0_f32.min(size[0]);
+            let top = (self.y.max(knave_shell_ui::status_bar::STATUS_BAR_HEIGHT) + 8.0)
+                .clamp(0.0, (size[1] - 96.0).max(0.0));
+            let status_height =
+                if self.page.error.is_some() || self.page.loading || self.page.rows.is_empty() {
+                    60.0
+                } else {
+                    0.0
+                };
             let height = (self
                 .page
                 .rows
                 .iter()
-                .map(|r| if r.separator { 10.0 } else { 32.0 })
+                .map(|row| if row.separator { 10.0 } else { 32.0 })
                 .sum::<f32>()
-                + 64.0)
-                .clamp(96.0, (size[1] - 44.0).max(96.0));
+                + 64.0
+                + status_height)
+                .max(96.0)
+                .min((size[1] - top).max(1.0));
             self.panel = Rect::new(
                 (self.x - width / 2.0).clamp(0.0, (size[0] - width).max(0.0)),
-                self.y + 8.0,
+                top,
                 width,
                 height,
             );
@@ -450,6 +460,7 @@ impl Application for Menu {
                 gap: 0.0,
                 ..Default::default()
             });
+            root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             let mut panel = Element::new(1, Widget::Panel).layout(Layout {
                 width: Length::Px(width),
                 height: Length::Px(height),
@@ -458,12 +469,14 @@ impl Application for Menu {
                 gap: 4.0,
                 ..Default::default()
             });
-            panel.style.background = Some(ShapePaint::fill(Color::BACKGROUND));
+            panel.component = Some(ComponentKind::Card);
             let mut header = Element::new(2, Widget::Panel).layout(Layout {
                 flow: Flow::Row,
                 height: Length::Px(28.0),
                 ..Default::default()
             });
+            header.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+            header.layout.padding = 0.0;
             if self.page.parent.is_some() {
                 header
                     .children
@@ -484,7 +497,9 @@ impl Application for Menu {
                 } else {
                     format!("Menu unavailable: {error}")
                 };
-                list.children.push(Element::new(6, Widget::Text(text)));
+                let mut status = Element::new(6, Widget::Text(text));
+                status.style.text.wrap = knave_ui::TextWrap::WordOrGlyph;
+                list.children.push(status);
             } else if self.page.loading {
                 list.children
                     .push(Element::new(6, Widget::Text("Loading menu…".into())));
@@ -565,6 +580,71 @@ mod tests {
         process::{Child, Command, Stdio},
         sync::atomic::{AtomicBool, Ordering},
     };
+
+    struct Metrics;
+    impl TextMeasurer for Metrics {
+        fn measure(&mut self, text: &str, style: &knave_ui::TextStyle, width: f32) -> TextLayout {
+            let glyph = style.font_size * 0.6;
+            let columns = (width / glyph).floor().max(1.0) as usize;
+            TextLayout {
+                carets: Vec::new(),
+                size: [
+                    (text.chars().count() as f32 * glyph).min(width),
+                    text.chars().count().max(1).div_ceil(columns) as f32 * style.line_height,
+                ],
+            }
+        }
+        fn measure_spans(
+            &mut self,
+            spans: &[knave_ui::TextSpan],
+            style: &knave_ui::TextStyle,
+            width: f32,
+        ) -> TextLayout {
+            self.measure(
+                &spans
+                    .iter()
+                    .map(|span| span.text.as_str())
+                    .collect::<String>(),
+                style,
+                width,
+            )
+        }
+    }
+
+    #[test]
+    fn cached_timeout_menu_keeps_backdrop_transparent_and_action_visible() {
+        for theme in [Theme::Dark, Theme::Light] {
+            let mut menu = Menu::new(
+                ":1.1".into(),
+                "/item".into(),
+                "/menu".into(),
+                vec![Row {
+                    id: 7,
+                    label: "Cached action".into(),
+                    enabled: true,
+                    separator: false,
+                    submenu: false,
+                }],
+                1169.0,
+                18.0,
+                theme,
+            );
+            menu.page.error = Some("Timed out waiting for the application menu".into());
+            menu.frame([1280.0, 800.0], &mut Metrics);
+            let backdrop = menu.scene.computed_style(ElementId(0)).unwrap();
+            assert_eq!(backdrop.style.background.unwrap().fill.unwrap().alpha, 0);
+            let list = menu.scene.bounds(ElementId(5)).unwrap();
+            let action = menu.scene.bounds(ElementId(100)).unwrap();
+            assert!(action.height >= 32.0);
+            assert!(action.y >= list.y);
+            assert!(
+                action.y + action.height <= list.y + list.height,
+                "cached action must remain visible below timeout text: {action:?} in {list:?}"
+            );
+            menu.input(Input::PointerDown([400.0, 400.0]));
+            assert!(menu.should_close());
+        }
+    }
 
     struct PrivateBus(Child);
     impl PrivateBus {
