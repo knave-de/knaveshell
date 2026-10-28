@@ -81,8 +81,9 @@ pub struct StatusBar {
     pub scene: UiScene,
     pub display: DisplayList,
     toolkit_scene: ToolkitScene,
+    toolkit_root: Element,
     size: [f32; 2],
-    tinted_status_icons: Option<(Color, [Option<knave_ui::UiImage>; 3])>,
+    tinted_status_icons: Option<([Color; 3], [Option<knave_ui::UiImage>; 3])>,
 }
 
 impl StatusBar {
@@ -91,7 +92,26 @@ impl StatusBar {
         &mut self,
         theme: knave_ui::toolkit::Theme,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
-        self.toolkit_scene.set_theme(theme)?;
+        self.toolkit_scene
+            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
+            .expect("status bar element identities are unique");
+        self.toolkit_scene
+            .set_desktop_theme(theme, crate::styles::STYLESHEET)?;
+        self.refresh_toolkit_output();
+        Ok(())
+    }
+
+    /// Apply the shell theme and user theme CSS while retaining any bar-level overrides.
+    pub fn set_user_theme(
+        &mut self,
+        theme: knave_ui::toolkit::Theme,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.toolkit_scene
+            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
+            .expect("status bar element identities are unique");
+        self.toolkit_scene
+            .set_theme_stylesheets(theme, crate::styles::STYLESHEET, css)?;
         self.refresh_toolkit_output();
         Ok(())
     }
@@ -118,28 +138,25 @@ impl StatusBar {
             .toolkit_scene
             .display_list(self.size, &mut metrics)
             .clone();
-        let icon_color = [40_001, 40_002, 40_000]
-            .into_iter()
-            .find_map(|id| {
-                self.toolkit_scene
-                    .computed_style(ElementId(60_000 + id))
-                    .map(|style| style.style.text.color)
-            })
-            .unwrap_or(Color::TEXT);
+        let icon_colors = [40_000, 40_001, 40_002].map(|id| {
+            self.toolkit_scene
+                .computed_style(ElementId(60_000 + id))
+                .map_or(Color::TEXT, |style| style.style.text.color)
+        });
         if self
             .tinted_status_icons
             .as_ref()
-            .is_none_or(|(cached_color, _)| *cached_color != icon_color)
+            .is_none_or(|(cached_colors, _)| *cached_colors != icon_colors)
         {
             self.tinted_status_icons = Some((
-                icon_color,
+                icon_colors,
                 [
                     crate::status_icons::bell()
-                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                        .map(|image| crate::status_icons::tint(&image, icon_colors[0])),
                     crate::status_icons::wifi()
-                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                        .map(|image| crate::status_icons::tint(&image, icon_colors[1])),
                     crate::status_icons::volume()
-                        .map(|image| crate::status_icons::tint(&image, icon_color)),
+                        .map(|image| crate::status_icons::tint(&image, icon_colors[2])),
                 ],
             ));
         }
@@ -204,6 +221,11 @@ impl StatusBar {
     ) -> Self {
         let mut scene = UiScene::bar(revision, width, height);
         scene.targets.clear();
+        scene.push(crate::UiNode::Panel {
+            id: crate::NodeId(4_000),
+            bounds: knave_ui::Rect::new(EDGE, ISLAND_Y, 28.0, ISLAND_HEIGHT),
+            color: Color::rgba(0, 0, 0, 0),
+        });
         scene.target(
             knave_ui::Rect::new(EDGE, ISLAND_Y, 28.0, ISLAND_HEIGHT),
             crate::UiAction::OpenOverview,
@@ -258,6 +280,18 @@ impl StatusBar {
             8.0 + workspaces.len() as f32 * WORKSPACE_WIDTH
                 + workspaces.len().saturating_sub(1) as f32 * WORKSPACE_GAP
         };
+        if !workspaces.is_empty() {
+            scene.push(crate::UiNode::Panel {
+                id: crate::NodeId(4_999),
+                bounds: knave_ui::Rect::new(
+                    workspace_start,
+                    ISLAND_Y,
+                    workspace_group_width,
+                    ISLAND_HEIGHT,
+                ),
+                color: Color::rgba(0, 0, 0, 0),
+            });
+        }
         let focus_x = workspace_start
             + workspace_group_width
             + if workspaces.is_empty() {
@@ -302,9 +336,38 @@ impl StatusBar {
                     });
                 }
             }
+            let content_right = if !window.title.is_empty() && text_width > 0.0 {
+                text_x + text_width
+            } else if focused_icon.is_some() {
+                icon_bounds.x + icon_bounds.width
+            } else {
+                content_start
+            };
+            let island_width = (content_right + 6.0 - focus_x)
+                .max(28.0)
+                .min(focus_right - focus_x);
+            if island_width >= 28.0 {
+                scene.push(crate::UiNode::Panel {
+                    id: crate::NodeId(7_000),
+                    bounds: knave_ui::Rect::new(focus_x, ISLAND_Y, island_width, ISLAND_HEIGHT),
+                    color: Color::rgba(0, 0, 0, 0),
+                });
+            }
         }
 
         if !applets.is_empty() {
+            let first = applets.first().unwrap().0;
+            let last = applets.last().unwrap().0;
+            scene.push(crate::UiNode::Panel {
+                id: crate::NodeId(6_000),
+                bounds: knave_ui::Rect::new(
+                    first.x - 4.0,
+                    ISLAND_Y,
+                    last.x + last.width - first.x + 8.0,
+                    ISLAND_HEIGHT,
+                ),
+                color: Color::rgba(0, 0, 0, 0),
+            });
             for (bounds, item) in &applets {
                 scene.target(*bounds, crate::UiAction::Applet(item.id));
                 if let Some(image) = &item.image {
@@ -353,16 +416,41 @@ impl StatusBar {
         }
         if controls_visible {
             append_system_icons(&mut scene, system_x);
+            scene.push(crate::UiNode::Panel {
+                id: crate::NodeId(8_000),
+                bounds: knave_ui::Rect::new(system_x, ISLAND_Y, SYSTEM_WIDTH, ISLAND_HEIGHT),
+                color: Color::rgba(0, 0, 0, 0),
+            });
+        }
+        if bell_visible {
+            scene.push(crate::UiNode::Panel {
+                id: crate::NodeId(4_001),
+                bounds: knave_ui::Rect::new(bell_x, ISLAND_Y, BELL_WIDTH, ISLAND_HEIGHT),
+                color: Color::rgba(0, 0, 0, 0),
+            });
         }
 
         if bell_visible {
             append_bell(&mut scene, bell_x + BELL_WIDTH / 2.0, notifications);
         }
-        let toolkit_scene = build_toolkit_scene(&scene, desktop);
+        let mut island_nodes = Vec::new();
+        scene.nodes.retain(|node| {
+            if is_island_node(node) {
+                island_nodes.push(node.clone());
+                false
+            } else {
+                true
+            }
+        });
+        scene.nodes.splice(1..1, island_nodes);
+        let theme = knave_ui::toolkit::Theme::Dark;
+        let toolkit_root = build_toolkit_root(&scene, desktop);
+        let toolkit_scene = build_toolkit_scene(toolkit_root.clone(), theme);
         let mut result = Self {
             scene,
             display: DisplayList::new(revision, Color::BACKGROUND),
             toolkit_scene,
+            toolkit_root,
             size: [width, height],
             tinted_status_icons: None,
         };
@@ -458,6 +546,13 @@ fn action_class(action: crate::UiAction) -> &'static str {
 
 fn node_class(node: &crate::UiNode) -> &'static str {
     match node {
+        crate::UiNode::Panel { id, .. } if id.0 == 4_000 => "statusbar__overview-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 4_001 => "statusbar__notification-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 4_999 => "statusbar__workspace-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 6_000 => "statusbar__applet-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 7_000 => "statusbar__focus-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 8_000 => "statusbar__system-island",
+        crate::UiNode::Panel { id, .. } if id.0 == 40_010 => "statusbar__unread-badge",
         crate::UiNode::Panel { id, bounds, .. }
             if id.0 >= 5_000 && bounds.width == 3.0 && bounds.height == 3.0 =>
         {
@@ -485,77 +580,94 @@ fn node_class(node: &crate::UiNode) -> &'static str {
     }
 }
 
-fn build_toolkit_scene(scene: &UiScene, desktop: Option<&DesktopSnapshot>) -> ToolkitScene {
-    let children = scene
-        .targets
-        .iter()
-        .enumerate()
-        .map(|(index, target)| {
-            let element_id = 50_000 + index as u64;
-            let class = action_class(target.action);
-            let widget = if let crate::UiAction::FocusWorkspace(workspace_id) = target.action {
-                let selected = desktop.is_some_and(|snapshot| {
+fn is_island_node(node: &crate::UiNode) -> bool {
+    matches!(
+        node,
+        crate::UiNode::Panel { id, .. }
+            if matches!(id.0, 4_000 | 4_001 | 4_999 | 6_000 | 7_000 | 8_000)
+    )
+}
+
+fn build_toolkit_root(scene: &UiScene, desktop: Option<&DesktopSnapshot>) -> Element {
+    let action_elements = scene.targets.iter().enumerate().map(|(index, target)| {
+        let element_id = 50_000 + index as u64;
+        let class = action_class(target.action);
+        let widget = if let crate::UiAction::FocusWorkspace(workspace_id) = target.action {
+            let selected = desktop.is_some_and(|snapshot| {
+                snapshot
+                    .workspaces
+                    .iter()
+                    .any(|workspace| workspace.workspace == workspace_id && workspace.active)
+            });
+            Widget::Selectable {
+                label: String::new(),
+                selected,
+            }
+        } else {
+            Widget::Button(String::new())
+        };
+        element_at(element_id, widget, target.bounds, class, class)
+    });
+    let node_element = |node: &crate::UiNode| match node {
+        crate::UiNode::Panel { id, .. } if id.0 == 1 => None,
+        crate::UiNode::Panel { id, bounds, .. } => Some(element_at(
+            60_000 + id.0,
+            Widget::Panel,
+            *bounds,
+            node_class(node),
+            node_class(node),
+        )),
+        crate::UiNode::Label {
+            id, bounds, text, ..
+        } => {
+            let mut element = element_at(
+                60_000 + id.0,
+                Widget::Text(text.clone()),
+                *bounds,
+                node_class(node),
+                node_class(node),
+            )
+            .text_wrap(knave_ui::TextWrap::None);
+            if (10..=9_999).contains(&id.0)
+                && let Some(workspace) = desktop.and_then(|snapshot| {
                     snapshot
                         .workspaces
                         .iter()
-                        .any(|workspace| workspace.workspace == workspace_id && workspace.active)
-                });
-                Widget::Selectable {
-                    label: String::new(),
-                    selected,
+                        .find(|workspace| workspace.workspace.0 == (id.0 - 10) as u32)
+                })
+            {
+                if workspace.active {
+                    element = element.class("statusbar__workspace-label--active");
                 }
-            } else {
-                Widget::Button(String::new())
-            };
-            element_at(element_id, widget, target.bounds, class, class)
-        })
-        .chain(scene.nodes.iter().filter_map(|node| match node {
-            crate::UiNode::Panel { id, .. } if id.0 == 1 => None,
-            crate::UiNode::Panel { id, bounds, .. } => Some(element_at(
-                60_000 + id.0,
-                Widget::Panel,
-                *bounds,
-                node_class(node),
-                node_class(node),
-            )),
-            crate::UiNode::Label {
-                id, bounds, text, ..
-            } => {
-                let mut element = element_at(
-                    60_000 + id.0,
-                    Widget::Text(text.clone()),
-                    *bounds,
-                    node_class(node),
-                    node_class(node),
-                )
-                .text_wrap(knave_ui::TextWrap::None);
-                if (10..=9_999).contains(&id.0)
-                    && let Some(workspace) = desktop.and_then(|snapshot| {
-                        snapshot
-                            .workspaces
-                            .iter()
-                            .find(|workspace| workspace.workspace.0 == (id.0 - 10) as u32)
-                    })
-                {
-                    if workspace.active {
-                        element = element.class("statusbar__workspace-label--active");
-                    }
-                    if workspace.window_count > 0 {
-                        element = element.class("statusbar__workspace-label--occupied");
-                    }
+                if workspace.window_count > 0 {
+                    element = element.class("statusbar__workspace-label--occupied");
                 }
-                Some(element)
             }
-            crate::UiNode::Image { id, bounds, image } => Some(element_at(
-                60_000 + id.0,
-                Widget::Image(image.clone(), knave_ui::ImageStyle::default()),
-                *bounds,
-                node_class(node),
-                node_class(node),
-            )),
-        }))
+            Some(element)
+        }
+        crate::UiNode::Image { id, bounds, image } => Some(element_at(
+            60_000 + id.0,
+            Widget::Image(image.clone(), knave_ui::ImageStyle::default()),
+            *bounds,
+            node_class(node),
+            node_class(node),
+        )),
+    };
+    let island_elements = scene
+        .nodes
+        .iter()
+        .filter(|node| is_island_node(node))
+        .filter_map(node_element);
+    let content_elements = scene
+        .nodes
+        .iter()
+        .filter(|node| !is_island_node(node))
+        .filter_map(node_element);
+    let children = island_elements
+        .chain(action_elements)
+        .chain(content_elements)
         .collect();
-    let root = Element::new(1, Widget::Panel)
+    Element::new(1, Widget::Panel)
         .class("statusbar")
         .style_id("statusbar")
         .layout(Layout {
@@ -567,8 +679,16 @@ fn build_toolkit_scene(scene: &UiScene, desktop: Option<&DesktopSnapshot>) -> To
             gap: 0.0,
             ..Layout::default()
         })
-        .children(children);
-    ToolkitScene::new(root).expect("status bar element identities are unique")
+        .children(children)
+}
+
+fn build_toolkit_scene(root: Element, theme: knave_ui::toolkit::Theme) -> ToolkitScene {
+    let mut toolkit_scene = ToolkitScene::new(crate::styles::root(root, theme))
+        .expect("status bar element identities are unique");
+    toolkit_scene
+        .set_desktop_theme(theme, crate::styles::STYLESHEET)
+        .expect("shared shell stylesheet is valid");
+    toolkit_scene
 }
 
 struct StatusTextMetrics;
@@ -887,11 +1007,26 @@ mod tests {
                 knave_ui::DisplayCommand::Image { image, .. } if image == &applet_image)));
         };
 
-        check_color(&bar, [240, 243, 246]);
+        check_color(&bar, [232, 235, 239]);
         bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
-        check_color(&bar, [23, 35, 45]);
+        check_color(&bar, [23, 24, 28]);
         bar.set_theme(knave_ui::toolkit::Theme::Dark).unwrap();
-        check_color(&bar, [240, 243, 246]);
+        check_color(&bar, [232, 235, 239]);
+        bar.set_stylesheet(
+            ".statusbar__notification-icon { color: #123456; } \
+             .statusbar__network-icon { color: #234567; } \
+             .statusbar__volume-icon { color: #345678; }",
+        )
+        .unwrap();
+        assert_eq!(
+            bar.tinted_status_icons.as_ref().unwrap().0,
+            [
+                Color::rgba(0x12, 0x34, 0x56, 255),
+                Color::rgba(0x23, 0x45, 0x67, 255),
+                Color::rgba(0x34, 0x56, 0x78, 255),
+            ],
+            "each status glyph tint follows its computed CSS color"
+        );
 
         let mut notifications_disabled = StatusBar::new(2, 800.0, 36.0, None, false, None, &[]);
         notifications_disabled
@@ -919,7 +1054,7 @@ mod tests {
                 .iter()
                 .find(|pixel| pixel[3] > 200)
                 .expect("symbol contains an opaque pixel");
-            assert_eq!(&visible_pixel[..3], &[23, 35, 45]);
+            assert_eq!(&visible_pixel[..3], &[23, 24, 28]);
         }
     }
 
@@ -1048,21 +1183,26 @@ mod tests {
                 .font_size,
             17.0
         );
-        let dark_idle_background = bar
-            .toolkit_scene
-            .computed_style(ElementId(50_000 + idle_index as u64))
-            .unwrap()
-            .style
-            .background;
         bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
         assert_eq!(bar.toolkit_scene.theme(), knave_ui::toolkit::Theme::Light);
-        assert_ne!(
-            bar.toolkit_scene
-                .computed_style(ElementId(50_000 + idle_index as u64))
-                .unwrap()
+        let light_hover = bar
+            .toolkit_scene
+            .computed_style_for(
+                ElementId(50_000 + idle_index as u64),
+                knave_ui::toolkit::InteractionState {
+                    hovered: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            light_hover
                 .style
-                .background,
-            dark_idle_background
+                .background
+                .as_ref()
+                .and_then(|paint| paint.fill),
+            Some(Color::rgba(0xab, 0xcd, 0xef, 255)),
+            "theme changes keep the application hover override"
         );
         assert_eq!(
             bar.toolkit_scene
@@ -1075,6 +1215,89 @@ mod tests {
             Some(Color::rgba(0x12, 0x34, 0x56, 255)),
             "theme changes keep the application stylesheet override"
         );
+    }
+
+    #[test]
+    fn status_bar_uses_toolkit_palette_and_an_accent_notification_badge() {
+        let mut snapshot = desktop();
+        snapshot.workspaces[0].window_count = 1;
+        snapshot.windows.push(knave_desktop_api::WindowSummary {
+            id: knave_desktop_api::WindowId(9),
+            title: "Focused editor".into(),
+            app_id: "org.example.Editor".into(),
+            workspace: WorkspaceId(1),
+            focused: true,
+            minimized: false,
+            floating: false,
+            fullscreen: false,
+            maximized: false,
+        });
+        let mut notifications = NotificationSnapshot {
+            owned: true,
+            ..Default::default()
+        };
+        notifications
+            .notifications
+            .push(knave_desktop_api::notifications::Notification {
+                unread: true,
+                ..Default::default()
+            });
+        let applet = Applet {
+            id: 7,
+            title: "Fixture applet".into(),
+            image: None,
+            attention: false,
+        };
+        let mut bar = StatusBar::new(
+            1,
+            1280.0,
+            36.0,
+            Some(&snapshot),
+            true,
+            Some(&notifications),
+            &[applet],
+        );
+
+        fn fill(bar: &StatusBar, id: u64) -> Option<Color> {
+            bar.toolkit_scene
+                .computed_style(ElementId(id))
+                .unwrap_or_else(|| panic!("missing status bar toolkit element {id}"))
+                .style
+                .background
+                .and_then(|paint| paint.fill)
+        }
+        fn palette(theme: knave_ui::toolkit::Theme, token: &str) -> Color {
+            let mut scene = ToolkitScene::new(Element::new(1, Widget::Panel)).unwrap();
+            scene.set_theme(theme).unwrap();
+            scene
+                .set_stylesheet(&format!("panel {{ background-color: var({token}); }}"))
+                .unwrap();
+            scene
+                .computed_style(ElementId(1))
+                .unwrap()
+                .style
+                .background
+                .unwrap()
+                .fill
+                .unwrap()
+        }
+        for theme in [
+            knave_ui::toolkit::Theme::Dark,
+            knave_ui::toolkit::Theme::Light,
+        ] {
+            bar.set_theme(theme).unwrap();
+            assert_eq!(fill(&bar, 1), Some(palette(theme, "--panel-surface")));
+            assert_eq!(fill(&bar, 100_010), Some(palette(theme, "--accent")));
+            let badge = bar
+                .toolkit_scene
+                .computed_style(ElementId(100_011))
+                .unwrap();
+            assert_eq!(badge.style.text.color, palette(theme, "--on-accent"));
+            for id in [1, 64_000, 64_999, 66_000, 68_000, 64_001] {
+                let style = bar.toolkit_scene.computed_style(ElementId(id)).unwrap();
+                assert!(style.outline.is_none_or(|outline| outline.width == 0.0));
+            }
+        }
     }
 
     #[test]

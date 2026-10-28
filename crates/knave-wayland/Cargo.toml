@@ -11,6 +11,7 @@ knave-apps.workspace = true
 knave-renderer.workspace = true
 knave-desktop-api.workspace = true
 knave-ui.workspace = true
+knave-config.workspace = true
 knave-icons.workspace = true
 base64.workspace = true
 png.workspace = true

@@ -1,0 +1,3 @@
+.overview-muted { color: var(--text-secondary); }
+.overview-error { color: var(--danger); }
+.overview-card-selected { background-color: var(--surface-selected); }

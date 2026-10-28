@@ -49,6 +49,7 @@ enum ChargeFeedback {
 }
 pub struct QuickSettings {
     theme: Theme,
+    icon_color: Color,
     state: QuickSettingsSnapshot,
     client: Option<QuickSettingsClient>,
     scene: Scene,
@@ -84,9 +85,12 @@ impl QuickSettings {
     }
     pub fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
-        scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, "")
+            .expect("panel accessibility stylesheet is valid");
         Self {
             theme,
+            icon_color: view::text_color(theme, "").expect("default theme stylesheet is valid"),
             state: Default::default(),
             client: None,
             scene,
@@ -341,6 +345,15 @@ impl QuickSettings {
     }
 }
 impl Application for QuickSettings {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        let icon_color = view::text_color(theme, css)?;
+        self.theme = theme;
+        self.icon_color = icon_color;
+        self.dirty = true;
+        Ok(())
+    }
     fn set_waker(&mut self, w: knave_wayland::Waker) {
         self.client = Some(QuickSettingsClient::start(w))
     }
@@ -507,9 +520,6 @@ impl Application for QuickSettings {
             self.size = size;
             let tree = self.compose();
             if let Err(e) = self.scene.replace(tree) {
-                self.error = Some(e.to_string())
-            }
-            if let Err(e) = self.scene.set_theme(self.theme) {
                 self.error = Some(e.to_string())
             }
             if self.confirmation.is_some() {

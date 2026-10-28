@@ -75,6 +75,7 @@ fn selected_theme_survives_quick_settings_scene_recomposition() {
     assert_eq!(light.scene.theme(), Theme::Light);
     light.apply(QuickSettingsSnapshot {
         open: true,
+        light: true,
         ..Default::default()
     });
     light.frame([1280.0, 800.0], &mut Metrics);
@@ -97,6 +98,19 @@ fn all_pages_fit_narrow_and_short_outputs() {
             app.page = page;
             let list = app.frame(size, &mut Metrics).clone();
             assert_eq!(list.clear_color.alpha, 0);
+            assert_eq!(app.scene.theme(), app.theme);
+            assert_eq!(
+                app.scene
+                    .computed_style(ElementId(0))
+                    .unwrap()
+                    .style
+                    .background
+                    .and_then(|paint| paint.fill)
+                    .unwrap()
+                    .alpha,
+                0,
+                "overlay root must stay transparent at {size:?}"
+            );
             let panel = app.scene.bounds(PANEL).unwrap();
             assert!(panel.x >= 0.0 && panel.y >= 0.0);
             assert!(panel.x + panel.width <= size[0]);
@@ -320,7 +334,7 @@ fn trimmed_subtitles_keep_status_and_charge_policy_text() {
 #[test]
 fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
     let mut app = app();
-    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    app.frame([1280.0, 800.0], &mut Metrics);
     let panel = app.scene.bounds(PANEL).unwrap();
     assert_eq!(panel.width, 340.0);
     let target = |predicate: fn(&Target) -> bool| {
@@ -351,7 +365,14 @@ fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
             "{rect:?} outside {panel:?}"
         );
     }
-    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.fill==Some(Color::rgba(32,36,39,255)))));
+    let panel_surface = app
+        .scene
+        .computed_style(PANEL)
+        .unwrap()
+        .style
+        .background
+        .expect("quick-settings card should receive its theme surface");
+    assert!(panel_surface.fill.is_some_and(|fill| fill.alpha > 0));
     click(&mut app, POWER);
     assert!(app.scene.interaction(ElementId(POWER)).unwrap().expanded);
 }
@@ -363,8 +384,10 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
         matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
     );
     for light in [false, true] {
+        app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+            .expect("quick-settings theme should apply");
         app.state.light = light;
-        app.dirty = true;
+        app.apply(app.state.clone());
         let keys = |list: &DisplayList| {
             list.commands
                 .iter()
@@ -581,4 +604,35 @@ fn custom_limit_summary_and_support_do_not_follow_upower_preset_toggle() {
     app.frame([1280.0, 800.0], &mut Metrics);
     let tree = app.compose();
     assert!(find(&tree, ElementId(LIMIT)).unwrap().enabled);
+}
+
+#[test]
+fn shell_panels_do_not_add_decorative_outlines() {
+    let mut app = app();
+    app.frame([1280.0, 800.0], &mut Metrics);
+    for id in [PANEL, ElementId(CLOSE)] {
+        let computed = app.scene.computed_style(id).unwrap();
+        assert!(
+            computed.outline.is_none_or(|outline| outline.width == 0.0),
+            "idle shell element {id:?} must use the toolkit's borderless presentation"
+        );
+    }
+}
+
+#[test]
+fn full_named_themes_cannot_paint_the_fullscreen_positioning_host() {
+    for theme in [Theme::Dark, Theme::Light] {
+        let mut app = app();
+        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        let list = app.frame([1280.0, 800.0], &mut Metrics);
+        assert!(
+            !list.commands.iter().any(|command| matches!(command,
+                knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                    if bounds.x <= 400.0 && bounds.y <= 400.0
+                        && bounds.x + bounds.width > 400.0 && bounds.y + bounds.height > 400.0
+                        && paint.fill.is_some_and(|color| color.alpha > 0)
+            )),
+            "a full {theme:?} theme must not cover the desktop outside the panel"
+        );
+    }
 }

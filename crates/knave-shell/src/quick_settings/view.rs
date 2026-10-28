@@ -1,77 +1,56 @@
 use super::*;
-use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap, UiImage};
+use knave_ui::toolkit::{ButtonVariant, ComponentKind};
+use knave_ui::{ShapePaint, TextWrap, UiImage};
 use std::sync::{Mutex, OnceLock};
-struct Palette {
-    surface: Color,
-    card: Color,
-    text: Color,
-    muted: Color,
-    accent: Color,
-    border: Color,
-}
+
+struct Palette;
 impl Palette {
-    fn new(s: &QuickSettingsSnapshot) -> Self {
-        if s.light {
-            Self {
-                surface: Color::rgba(244, 247, 251, 255),
-                card: Color::rgba(255, 255, 255, 255),
-                text: Color::rgba(18, 28, 43, 255),
-                muted: Color::rgba(65, 80, 100, 255),
-                accent: Color::rgba(18, 91, 158, 255),
-                border: Color::rgba(120, 140, 160, 255),
-            }
-        } else {
-            Self {
-                surface: Color::rgba(32, 36, 39, 255),
-                card: Color::rgba(41, 47, 51, 255),
-                text: Color::TEXT,
-                muted: Color::rgba(146, 155, 163, 255),
-                accent: Color::rgba(149, 185, 238, 255),
-                border: if s.high_contrast {
-                    Color::TEXT
-                } else {
-                    Color::rgba(255, 255, 255, 18)
-                },
-            }
-        }
+    fn new() -> Self {
+        Self
     }
     fn element(&self, id: u64, w: Widget) -> Element {
+        let class = match &w {
+            Widget::Panel => Some(("shell-structure", "quick-settings-structure")),
+            Widget::Button(_) | Widget::Menu { .. } => {
+                Some(("shell-control", "quick-settings-button"))
+            }
+            Widget::Slider(_) => Some(("shell-control", "quick-settings-slider")),
+            Widget::Text(_) => Some(("shell-text", "quick-settings-text")),
+            _ => None,
+        };
         let mut e = Element::new(id, w);
-        e.style.text.color = self.text;
-        e.style.text.font_size = 12.0;
-        e.style.text.line_height = 16.0;
+        if let Some((shared, local)) = class {
+            e = e.class(shared).class(local);
+        }
         e.style.text.wrap = TextWrap::WordOrGlyph;
-        e.style.hover = self.card;
-        e.style.pressed = self.surface;
-        e.style.focus = self.accent;
-        e.style.radii = Some(CornerRadii::uniform(7.0));
         e
     }
     fn text(&self, id: u64, s: impl Into<String>, muted: bool) -> Element {
-        let mut e = self.element(id, Widget::Text(s.into()));
-        if muted {
-            e.style.text.color = self.muted;
-            e.style.text.font_size = 10.0;
-            e.style.text.line_height = 14.0;
-        }
+        let mut e = if muted {
+            Element::subtitle(id, s)
+                .class("shell-muted")
+                .class("quick-settings-muted")
+        } else {
+            self.element(id, Widget::Text(s.into()))
+        };
+        e.style.text.wrap = TextWrap::WordOrGlyph;
         e
     }
     fn panel(&self, id: u64) -> Element {
-        self.element(id, Widget::Panel)
+        let mut e = self.element(id, Widget::Panel).without_surface();
+        e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        e
+    }
+    fn surface_panel(&self, id: u64) -> Element {
+        let mut e = Element::new(id, Widget::Panel);
+        e.style.text.wrap = TextWrap::WordOrGlyph;
+        e
     }
     fn button(&self, id: u64, label: impl Into<String>, enabled: bool) -> Element {
         let mut e = self.element(id, Widget::Button(label.into()));
         e.layout.padding = 8.0;
         e.layout.height = Length::Px(44.0);
         e.enabled = enabled;
-        e.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: self.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(self.card)
-        });
         e
     }
     fn header_button(&self, id: u64, label: &str, width: f32) -> Element {
@@ -81,8 +60,7 @@ impl Palette {
         e.layout.padding = 0.0;
         e.layout.padding_edges = Some(Insets::all(0.0));
         e.layout.align = Align::Center;
-        e.style.text.align = TextAlign::Center;
-        e
+        e.class("quick-settings-header-button")
     }
     fn slider(&self, id: u64, min: f64, max: f64, value: f64, step: f64, enabled: bool) -> Element {
         let mut e = self.element(
@@ -91,7 +69,6 @@ impl Palette {
         );
         e.enabled = enabled;
         e.layout.height = Length::Px(30.0);
-        e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }
 }
@@ -307,50 +284,63 @@ fn is_charging(status: &str) -> bool {
     status.eq_ignore_ascii_case("charging")
 }
 
-fn icon_image(icon: Icon, light: bool) -> UiImage {
-    static DARK: OnceLock<[UiImage; 8]> = OnceLock::new();
-    static LIGHT: OnceLock<[UiImage; 8]> = OnceLock::new();
-    let cache = if light { &LIGHT } else { &DARK };
-    cache.get_or_init(|| {
-        let color = if light {
-            Color::rgba(65, 80, 100, 255)
-        } else {
-            Color::rgba(185, 192, 198, 255)
-        };
-        [
-            Icon::Power,
-            Icon::Close,
-            Icon::Network,
-            Icon::Bluetooth,
-            Icon::Speaker,
-            Icon::Microphone,
-            Icon::Brightness,
-            Icon::Battery,
-        ]
-        .map(|i| raster_icon(i, color, None, false))
-    })[icon as usize]
+pub(super) fn text_color(theme: Theme, user_theme_css: &str) -> Result<Color, StylesheetError> {
+    let mut scene = Scene::new(knave_shell_ui::styles::root(
+        Element::new(
+            1,
+            Widget::Icon(knave_ui::toolkit::Icon {
+                image: UiImage::from_rgba(1, 1, vec![0; 4]).expect("transparent sample icon"),
+                name: "quick settings".into(),
+            }),
+        )
+        .class("quick-settings-icon"),
+        theme,
+    ))
+    .expect("icon text style scene is valid");
+    scene.set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, user_theme_css)?;
+    Ok(scene
+        .computed_style(ElementId(1))
+        .map(|style| style.style.text.color)
+        .unwrap_or(Color::TEXT))
+}
+
+fn color_key(color: Color) -> [u8; 4] {
+    [color.red, color.green, color.blue, color.alpha]
+}
+
+fn icon_image(icon: Icon, color: Color) -> UiImage {
+    type IconCache = Mutex<std::collections::HashMap<([u8; 4], usize), UiImage>>;
+    static CACHE: OnceLock<IconCache> = OnceLock::new();
+    let key = (color_key(color), icon as usize);
+    let mut cache = CACHE
+        .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !cache.contains_key(&key) && cache.len() >= 128 {
+        cache.clear();
+    }
+    cache
+        .entry(key)
+        .or_insert_with(|| raster_icon(icon, color, None, false))
         .clone()
 }
 
-type BatteryIconCache = Mutex<std::collections::HashMap<(u8, bool, bool), UiImage>>;
+type BatteryIconCache = Mutex<std::collections::HashMap<(u8, bool, [u8; 4]), UiImage>>;
 
-fn battery_image(percent: u8, status: &str, light: bool) -> UiImage {
-    // At most 101 levels × two charging states × two palettes.
+fn battery_image(percent: u8, status: &str, color: Color) -> UiImage {
+    // Bound cached raster memory across user-theme color changes.
     static CACHE: OnceLock<BatteryIconCache> = OnceLock::new();
-    let key = (percent.min(100), is_charging(status), light);
-    CACHE
+    let key = (percent.min(100), is_charging(status), color_key(color));
+    let mut cache = CACHE
         .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !cache.contains_key(&key) && cache.len() >= 256 {
+        cache.clear();
+    }
+    cache
         .entry(key)
-        .or_insert_with(|| {
-            let color = if light {
-                Color::rgba(65, 80, 100, 255)
-            } else {
-                Color::rgba(185, 192, 198, 255)
-            };
-            raster_icon(Icon::Battery, color, Some(key.0), key.1)
-        })
+        .or_insert_with(|| raster_icon(Icon::Battery, color, Some(key.0), key.1))
         .clone()
 }
 
@@ -394,19 +384,16 @@ impl QuickSettings {
     }
     fn group(&mut self, p: &Palette) -> Element {
         let id = self.id();
-        let mut group = p.panel(id).layout(Layout {
-            padding: 12.0,
-            gap: 8.0,
-            ..Default::default()
-        });
-        group.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: p.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(p.card)
-        });
+        let mut group = p
+            .surface_panel(id)
+            .component(ComponentKind::Card)
+            .layout(Layout {
+                padding: 12.0,
+                gap: 8.0,
+                ..Default::default()
+            });
+        group = group.class("quick-settings-card");
+        group.style.background = None;
         group
     }
     fn stack(&mut self, p: &Palette) -> Element {
@@ -425,7 +412,7 @@ impl QuickSettings {
     fn icon(&mut self, icon: Icon) -> Element {
         Element::new(
             self.id(),
-            Widget::Image(icon_image(icon, self.state.light), Default::default()),
+            Widget::Image(icon_image(icon, self.icon_color), Default::default()),
         )
         .layout(Layout {
             width: Length::Px(18.0),
@@ -437,7 +424,7 @@ impl QuickSettings {
         Element::new(
             self.id(),
             Widget::Image(
-                battery_image(percent, status, self.state.light),
+                battery_image(percent, status, self.icon_color),
                 Default::default(),
             ),
         )
@@ -447,29 +434,23 @@ impl QuickSettings {
             ..Default::default()
         })
     }
-    fn icon_control(
-        &mut self,
-        p: &Palette,
-        mut control: Element,
-        icon: Icon,
-        label: &str,
-    ) -> Element {
+    fn icon_control(&mut self, mut control: Element, icon: Icon, label: &str) -> Element {
         control.layout.flow = Flow::Overlay;
         control.layout.padding = 6.0;
         control.layout.padding_edges = None;
-        control.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        control.button_variant = Some(ButtonVariant::Ghost);
+        control = control.class("quick-settings-icon-control");
         control.tooltip = Some(label.into());
-        control.style.text.color = p.text;
         control.children.push(self.icon(icon));
         control
     }
-    fn separator(&mut self, p: &Palette) -> Element {
-        let mut e = p.panel(self.id()).layout(Layout {
-            height: Length::Px(1.0),
-            ..Default::default()
-        });
-        e.style.background = Some(ShapePaint::fill(p.border));
-        e
+    fn separator(&mut self) -> Element {
+        Element::new(self.id(), Widget::Separator)
+            .class("quick-settings-separator")
+            .layout(Layout {
+                height: Length::Px(1.0),
+                ..Default::default()
+            })
     }
     fn tile(
         &mut self,
@@ -487,6 +468,7 @@ impl QuickSettings {
         b.layout.align = Align::Center;
         b.layout.gap = 8.0;
         b.layout.height = Length::Px(64.0);
+        b = b.class("quick-settings-tile");
         b.children.push(self.icon(icon));
         let mut copy = self.stack(p);
         copy.layout.gap = 2.0;
@@ -497,18 +479,7 @@ impl QuickSettings {
         copy.children.push(sub);
         b.children.push(copy);
         if active {
-            b.style.background = Some(ShapePaint {
-                border: Some(Border {
-                    color: p.accent,
-                    width: 1.0,
-                }),
-                radii: CornerRadii::uniform(7.0),
-                ..ShapePaint::fill(if self.state.light {
-                    Color::rgba(220, 232, 248, 255)
-                } else {
-                    Color::rgba(49, 62, 77, 255)
-                })
-            });
+            b = b.class("quick-settings-active");
         }
         b
     }
@@ -539,7 +510,6 @@ impl QuickSettings {
         mute.layout.width = Length::Px(30.0);
         mute.layout.height = Length::Px(30.0);
         let mute = self.icon_control(
-            p,
             mute,
             if input {
                 Icon::Microphone
@@ -563,7 +533,7 @@ impl QuickSettings {
         value.layout.width = Length::Px(90.0);
         value.layout.height = Length::Auto;
         value.layout.padding_edges = Some(Insets::all(0.0));
-        value.style.text.align = TextAlign::End;
+        value = value.class("quick-settings-value");
         heading.children.push(value);
         group.children.push(heading);
         group.children.push(p.slider(
@@ -577,7 +547,7 @@ impl QuickSettings {
         group
     }
     pub(super) fn compose(&mut self) -> Element {
-        let p = Palette::new(&self.state);
+        let p = Palette::new();
         self.targets.clear();
         self.next = 100;
         let gap = if self.size[0] < 360.0 { 8.0 } else { 12.0 };
@@ -588,7 +558,12 @@ impl QuickSettings {
             height: Length::Fill,
             ..Default::default()
         });
-        let mut panel = p.panel(PANEL.0).layout(Layout {
+        root = root.class("quick-settings-root");
+        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        if self.state.high_contrast {
+            root.classes.push("high-contrast".into());
+        }
+        let mut panel = p.surface_panel(PANEL.0).layout(Layout {
             width: Length::Px(width),
             height: Length::Px((self.size[1] - top - gap).max(1.0)),
             offset: [(self.size[0] - width - gap).max(0.0), top],
@@ -596,14 +571,9 @@ impl QuickSettings {
             gap: 10.0,
             ..Default::default()
         });
-        panel.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: p.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(p.surface)
-        });
+        panel = panel.class("quick-settings-panel");
+        panel.component = Some(ComponentKind::Card);
+        panel.style.background = None;
         let mut header = self.row(&p);
         if self.page != Page::Main {
             header.children.push(p.header_button(BACK, "‹", 30.0));
@@ -618,8 +588,7 @@ impl QuickSettings {
         let mut title = self.label(&p, title, false);
         title.layout.height = Length::Auto;
         title.layout.padding_edges = Some(Insets::all(0.0));
-        title.style.text.font_size = 17.0;
-        title.style.text.line_height = 22.0;
+        title = title.class("quick-settings-title");
         header.children.push(title);
         if self.page == Page::Main {
             let mut power = p.header_button(POWER, "", 30.0);
@@ -631,13 +600,13 @@ impl QuickSettings {
                     MenuItem::option(3, "Shut down…"),
                 ],
             };
-            let power = self.icon_control(&p, power, Icon::Power, "Power menu");
+            let power = self.icon_control(power, Icon::Power, "Power menu");
             header.children.push(power);
         }
         let close = p.header_button(CLOSE, "", 30.0);
         header
             .children
-            .push(self.icon_control(&p, close, Icon::Close, "Close Quick Settings"));
+            .push(self.icon_control(close, Icon::Close, "Close Quick Settings"));
         panel.children.push(header);
         let mut scroll = p.element(20, Widget::Scroll).layout(Layout {
             height: Length::Fill,
@@ -685,7 +654,7 @@ impl QuickSettings {
                 );
                 profile.layout.width = Length::Px(112.0);
                 profile.layout.height = Length::Px(32.0);
-                profile.style.text.font_size = 10.0;
+                profile = profile.class("quick-settings-profile");
                 profile.tooltip = Some("Power mode".into());
                 profile.widget = Widget::Menu {
                     label: self
@@ -742,16 +711,16 @@ impl QuickSettings {
                 content.children.push(tiles);
                 let mut audio = self.group(&p);
                 audio.children.push(self.volume(&p, false));
-                audio.children.push(self.separator(&p));
+                audio.children.push(self.separator());
                 audio.children.push(self.volume(&p, true));
-                audio.children.push(self.separator(&p));
+                audio.children.push(self.separator());
                 let mut devices = self.button(
                     &p,
                     "Audio devices & apps  ↗",
                     Target::Command(QuickSettingsCommand::OpenAudio),
                     true,
                 );
-                devices.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+                devices = devices.class("quick-settings-device-link");
                 devices.layout.height = Length::Px(32.0);
                 audio.children.push(devices);
                 content.children.push(audio);
@@ -769,7 +738,7 @@ impl QuickSettings {
                     true,
                 );
                 value.layout.width = Length::Px(80.0);
-                value.style.text.align = TextAlign::End;
+                value = value.class("quick-settings-value");
                 brightness.children.push(value);
                 display.children.push(brightness);
                 display.children.push(p.slider(
@@ -780,7 +749,7 @@ impl QuickSettings {
                     1.0,
                     self.state.brightness.is_some(),
                 ));
-                display.children.push(self.separator(&p));
+                display.children.push(self.separator());
                 let state = if self.state.night.active {
                     "On"
                 } else if self.state.night.enabled {
@@ -794,7 +763,7 @@ impl QuickSettings {
                     Target::Page(Page::Night),
                     true,
                 );
-                night.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+                night = night.class("quick-settings-navigation");
                 night.layout.height = Length::Px(34.0);
                 display.children.push(night);
                 content.children.push(display);
@@ -1043,14 +1012,9 @@ impl QuickSettings {
                 ..Default::default()
             });
         dialog.visible = self.confirmation.is_some();
-        dialog.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: p.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(p.surface)
-        });
+        dialog = dialog.class("quick-settings-dialog");
+        dialog.component = Some(ComponentKind::Card);
+        dialog.style.background = None;
         if let Some(command) = self.confirmation.clone() {
             let (title, body, action) = match command {
                 QuickSettingsCommand::Suspend => {
@@ -1068,12 +1032,12 @@ impl QuickSettings {
                 .children
                 .push(p.button(CANCEL_CONFIRMATION, "Cancel", true));
             let mut confirm = p.button(CONFIRM_ACTION, action, true);
-            confirm.style.text.align = TextAlign::Center;
+            confirm = confirm.class("quick-settings-confirm");
             actions.children.push(confirm);
             dialog.children.push(actions);
         }
         root.children.push(dialog);
-        root
+        knave_shell_ui::styles::root(root, self.theme)
     }
 }
 
@@ -1081,13 +1045,30 @@ impl QuickSettings {
 mod icon_tests {
     use super::*;
     #[test]
+    fn user_theme_icon_color_updates_and_invalid_css_is_atomic() {
+        let mut app = QuickSettings::new();
+        app.theme_changed(Theme::Light, "icon { color: #123456; }")
+            .expect("valid user icon color");
+        assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
+        assert_eq!(app.scene.theme(), Theme::Light);
+
+        assert!(
+            app.theme_changed(Theme::Dark, "icon { color: invalid; }")
+                .is_err()
+        );
+        assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
+        assert_eq!(app.scene.theme(), Theme::Light);
+    }
+
+    #[test]
     fn battery_fill_and_cache_follow_real_charge_state() {
         assert_eq!(battery_fill_width(0), 0.0);
         assert_eq!(battery_fill_width(100), 11.0);
         assert_eq!(battery_fill_width(255), 11.0);
-        let empty = battery_image(0, "Not charging", false);
-        let full = battery_image(100, "Not charging", false);
-        let charging = battery_image(100, "Charging", false);
+        let color = text_color(Theme::Dark, "").expect("default theme is valid");
+        let empty = battery_image(0, "Not charging", color);
+        let full = battery_image(100, "Not charging", color);
+        let charging = battery_image(100, "Charging", color);
         let filled_columns = |image: &UiImage| {
             (6..17)
                 .filter(|x| image.pixels()[(12 * 24 + x) * 4 + 3] > 0)
@@ -1095,7 +1076,7 @@ mod icon_tests {
         };
         assert_eq!(
             empty.cache_key(),
-            battery_image(0, "Not charging", false).cache_key()
+            battery_image(0, "Not charging", color).cache_key()
         );
         assert_eq!(filled_columns(&empty), 0);
         assert_eq!(filled_columns(&full), 11);

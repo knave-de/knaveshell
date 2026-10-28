@@ -95,6 +95,10 @@ struct Wallpaper {
     worker: Option<ReloadWorker>,
 }
 impl Application for Wallpaper {
+    fn uses_theme(&self) -> bool {
+        false
+    }
+
     fn set_waker(&mut self, waker: Waker) {
         // The reload thread's lifetime matches this application's.
         self.worker = Some(ReloadWorker::start(

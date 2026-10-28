@@ -9,11 +9,12 @@ mod ime;
 pub mod notifications;
 pub mod quick_settings;
 mod snapshot;
+mod theme;
 pub mod tray;
 pub mod tray_menu;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition, Waker,
-    run_application,
+    run_application, run_application_with_theme,
 };
 use knave_ui::toolkit::{Input, KeyModifiers};
 use snapshot::SnapshotWorker;
@@ -24,6 +25,7 @@ use std::{
     ptr::NonNull,
     sync::{
         Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
     },
     thread::{self, JoinHandle},
@@ -684,6 +686,37 @@ fn run_internal(
         })
         .map_err(|error| WaylandError::Dispatch(error.to_string()))?;
 
+    let uses_theme = app.as_ref().is_none_or(|app| app.uses_theme());
+    let selected_theme = match if uses_theme {
+        theme::Selection::load()
+    } else {
+        Ok(theme::Selection::fallback(theme))
+    } {
+        Ok(selected) => selected,
+        Err(error) => {
+            eprintln!("knave-shell: theme: {error}; using toolkit defaults");
+            theme::Selection::fallback(theme)
+        }
+    };
+    if let Some(app) = &mut app {
+        app.theme_changed(selected_theme.theme, &selected_theme.css)
+            .map_err(|error| WaylandError::Dispatch(format!("theme: {error}")))?;
+    }
+    // Recheck after watch registration so an edit during startup cannot be missed.
+    let theme_pending = Arc::new(AtomicBool::new(uses_theme));
+    let pending = theme_pending.clone();
+    let theme_wake = Waker::new(wake_sender.clone());
+    let theme_watcher = uses_theme
+        .then(|| {
+            knave_ui::toolkit::theme_file::FileWatcher::start(theme::watch_paths, move || {
+                pending.store(true, Ordering::Release);
+                theme_wake.wake();
+            })
+            .map_err(|error| eprintln!("knave-shell: theme reload unavailable: {error}"))
+            .ok()
+        })
+        .flatten();
+
     let desktop_role = options.is_none() || app.as_ref().is_some_and(|app| app.uses_desktop());
     let application_overview = app.is_some() && role == ShellRole::Overview;
     let clipboard_manager =
@@ -724,7 +757,10 @@ fn run_internal(
         keyboard: None,
         pointer: None,
         role,
-        theme,
+        theme: selected_theme.theme,
+        user_theme_css: selected_theme.css,
+        theme_pending,
+        _theme_watcher: theme_watcher,
         app,
         options,
         notification_client: notification_bar.then(|| {
@@ -816,6 +852,9 @@ struct Runtime {
     pointer: Option<ThemedPointer>,
     role: ShellRole,
     theme: knave_ui::toolkit::Theme,
+    user_theme_css: String,
+    theme_pending: Arc<AtomicBool>,
+    _theme_watcher: Option<knave_ui::toolkit::theme_file::FileWatcher>,
     app: Option<Box<dyn Application>>,
     options: Option<SurfaceOptions>,
     notification_client: Option<notifications::NotificationClient>,
@@ -925,6 +964,21 @@ impl Runtime {
         }
         if self.exit {
             return;
+        }
+        if self.theme_pending.swap(false, Ordering::AcqRel) {
+            let result = theme::Selection::load().and_then(|selected| {
+                if let Some(app) = &mut self.app {
+                    app.theme_changed(selected.theme, &selected.css)
+                        .map_err(|error| error.to_string())?;
+                }
+                self.theme = selected.theme;
+                self.user_theme_css = selected.css;
+                self.scene_dirty = true;
+                Ok(())
+            });
+            if let Err(error) = result {
+                eprintln!("knave-shell: theme reload: {error}; keeping previous theme");
+            }
         }
         if let Some(error) = self.pane_worker.as_ref().and_then(PaneWorker::latest_error)
             && let Some(app) = &mut self.app
@@ -1105,7 +1159,7 @@ impl Runtime {
                     &self.applets,
                     self.focused_app_icon.as_ref(),
                 );
-                bar.set_theme(self.theme)
+                bar.set_user_theme(self.theme, &self.user_theme_css)
                     .expect("bundled shell theme stylesheet is valid");
                 self.scene = bar.scene;
                 self.render_list = bar.display;

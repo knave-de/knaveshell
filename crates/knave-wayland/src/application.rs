@@ -96,6 +96,20 @@ impl Waker {
 }
 
 pub trait Application {
+    /// Image-only surfaces can opt out of theme file notifications.
+    fn uses_theme(&self) -> bool {
+        true
+    }
+
+    /// Apply the selected user theme above shell presentation and below application CSS.
+    fn theme_changed(
+        &mut self,
+        _theme: knave_ui::toolkit::Theme,
+        _css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        Ok(())
+    }
+
     /// Drain completed background work before visibility and rendering are evaluated.
     fn update(&mut self) {}
     /// Dynamic input regions in logical surface coordinates; None uses the whole surface.
@@ -173,11 +187,19 @@ pub fn run_application(
     options: SurfaceOptions,
     app: impl Application + 'static,
 ) -> Result<(), super::WaylandError> {
+    run_application_with_theme(options, app, knave_ui::toolkit::Theme::Dark)
+}
+
+pub fn run_application_with_theme(
+    options: SurfaceOptions,
+    app: impl Application + 'static,
+    theme: knave_ui::toolkit::Theme,
+) -> Result<(), super::WaylandError> {
     validate_options(&options)?;
     super::run_internal(
         super::ShellRole::Overview,
         Some((options, Box::new(app))),
-        knave_ui::toolkit::Theme::Dark,
+        theme,
     )
 }
 

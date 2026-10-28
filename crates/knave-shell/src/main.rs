@@ -57,13 +57,17 @@ fn run() -> Result<(), String> {
     }
     if std::env::args().nth(1).as_deref() == Some("tray-menu") {
         let args: Vec<_> = std::env::args().skip(2).collect();
-        if args.len() != 3 {
+        if args.len() != 6 {
             return Err("invalid internal tray menu arguments".into());
         }
         return knave_wayland::tray_menu::run(
             args[0].clone(),
             args[1].clone(),
-            args[2].parse().map_err(|_| "invalid tray menu position")?,
+            args[2].clone(),
+            args[3].clone(),
+            args[4].parse().map_err(|_| "invalid tray menu position")?,
+            args[5].parse().map_err(|_| "invalid tray menu position")?,
+            configured_theme()?,
         );
     }
     if std::env::args().skip(1).eq(["notifications"]) {

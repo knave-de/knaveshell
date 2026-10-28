@@ -2,7 +2,7 @@
 mod backend;
 mod cache;
 pub use cache::status as cache_status;
-use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, toolkit::*};
+use knave_ui::{DisplayList, TextWrap, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker};
 use std::sync::{Arc, Mutex};
 use zeroize::{Zeroize, Zeroizing};
@@ -53,7 +53,9 @@ struct Agent {
 impl Agent {
     fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
-        scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .expect("shell stylesheet is valid");
         Self {
             theme,
             shared: Arc::new(Mutex::new(Shared::default())),
@@ -89,7 +91,6 @@ impl Agent {
             gap: 12.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(20, 29, 42, 255)));
         let text = |id, value: String| {
             let mut element = Element::new(id, Widget::Text(value));
             element.style.text.wrap = TextWrap::WordOrGlyph;
@@ -99,10 +100,13 @@ impl Agent {
             height: Length::Fill,
             ..Default::default()
         });
-        let mut content = Element::new(12, Widget::Panel).layout(Layout {
-            gap: 12.0,
-            ..Default::default()
-        });
+        let mut content = Element::new(12, Widget::Panel)
+            .without_surface()
+            .class("shell-structure")
+            .layout(Layout {
+                gap: 12.0,
+                ..Default::default()
+            });
         let heading = self
             .state
             .prompt
@@ -129,8 +133,8 @@ impl Agent {
                 FIELD.0,
                 Widget::Button(if value.is_empty() { " ".into() } else { value }),
             );
+            field.classes.push("polkit-field".into());
             field.layout.height = Length::Px(44.0);
-            field.style.background = Some(ShapePaint::fill(Color::rgba(31, 43, 60, 255)));
             content.children.push(field);
         }
         if let Some(retained) = self.state.retention {
@@ -149,12 +153,15 @@ impl Agent {
         }
         scroll.children.push(content);
         root.children.push(scroll);
-        let mut row = Element::new(10, Widget::Panel).layout(Layout {
-            flow: Flow::Row,
-            gap: 12.0,
-            height: Length::Px(44.0),
-            ..Default::default()
-        });
+        let mut row = Element::new(10, Widget::Panel)
+            .without_surface()
+            .class("shell-structure")
+            .layout(Layout {
+                flow: Flow::Row,
+                gap: 12.0,
+                height: Length::Px(44.0),
+                ..Default::default()
+            });
         for (id, label) in [(CANCEL, "Cancel"), (CONFIRM, "Continue")] {
             let mut button = Element::new(id.0, Widget::Button(label.into()));
             button.layout.height = Length::Px(44.0);
@@ -162,10 +169,17 @@ impl Agent {
             row.children.push(button);
         }
         root.children.push(row);
-        root
+        knave_shell_ui::styles::root(root.class("polkit-dialog"), self.theme)
     }
 }
 impl Application for Agent {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn set_waker(&mut self, waker: Waker) {
         self.shared.lock().unwrap().waker = Some(waker);
         let (sender, receiver) = async_channel::bounded(1);
@@ -266,9 +280,6 @@ impl Application for Agent {
             self.scene
                 .replace(self.compose())
                 .expect("bounded authentication scene");
-            self.scene
-                .set_theme(self.theme)
-                .expect("built-in theme is valid");
             self.scene.layout(size, text);
             if self.focus_field {
                 let _ = self.scene.set_focus(Some(FIELD));

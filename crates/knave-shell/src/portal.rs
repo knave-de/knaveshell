@@ -1,7 +1,7 @@
 //! Native portal selection and sharing controls on Knave's retained UI toolkit.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, SourceKind};
-use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, UiImage, toolkit::*};
+use knave_ui::{DisplayList, TextWrap, UiImage, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
 use std::{
     collections::BTreeSet,
@@ -75,7 +75,9 @@ impl Picker {
             })
             .collect();
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).map_err(|e| e.to_string())?;
-        scene.set_theme(theme).map_err(|e| e.to_string())?;
+        scene
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             theme,
             workspace_frozen: false,
@@ -125,7 +127,6 @@ impl Picker {
             gap: 16.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
         let title = match self.request.operation {
             Operation::Share => "Choose what to share",
             Operation::Screenshot => "Choose a screen to capture",
@@ -159,12 +160,15 @@ impl Picker {
             }),
         );
         if self.request.operation == Operation::Share {
-            let mut tabs = Element::new(10, Widget::Panel).layout(Layout {
-                flow: Flow::Row,
-                height: Length::Px(38.0),
-                gap: 8.0,
-                ..Default::default()
-            });
+            let mut tabs = Element::new(10, Widget::Panel)
+                .without_surface()
+                .class("shell-structure")
+                .layout(Layout {
+                    flow: Flow::Row,
+                    height: Length::Px(38.0),
+                    gap: 8.0,
+                    ..Default::default()
+                });
             for (index, (mode, label)) in [
                 (Mode::Screen, "Screen"),
                 (Mode::Window, "Window"),
@@ -180,7 +184,7 @@ impl Picker {
                     .iter()
                     .any(|source| mode.matches(source.kind));
                 if self.mode == mode {
-                    button.style.background = Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                    button.classes.push("portal-selected".into());
                 }
                 tabs.children.push(button);
             }
@@ -190,14 +194,17 @@ impl Picker {
             }
         }
         if self.request.operation != Operation::Sharing {
-            let mut grid = Element::new(6, Widget::Panel).layout(Layout {
-                flow: Flow::Grid {
-                    columns: if self.mode == Mode::Workspaces { 5 } else { 2 },
-                },
-                gap: 12.0,
-                height: Length::Auto,
-                ..Default::default()
-            });
+            let mut grid = Element::new(6, Widget::Panel)
+                .without_surface()
+                .class("shell-structure")
+                .layout(Layout {
+                    flow: Flow::Grid {
+                        columns: if self.mode == Mode::Workspaces { 5 } else { 2 },
+                    },
+                    gap: 12.0,
+                    height: Length::Auto,
+                    ..Default::default()
+                });
             for (index, source) in self.request.sources.iter().enumerate() {
                 if !self.mode.matches(source.kind) {
                     continue;
@@ -217,24 +224,22 @@ impl Picker {
                         ..Default::default()
                     });
                     if selected {
-                        checkbox.style.background =
-                            Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                        checkbox.classes.push("portal-selected".into());
                     }
                     grid.children.push(checkbox);
                     continue;
                 }
                 let mut card = Element::new(SOURCE + index as u64, Widget::Button(String::new()))
+                    .class("portal-card")
                     .layout(Layout {
                         height: Length::Px(190.0),
                         padding: 10.0,
                         gap: 8.0,
                         ..Default::default()
                     });
-                card.style.background = Some(ShapePaint::fill(if selected {
-                    Color::rgba(48, 82, 126, 255)
-                } else {
-                    Color::rgba(38, 49, 65, 255)
-                }));
+                if selected {
+                    card.classes.push("portal-selected".into());
+                }
                 if let Some(image) = &self.images[index] {
                     card.children.push(
                         Element::new(
@@ -294,12 +299,15 @@ impl Picker {
                     .children(vec![grid]),
             );
         }
-        let mut buttons = Element::new(8, Widget::Panel).layout(Layout {
-            flow: Flow::Row,
-            height: Length::Px(44.0),
-            gap: 12.0,
-            ..Default::default()
-        });
+        let mut buttons = Element::new(8, Widget::Panel)
+            .without_surface()
+            .class("shell-structure")
+            .layout(Layout {
+                flow: Flow::Row,
+                height: Length::Px(44.0),
+                gap: 12.0,
+                ..Default::default()
+            });
         if self.request.operation != Operation::Sharing {
             buttons
                 .children
@@ -340,7 +348,7 @@ impl Picker {
             buttons.children.push(confirm);
         }
         root.children.push(buttons);
-        root
+        knave_shell_ui::styles::root(root.class("portal-picker"), self.theme)
     }
 
     fn sharing_control(&self) -> Element {
@@ -350,7 +358,6 @@ impl Picker {
             gap: 6.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
         let app = if self.request.app_id.is_empty() {
             "Application"
         } else {
@@ -392,11 +399,11 @@ impl Picker {
             ..Default::default()
         });
         label.style.text.wrap = TextWrap::None;
-        label.style.text.color = if self.workspace_frozen {
-            Color::rgba(240, 190, 100, 255)
+        label.classes.push(if self.workspace_frozen {
+            "portal-frozen".into()
         } else {
-            Color::rgba(137, 207, 240, 255)
-        };
+            "portal-sharing".into()
+        });
         root.children.push(label);
         root.children.push(
             Element::new(CONFIRM.0, Widget::Button("Stop sharing".into())).layout(Layout {
@@ -406,10 +413,17 @@ impl Picker {
                 ..Default::default()
             }),
         );
-        root
+        knave_shell_ui::styles::root(root.class("portal-picker"), self.theme)
     }
 }
 impl Application for Picker {
+    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+        self.scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = theme;
+        self.dirty = true;
+        Ok(())
+    }
     fn uses_desktop(&self) -> bool {
         self.request.operation == Operation::Sharing
             && self
@@ -487,10 +501,15 @@ impl Application for Picker {
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
             let focus = self.scene.focus();
+            let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
             if let Ok(mut scene) = Scene::new(self.compose()) {
                 scene
-                    .set_theme(self.theme)
-                    .expect("built-in theme is valid");
+                    .set_theme_stylesheets(
+                        self.theme,
+                        knave_shell_ui::styles::STYLESHEET,
+                        &user_theme_css,
+                    )
+                    .expect("portal stylesheet is valid");
                 scene.layout(size, text);
                 let initial = (self.request.operation != Operation::Sharing).then_some(CANCEL);
                 let _ = scene.set_focus(focus.or(initial));
@@ -641,6 +660,43 @@ mod tests {
         picker.frame([820.0, 640.0], &mut Metrics);
         click(&mut picker, CONFIRM);
         assert!(picker.should_close());
+    }
+    #[test]
+    fn portal_surfaces_and_selection_follow_the_selected_theme() {
+        let mut picker = Picker::with_theme(request(), Theme::Light).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+
+        let mut defaults = Scene::new(Element::new(0, Widget::Panel)).unwrap();
+        defaults.set_theme(Theme::Light).unwrap();
+        assert_eq!(
+            picker
+                .scene
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background,
+            defaults
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background
+        );
+        defaults
+            .set_stylesheet("panel { background-color: var(--surface-selected); }")
+            .unwrap();
+        assert_eq!(
+            picker
+                .scene
+                .computed_style(ElementId(TAB))
+                .unwrap()
+                .style
+                .background,
+            defaults
+                .computed_style(ElementId(0))
+                .unwrap()
+                .style
+                .background
+        );
     }
     #[test]
     fn sharing_stop_button_closes_without_source_selection() {

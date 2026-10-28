@@ -838,13 +838,17 @@ fn enter_while_the_catalog_loads_launches_when_it_arrives() {
     let mut app = Overview::new()
         .with_catalog_environment(apps_environment())
         .with_icon_lookup(icon_lookup(true));
+    // Hold the loading state until the deferred action is asserted.
+    app.apps = Apps::Loading;
     app.desktop_snapshot(&snapshot());
     app.frame([1200.0, 800.0], &mut Metrics);
     app.input(Input::Text("edit".into()));
-    // No frame has absorbed the worker's catalog yet, so Enter must not be lost.
+    // Enter must not be lost while catalog loading is pending.
     key(&mut app, Key::Enter, true);
     assert!(app.take_request().is_none());
     assert!(app.launch_when_ready);
+    app.apps = Apps::Unloaded;
+    app.ensure_catalog();
     settle(&mut app, [1200.0, 800.0]);
     assert_eq!(
         spawned(&mut app),
@@ -855,11 +859,15 @@ fn enter_while_the_catalog_loads_launches_when_it_arrives() {
     let mut app = Overview::new()
         .with_catalog_environment(apps_environment())
         .with_icon_lookup(icon_lookup(true));
+    // Hold the loading state until the deferred action is asserted.
+    app.apps = Apps::Loading;
     app.desktop_snapshot(&snapshot());
     app.frame([1200.0, 800.0], &mut Metrics);
     app.input(Input::Text("edit".into()));
     key(&mut app, Key::Enter, true);
     app.input(Input::Text("x".into()));
+    app.apps = Apps::Unloaded;
+    app.ensure_catalog();
     settle(&mut app, [1200.0, 800.0]);
     assert!(app.take_request().is_none());
 }
@@ -1003,6 +1011,7 @@ fn hiding_while_catalog_loads_cancels_the_deferred_launch() {
     let mut app = Overview::new()
         .with_catalog_environment(apps_environment())
         .with_icon_lookup(icon_lookup(true));
+    app.apps = Apps::Loading;
     app.desktop_snapshot(&snapshot());
     app.frame([1200.0, 800.0], &mut Metrics);
     app.input(Input::Text("edit".into()));
@@ -1013,6 +1022,8 @@ fn hiding_while_catalog_loads_cancels_the_deferred_launch() {
     app.desktop_snapshot(&hidden);
     assert!(!app.launch_when_ready);
     app.desktop_snapshot(&snapshot());
+    app.apps = Apps::Unloaded;
+    app.ensure_catalog();
     settle(&mut app, [1200.0, 800.0]);
     assert!(app.query.text().is_empty());
     assert!(app.take_request().is_none());
@@ -1042,19 +1053,44 @@ fn overview_backdrop_preserves_wallpaper_visibility() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(list.clear_color, knave_ui::Color::rgba(0, 0, 0, 0));
-    let backdrop = list
-        .commands
-        .iter()
-        .find_map(|command| match command {
-            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
-                if bounds.width == 1200.0 && bounds.height == 800.0 =>
-            {
-                Some(paint)
-            }
-            _ => None,
-        })
-        .expect("full output backdrop");
-    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 0)));
+    assert!(
+        !list.commands.iter().any(|command| matches!(command,
+            knave_ui::DisplayCommand::Shape { bounds, .. }
+                if bounds.width == 1200.0 && bounds.height == 800.0
+        )),
+        "a structural fullscreen root must not emit a surface shape"
+    );
+}
+
+#[test]
+fn overview_controls_follow_the_selected_toolkit_theme() {
+    let mut app = Overview::with_theme(knave_ui::toolkit::Theme::Light);
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+
+    let search = app.scene.computed_style(SEARCH).unwrap();
+    let search_paint = search.style.background.as_ref().unwrap();
+    let mut defaults = Scene::new(Element::new(
+        1,
+        Widget::TextInput(TextEdit::new("").unwrap()),
+    ))
+    .unwrap();
+    defaults.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
+    let baseline = defaults.computed_style(ElementId(1)).unwrap();
+    assert_eq!(
+        search_paint.fill,
+        baseline.style.background.and_then(|paint| paint.fill)
+    );
+    assert!(search.outline.is_none_or(|outline| outline.width == 0.0));
+    let selected_card = app
+        .scene
+        .computed_style(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    assert!(
+        selected_card
+            .outline
+            .is_none_or(|outline| outline.width == 0.0)
+    );
 }
 
 #[test]
@@ -1246,8 +1282,8 @@ fn the_shared_bar_strip_is_rendered_by_the_statusbar_widgets() {
     };
     assert_eq!(
         strip,
-        vec![Some(knave_ui::Color::rgba(0, 0, 0, 0)), background],
-        "transparent target container followed by toolkit statusbar"
+        vec![background],
+        "only the real status bar paints the strip; its input container does not"
     );
 }
 
@@ -1463,4 +1499,32 @@ fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
         .bounds(ElementId(0x200_0000_0000 + 2))
         .expect("current workspace dot");
     assert!(dot.y + dot.height <= 800.0 - 24.0);
+}
+
+#[test]
+fn full_named_themes_leave_compositor_preview_windows_unpainted() {
+    for theme in [
+        knave_ui::toolkit::Theme::Dark,
+        knave_ui::toolkit::Theme::Light,
+    ] {
+        let mut app = app();
+        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+        let pane = app
+            .panes
+            .iter()
+            .find(|pane| pane.workspace == WorkspaceId(2))
+            .unwrap();
+        let x = pane.x as f32 + pane.width as f32 / 2.0;
+        let y = pane.y as f32 + pane.height as f32 / 2.0;
+        assert!(
+            !list.commands.iter().any(|command| matches!(command,
+                knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                    if bounds.x <= x && bounds.y <= y
+                        && bounds.x + bounds.width > x && bounds.y + bounds.height > y
+                        && paint.fill.is_some_and(|color| color.alpha > 0)
+            )),
+            "{theme:?} shell chrome must not obscure compositor-rendered windows"
+        );
+    }
 }

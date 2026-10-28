@@ -44,6 +44,18 @@ compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume
 Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
+Knave UI supplies the shell's colors, surfaces, typography, control states
+and keyboard focus treatment. CSS in
+`crates/knave-shell-ui/src/styles/` is limited to shell-specific layout details,
+selected and error states, and the unread-count badge. User theme CSS layers over
+these shell rules, from `$XDG_DATA_HOME/knave/themes/<theme-name>/dark.css` or
+`light.css` (default data directory: `~/.local/share`). Configured theme and CSS
+file changes apply live. Invalid edits retain the last valid theme; missing files
+use the toolkit defaults. Application CSS overrides remain the final layer.
+Layout and hit targets remain in the Rust compositions;
+fullscreen structural roots and compositor preview regions use non-painting
+Rust elements, so general theme rules cannot cover the desktop or previewed windows.
+
 ## Build
 
 Building requires GLib/GIO and Polkit development libraries discoverable by
@@ -141,9 +153,10 @@ disturb and clear/read controls. Escape or an outside click closes the center.
 Passive banners never request keyboard focus and leave the desktop outside their
 cards clickable. History is paged in groups of 20 to bound retained UI size.
 Long titles, bodies and action labels wrap; lengthy bodies have Show more/less.
-The center and banners use compact charcoal cards, muted metadata and a blue
-accent; Do not disturb is a switch above the history controls. Light/dark and
-high-contrast colors use Knave's appearance settings.
+The center and banners use Knave UI's bundled CSS for cards, controls and text;
+Do not disturb is a switch above the history controls. Light/dark colors follow
+Knave's appearance settings. The fullscreen dismissal host stays transparent
+outside the bounded panel and banners.
 
 The session service owns persistence and delivery. Expired banners remain in
 history; restored history has no stale actions. Transient notifications do not
@@ -158,7 +171,9 @@ checks `--supports-notifications-service` before starting the role.
 StatusNotifier tray icons appear immediately left of the notification bell in
 both the bar and Overview. Left-click activates the app (or opens a menu-only
 applet), right-click opens its menu, middle-click sends its secondary action,
-and scrolling sends vertical scroll events. Exported dbusmenu menus support
+and scrolling sends vertical scroll events. Menu loading runs independently of
+tray refreshes, so an unresponsive applet cannot hold up opening another menu.
+Exported dbusmenu menus support
 submenus, disabled actions and check/radio states; Escape, Close or an outside
 click dismisses the menu. Attention icons have a marker; passive items are hidden.
 

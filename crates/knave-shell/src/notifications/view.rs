@@ -1,5 +1,6 @@
 use super::*;
-use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
+use knave_ui::toolkit::{ButtonVariant, ComponentKind};
+use knave_ui::{ShapePaint, TextWrap};
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
     knave_shell_ui::status_icons::bell()
@@ -8,66 +9,39 @@ fn fallback_icon() -> Option<knave_ui::UiImage> {
 pub(super) fn card_id(id: u64) -> u64 {
     1000 + id * 32
 }
-struct Palette {
-    surface: Color,
-    card: Color,
-    text: Color,
-    muted: Color,
-    accent: Color,
-    border: Color,
-    critical: Color,
-}
+struct Palette;
 impl Palette {
-    fn new(light: bool, contrast: bool) -> Self {
-        if light {
-            Self {
-                surface: Color::rgba(244, 247, 251, 255),
-                card: Color::rgba(255, 255, 255, 255),
-                text: Color::rgba(18, 28, 43, 255),
-                muted: Color::rgba(65, 80, 100, 255),
-                accent: Color::rgba(18, 91, 158, 255),
-                border: if contrast {
-                    Color::rgba(18, 28, 43, 255)
-                } else {
-                    Color::rgba(180, 193, 210, 210)
-                },
-                critical: Color::rgba(170, 35, 49, 255),
-            }
-        } else {
-            Self {
-                surface: Color::rgba(32, 36, 39, 255),
-                card: Color::rgba(41, 47, 51, 255),
-                text: Color::rgba(220, 224, 228, 255),
-                muted: Color::rgba(146, 155, 163, 255),
-                accent: Color::rgba(149, 185, 238, 255),
-                border: if contrast {
-                    Color::TEXT
-                } else {
-                    Color::rgba(255, 255, 255, 20)
-                },
-                critical: Color::rgba(255, 157, 162, 255),
-            }
-        }
+    fn new() -> Self {
+        Self
     }
     fn style(&self, e: &mut Element) {
-        e.style.text.color = self.text;
         e.style.text.wrap = TextWrap::WordOrGlyph;
-        e.style.hover = self.surface;
-        e.style.pressed = self.card;
-        e.style.focus = self.accent;
-        e.style.radii = Some(CornerRadii::uniform(7.0));
     }
     fn panel(&self, id: u64) -> Element {
+        let mut e = Element::new(id, Widget::Panel)
+            .without_surface()
+            .class("shell-structure")
+            .class("notifications-structure");
+        self.style(&mut e);
+        e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        e
+    }
+    fn surface_panel(&self, id: u64) -> Element {
         let mut e = Element::new(id, Widget::Panel);
         self.style(&mut e);
         e
     }
     fn text(&self, id: u64, value: String, muted: bool) -> Element {
-        let mut e = Element::new(id, Widget::Text(value));
+        let mut e = if muted {
+            Element::subtitle(id, value)
+        } else {
+            Element::new(id, Widget::Text(value))
+        };
+        e = e.class("shell-text").class("notifications-text");
+        if muted {
+            e = e.class("shell-muted").class("notifications-muted");
+        }
         self.style(&mut e);
-        e.style.text.font_size = 12.0;
-        e.style.text.line_height = 16.0;
-        e.style.text.color = if muted { self.muted } else { self.text };
         e
     }
     fn close_button(&self, id: u64, keyboard_focus: bool) -> Element {
@@ -76,20 +50,16 @@ impl Palette {
             height: Length::Px(32.0),
             ..Default::default()
         });
+        e = e
+            .class("shell-control")
+            .class("notifications-button")
+            .class("notifications-close");
         self.style(&mut e);
-        e.style.text.font_size = 11.0;
-        e.style.text.align = TextAlign::Center;
-        e.style.hover = Color::rgba(128, 128, 128, 40);
-        e.style.pressed = Color::rgba(128, 128, 128, 70);
-        e.style.focus = if keyboard_focus {
-            self.muted
-        } else {
-            Color::rgba(0, 0, 0, 0)
-        };
-        e.style.background = Some(ShapePaint {
-            radii: CornerRadii::uniform(6.0),
-            ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
-        });
+        e.button_variant = Some(ButtonVariant::Ghost);
+        if keyboard_focus {
+            e.classes.push("keyboard-focus-visible".into());
+            e.classes.push("notifications-keyboard-focus".into());
+        }
         e
     }
     fn page_button(&self, id: u64, value: &str) -> Element {
@@ -97,7 +67,7 @@ impl Palette {
         e.layout.width = Length::Px(36.0);
         e.layout.height = Length::Px(36.0);
         e.layout.padding = 0.0;
-        e.style.text.align = TextAlign::Center;
+        e = e.class("notifications-page-button");
         e
     }
     fn button(&self, id: u64, value: &str) -> Element {
@@ -105,17 +75,8 @@ impl Palette {
             padding: 8.0,
             ..Default::default()
         });
+        e = e.class("shell-control").class("notifications-button");
         self.style(&mut e);
-        e.style.text.font_size = 11.0;
-        e.style.text.line_height = 14.0;
-        e.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: self.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(6.0),
-            ..ShapePaint::fill(self.card)
-        });
         e
     }
     fn text_button(&self, id: u64, value: &str) -> Element {
@@ -125,16 +86,9 @@ impl Palette {
             padding: 4.0,
             ..Default::default()
         });
+        e = e.class("shell-control").class("notifications-text-button");
         self.style(&mut e);
-        e.style.text.color = self.muted;
-        e.style.text.font_size = 10.0;
-        e.style.text.line_height = 13.0;
-        e.style.hover = Color::rgba(255, 255, 255, 16);
-        e.style.pressed = Color::rgba(255, 255, 255, 28);
-        e.style.background = Some(ShapePaint {
-            radii: CornerRadii::uniform(4.0),
-            ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
-        });
+        e.button_variant = Some(ButtonVariant::Ghost);
         e
     }
 }
@@ -151,7 +105,7 @@ fn panel_geometry(width: f32) -> (f32, f32) {
 }
 impl Notifications {
     pub(super) fn compose(&mut self) -> Element {
-        let p = Palette::new(self.state.light, self.state.high_contrast);
+        let p = Palette::new();
         self.targets.clear();
         let width = self.size[0].max(1.0);
         let height = self.size[1].max(1.0);
@@ -160,7 +114,12 @@ impl Notifications {
         let mut root = p.panel(0);
         root.layout.flow = Flow::Overlay;
         root.layout.height = Length::Fill;
-        let mut panel = p.panel(PANEL.0).layout(Layout {
+        root = root.class("notifications-root");
+        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        if self.state.high_contrast {
+            root.classes.push("high-contrast".into());
+        }
+        let mut panel = p.surface_panel(PANEL.0).layout(Layout {
             width: Length::Px(panel_width),
             height: if self.state.center_open {
                 Length::Px((height - top - gap).max(1.0))
@@ -173,14 +132,9 @@ impl Notifications {
             ..Default::default()
         });
         if self.state.center_open {
-            panel.style.background = Some(ShapePaint {
-                border: Some(Border {
-                    color: p.border,
-                    width: 1.0,
-                }),
-                radii: CornerRadii::uniform(7.0),
-                ..ShapePaint::fill(p.surface)
-            });
+            panel = panel.class("notifications-panel");
+            panel.component = Some(ComponentKind::Card);
+            panel.style.background = None;
             let mut heading = p.panel(10).layout(Layout {
                 flow: Flow::Row,
                 align: Align::Center,
@@ -190,37 +144,28 @@ impl Notifications {
             });
             let mut title = p.text(11, "Notifications".into(), false);
             title.layout.height = Length::Auto;
-            title.style.text.weight = 600;
-            title.style.text.font_size = 17.0;
-            title.style.text.line_height = 22.0;
+            title = title.class("notifications-title");
             heading.children.push(title);
             let mut close = p.close_button(CLOSE, self.keyboard_focus_visible);
             close.tooltip = Some("Close notification center".into());
             heading.children.push(close);
             panel.children.push(heading);
-            let mut dnd = p.panel(20).layout(Layout {
+            let mut dnd = p.surface_panel(20).layout(Layout {
                 flow: Flow::Row,
                 align: Align::Center,
                 gap: 10.0,
                 padding: 12.0,
                 ..Default::default()
             });
-            dnd.style.background = Some(ShapePaint {
-                border: Some(Border {
-                    color: p.border,
-                    width: 1.0,
-                }),
-                radii: CornerRadii::uniform(7.0),
-                ..ShapePaint::fill(p.card)
-            });
+            dnd = dnd.class("notifications-dnd");
+            dnd.component = Some(ComponentKind::Card);
+            dnd.style.background = None;
             let mut dnd_copy = p.panel(21).layout(Layout {
                 height: Length::Auto,
                 ..Default::default()
             });
             let mut dnd_title = p.text(22, "Do not disturb".into(), false);
-            dnd_title.style.text.weight = 600;
-            dnd_title.style.text.font_size = 12.0;
-            dnd_title.style.text.line_height = 16.0;
+            dnd_title = dnd_title.class("notifications-dnd-title");
             dnd_copy.children.push(dnd_title);
             let mut dnd_subtitle = p.text(
                 23,
@@ -231,8 +176,7 @@ impl Notifications {
                 },
                 true,
             );
-            dnd_subtitle.style.text.font_size = 10.0;
-            dnd_subtitle.style.text.line_height = 13.0;
+            dnd_subtitle = dnd_subtitle.class("notifications-dnd-subtitle");
             dnd_copy.children.push(dnd_subtitle);
             dnd.children.push(dnd_copy);
             let mut toggle = Element::new(
@@ -247,6 +191,7 @@ impl Notifications {
                 height: Length::Px(24.0),
                 ..Default::default()
             });
+            toggle = toggle.class("shell-control").class("notifications-toggle");
             p.style(&mut toggle);
             toggle.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             toggle.enabled = self.state.owned;
@@ -272,10 +217,8 @@ impl Notifications {
                 format!("RECENT · {}", self.state.history().count()),
                 true,
             );
-            recent.style.text.font_size = 10.0;
-            recent.style.text.line_height = 13.0;
-            recent.style.text.weight = 600;
             recent.layout.height = Length::Auto;
+            recent = recent.class("notifications-recent");
             controls.children.push(recent);
             let mut read = p.text_button(READ, "Mark all read");
             read.layout.width = Length::Px(84.0);
@@ -361,8 +304,7 @@ impl Notifications {
                 true,
             );
             page_label.layout.height = Length::Auto;
-            page_label.style.text.font_size = 10.0;
-            page_label.style.text.line_height = 13.0;
+            page_label = page_label.class("notifications-page-label");
             footer.children.push(page_label);
             let mut next = p.page_button(NEXT, "›");
             next.enabled = self.page + 1 < pages;
@@ -392,29 +334,26 @@ impl Notifications {
             panel.children.push(scroll);
         }
         root.children.push(panel);
-        root
+        knave_shell_ui::styles::root(root, self.theme)
     }
     fn card(&mut self, n: &Notification, p: &Palette, banner: bool) -> Element {
         let id = card_id(n.id);
-        let mut card = p.panel(id).layout(Layout {
-            padding: 12.0,
-            gap: 7.0,
-            ..Default::default()
-        });
-        card.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: if n.urgency == 2 {
-                    p.critical
-                } else if n.unread {
-                    p.accent
-                } else {
-                    p.border
-                },
-                width: if n.unread || n.urgency == 2 { 2.0 } else { 1.0 },
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(p.card)
-        });
+        let mut card = p
+            .surface_panel(id)
+            .component(ComponentKind::Card)
+            .layout(Layout {
+                padding: 12.0,
+                gap: 7.0,
+                ..Default::default()
+            });
+        card.style.background = None;
+        card = card.class("notifications-card");
+        if n.unread {
+            card = card.class("notifications-unread");
+        }
+        if n.urgency == 2 {
+            card = card.class("notifications-critical");
+        }
         let mut head = p.panel(id + 1).layout(Layout {
             flow: Flow::Row,
             align: Align::Center,
@@ -460,8 +399,7 @@ impl Notifications {
             ),
             true,
         );
-        metadata.style.text.font_size = 10.0;
-        metadata.style.text.line_height = 13.0;
+        metadata = metadata.class("notifications-metadata");
         head.children.push(metadata);
         let mut dismiss = p.close_button(id + 4, self.keyboard_focus_visible);
         dismiss.tooltip = Some("Dismiss notification".into());
@@ -470,9 +408,7 @@ impl Notifications {
         card.children.push(head);
         let summary = short(&n.summary, if banner { 150 } else { 512 });
         let mut title = p.text(id + 5, summary, false);
-        title.style.text.weight = 600;
-        title.style.text.font_size = 12.0;
-        title.style.text.line_height = 16.0;
+        title = title.class("notifications-summary");
         card.children.push(title);
         let expanded = self.expanded.contains(&n.id);
         let body = short(
@@ -487,8 +423,7 @@ impl Notifications {
         );
         if !body.is_empty() {
             let mut body = p.text(id + 6, body, false);
-            body.style.text.font_size = 11.0;
-            body.style.text.line_height = 15.0;
+            body = body.class("notifications-body");
             card.children.push(body);
         }
         if let Some(source) = &n.image {
@@ -532,23 +467,19 @@ impl Notifications {
         if let Some(value) = n.progress {
             card.children
                 .push(p.text(id + 8, format!("Progress: {value}%"), true));
-            let mut track = p.panel(id + 9).layout(Layout {
-                height: Length::Px(4.0),
-                flow: Flow::Overlay,
-                ..Default::default()
-            });
-            track.style.background = Some(ShapePaint::fill(p.border));
-            // Percentage is also printed, so it remains clear without relying on color.
-            let (_, panel_width) = panel_geometry(self.size[0]);
-            let available = (panel_width - if banner { 24.0 } else { 48.0 }).max(0.0);
-            let mut fill = p.panel(id + 10).layout(Layout {
-                width: Length::Px(available * f32::from(value) / 100.0),
-                height: Length::Fill,
-                ..Default::default()
-            });
-            fill.style.background = Some(ShapePaint::fill(p.accent));
-            track.children.push(fill);
-            card.children.push(track);
+            card.children.push(
+                Element::new(
+                    id + 9,
+                    Widget::Progress {
+                        value: Some(f64::from(value) / 100.0),
+                    },
+                )
+                .layout(Layout {
+                    height: Length::Px(4.0),
+                    ..Default::default()
+                })
+                .class("notifications-progress"),
+            );
         }
         if n.live {
             for (index, action) in n.actions.iter().take(MAX_ACTIONS).enumerate() {
