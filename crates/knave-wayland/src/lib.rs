@@ -13,7 +13,7 @@ pub mod tray;
 pub mod tray_menu;
 pub use application::{
     Application, HostRequest, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition, Waker,
-    run_application,
+    run_application, run_application_with_theme,
 };
 use knave_ui::toolkit::{Input, KeyModifiers};
 use snapshot::SnapshotWorker;

@@ -44,6 +44,10 @@ compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume
 Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
+Shell controls and content surfaces use Knave UI's bundled light/dark CSS.
+Only fullscreen dismissal hosts and compositor preview regions stay explicitly
+transparent; they do not supply a competing shell color palette.
+
 ## Build
 
 Building requires GLib/GIO and Polkit development libraries discoverable by
@@ -141,9 +145,10 @@ disturb and clear/read controls. Escape or an outside click closes the center.
 Passive banners never request keyboard focus and leave the desktop outside their
 cards clickable. History is paged in groups of 20 to bound retained UI size.
 Long titles, bodies and action labels wrap; lengthy bodies have Show more/less.
-The center and banners use compact charcoal cards, muted metadata and a blue
-accent; Do not disturb is a switch above the history controls. Light/dark and
-high-contrast colors use Knave's appearance settings.
+The center and banners use Knave UI's bundled CSS for cards, controls and text;
+Do not disturb is a switch above the history controls. Light/dark colors follow
+Knave's appearance settings. The fullscreen dismissal host stays transparent
+outside the bounded panel and banners.
 
 The session service owns persistence and delivery. Expired banners remain in
 history; restored history has no stale actions. Transient notifications do not
@@ -158,7 +163,9 @@ checks `--supports-notifications-service` before starting the role.
 StatusNotifier tray icons appear immediately left of the notification bell in
 both the bar and Overview. Left-click activates the app (or opens a menu-only
 applet), right-click opens its menu, middle-click sends its secondary action,
-and scrolling sends vertical scroll events. Exported dbusmenu menus support
+and scrolling sends vertical scroll events. Menu loading runs independently of
+tray refreshes, so an unresponsive applet cannot hold up opening another menu.
+Exported dbusmenu menus support
 submenus, disabled actions and check/radio states; Escape, Close or an outside
 click dismisses the menu. Attention icons have a marker; passive items are hidden.
 

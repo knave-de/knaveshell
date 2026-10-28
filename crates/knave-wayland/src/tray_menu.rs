@@ -14,20 +14,25 @@ use zbus::{
     zvariant::{OwnedValue, Value},
 };
 
-type WireLayout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
-#[derive(Clone, Debug)]
-struct Row {
-    id: i32,
-    label: String,
-    enabled: bool,
-    separator: bool,
-    submenu: bool,
+const MENU_LOAD_TIMEOUT: Duration = Duration::from_millis(900);
+const MAX_CACHED_ROWS: usize = 128;
+const MAX_CACHED_JSON_BYTES: usize = 64 * 1024;
+pub(super) type WireLayout = (i32, HashMap<String, OwnedValue>, Vec<OwnedValue>);
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub(crate) struct MenuRow {
+    pub(crate) id: i32,
+    pub(crate) label: String,
+    pub(crate) enabled: bool,
+    pub(crate) separator: bool,
+    pub(crate) submenu: bool,
 }
+type Row = MenuRow;
 #[derive(Clone, Default)]
 struct Page {
     rows: Vec<Row>,
     parent: Option<i32>,
     error: Option<String>,
+    loading: bool,
     close: bool,
 }
 enum Job {
@@ -41,7 +46,15 @@ struct Client {
     thread: Option<JoinHandle<()>>,
 }
 impl Client {
-    fn start(owner: String, path: String, waker: Waker) -> Self {
+    fn start(
+        owner: String,
+        item_path: String,
+        cached_menu_path: String,
+        cached_rows: Vec<Row>,
+        x: i32,
+        y: i32,
+        waker: Waker,
+    ) -> Self {
         let (jobs, mut input) = mpsc::channel(4);
         let update = Arc::new(Mutex::new(None));
         let output = update.clone();
@@ -59,18 +72,50 @@ impl Client {
                 Ok(runtime) => runtime.block_on(async {
                     let work = async {
                         let conn = zbus::connection::Builder::session()?.method_timeout(Duration::from_secs(2)).build().await?;
-                        let proxy = Proxy::new(&conn, owner.as_str(), path.as_str(), "com.canonical.dbusmenu").await?;
+                        let (item, menu_path) = if cached_menu_path != "/" {
+                            let path = zbus::zvariant::OwnedObjectPath::try_from(cached_menu_path.as_str())
+                                .map_err(|error| zbus::Error::Failure(error.to_string()))?;
+                            (None, path)
+                        } else {
+                            match tokio::time::timeout(MENU_LOAD_TIMEOUT, item_menu(&conn, &owner, &item_path)).await {
+                                Ok(Ok((item, path))) => (Some(item), path),
+                                Ok(Err(error)) => return Err(error),
+                                Err(_) => return Err(zbus::Error::Failure("timed out discovering the application menu".into())),
+                            }
+                        };
+                        if menu_path.as_str() == "/" {
+                            let item = item.expect("uncached menu path has an item proxy");
+                            match tokio::time::timeout(MENU_LOAD_TIMEOUT, item.call::<_, _, ()>("ContextMenu", &(x, y))).await {
+                                Ok(result) => result?,
+                                Err(_) => return Err(zbus::Error::Failure("timed out opening the application menu".into())),
+                            }
+                            publish(Page { close: true, ..Default::default() });
+                            return Ok::<_, zbus::Error>(());
+                        }
+                        let proxy = Proxy::new(&conn, owner.as_str(), menu_path.as_str(), "com.canonical.dbusmenu").await?;
                         let mut changes = proxy.receive_all_signals().await?;
                         let mut owners = proxy.receive_owner_changed().await?;
                         let mut stack = vec![0];
                         let mut dirty = true;
+                        let mut cached_pages = HashMap::new();
+                        if !cached_rows.is_empty() {
+                            cached_pages.insert(0, cached_rows);
+                        }
                         loop {
                             if dirty {
                                 let parent = *stack.last().unwrap();
-                                // Menus may populate their children only after AboutToShow.
-                                let _: bool = proxy.call("AboutToShow", &(parent,)).await.unwrap_or(false);
-                                let (_, layout): (u32, WireLayout) = proxy.call("GetLayout", &(parent, 1_i32, Vec::<&str>::new())).await?;
-                                publish(Page { rows: rows(layout)?, parent: (stack.len() > 1).then_some(stack[stack.len().saturating_sub(2)]), ..Default::default() });
+                                let fetched = tokio::time::timeout(
+                                    MENU_LOAD_TIMEOUT,
+                                    load_layout(&proxy, parent),
+                                )
+                                .await;
+                                let parent_page = (stack.len() > 1).then_some(stack[stack.len().saturating_sub(2)]);
+                                let fetched = match fetched {
+                                    Ok(result) => result.map_err(|error| error.to_string()),
+                                    Err(_) => Err("Timed out waiting for the application menu".into()),
+                                };
+                                let page = update_cached_page(&mut cached_pages, parent, parent_page, fetched);
+                                publish(page);
                                 dirty = false;
                             }
                             tokio::select! {
@@ -125,16 +170,98 @@ impl Drop for Client {
         }
     }
 }
+fn update_cached_page(
+    cache: &mut HashMap<i32, Vec<Row>>,
+    parent_id: i32,
+    parent: Option<i32>,
+    fetched: Result<Vec<Row>, String>,
+) -> Page {
+    match fetched {
+        Ok(rows) => {
+            cache.insert(parent_id, rows.clone());
+            Page {
+                rows,
+                parent,
+                ..Default::default()
+            }
+        }
+        Err(error) => Page {
+            rows: cache.get(&parent_id).cloned().unwrap_or_default(),
+            parent,
+            error: Some(error),
+            ..Default::default()
+        },
+    }
+}
+fn initial_page(rows: Vec<Row>) -> Page {
+    Page {
+        error: (!rows.is_empty()).then(|| "Showing last known menu".into()),
+        loading: rows.is_empty(),
+        rows,
+        ..Default::default()
+    }
+}
+fn decode_cached_rows(json: &str) -> Result<Vec<Row>, String> {
+    if json.len() > MAX_CACHED_JSON_BYTES {
+        return Err("cached tray menu exceeds size limit".into());
+    }
+    let mut rows: Vec<Row> =
+        serde_json::from_str(json).map_err(|error| format!("invalid cached tray menu: {error}"))?;
+    if rows.len() > MAX_CACHED_ROWS {
+        return Err("cached tray menu exceeds row limit".into());
+    }
+    for row in &mut rows {
+        row.label = row
+            .label
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(160)
+            .collect();
+    }
+    Ok(rows)
+}
+async fn load_layout(proxy: &Proxy<'_>, parent: i32) -> zbus::Result<Vec<Row>> {
+    // Menus may populate their children only after AboutToShow.
+    let _ = tokio::time::timeout(
+        Duration::from_millis(100),
+        proxy.call::<_, _, bool>("AboutToShow", &(parent,)),
+    )
+    .await;
+    let (_, layout): (u32, WireLayout) = proxy
+        .call("GetLayout", &(parent, 1_i32, Vec::<&str>::new()))
+        .await?;
+    rows(layout)
+}
+async fn item_menu<'a>(
+    conn: &'a zbus::Connection,
+    owner: &'a str,
+    path: &'a str,
+) -> zbus::Result<(Proxy<'a>, zbus::zvariant::OwnedObjectPath)> {
+    let kde = Proxy::new(conn, owner, path, "org.kde.StatusNotifierItem").await?;
+    if let Ok(menu) = kde
+        .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
+        .await
+    {
+        return Ok((kde, menu));
+    }
+    drop(kde);
+    let fdo = Proxy::new(conn, owner, path, "org.freedesktop.StatusNotifierItem").await?;
+    let menu = fdo
+        .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
+        .await?;
+    Ok((fdo, menu))
+}
 fn text(props: &HashMap<String, OwnedValue>, key: &str) -> String {
     props
         .get(key)
         .and_then(|v| <&str>::try_from(v).ok())
         .unwrap_or("")
         .chars()
+        .filter(|character| !character.is_control())
         .take(160)
         .collect()
 }
-fn rows(layout: WireLayout) -> zbus::Result<Vec<Row>> {
+pub(super) fn rows(layout: WireLayout) -> zbus::Result<Vec<MenuRow>> {
     layout
         .2
         .into_iter()
@@ -180,8 +307,10 @@ fn rows(layout: WireLayout) -> zbus::Result<Vec<Row>> {
 }
 struct Menu {
     owner: String,
-    path: String,
+    item_path: String,
+    menu_path: String,
     x: f32,
+    y: f32,
     client: Option<Client>,
     page: Page,
     scene: Scene,
@@ -192,14 +321,26 @@ struct Menu {
     panel: Rect,
 }
 impl Menu {
-    fn new(owner: String, path: String, x: f32) -> Self {
+    fn new(
+        owner: String,
+        item_path: String,
+        menu_path: String,
+        initial_rows: Vec<Row>,
+        x: f32,
+        y: f32,
+        theme: Theme,
+    ) -> Self {
+        let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
+        scene.set_theme(theme).expect("built-in theme is valid");
         Self {
             owner,
-            path,
+            item_path,
+            menu_path,
             x,
+            y,
             client: None,
-            page: Page::default(),
-            scene: Scene::new(Element::new(0, Widget::Panel)).unwrap(),
+            page: initial_page(initial_rows),
+            scene,
             display: DisplayList::default(),
             dirty: true,
             close: false,
@@ -220,7 +361,15 @@ impl Menu {
 }
 impl Application for Menu {
     fn set_waker(&mut self, waker: Waker) {
-        self.client = Some(Client::start(self.owner.clone(), self.path.clone(), waker));
+        self.client = Some(Client::start(
+            self.owner.clone(),
+            self.item_path.clone(),
+            self.menu_path.clone(),
+            self.page.rows.clone(),
+            self.x as i32,
+            self.y as i32,
+            waker,
+        ));
     }
     fn update(&mut self) {
         if let Some(page) = self
@@ -291,7 +440,7 @@ impl Application for Menu {
                 .clamp(96.0, (size[1] - 44.0).max(96.0));
             self.panel = Rect::new(
                 (self.x - width / 2.0).clamp(0.0, (size[0] - width).max(0.0)),
-                40.0,
+                self.y + 8.0,
                 width,
                 height,
             );
@@ -330,10 +479,15 @@ impl Application for Menu {
                 ..Default::default()
             });
             if let Some(error) = &self.page.error {
-                list.children.push(Element::new(
-                    6,
-                    Widget::Text(format!("Menu unavailable: {error}")),
-                ));
+                let text = if error == "Showing last known menu" {
+                    error.clone()
+                } else {
+                    format!("Menu unavailable: {error}")
+                };
+                list.children.push(Element::new(6, Widget::Text(text)));
+            } else if self.page.loading {
+                list.children
+                    .push(Element::new(6, Widget::Text("Loading menu…".into())));
             } else if self.page.rows.is_empty() {
                 list.children
                     .push(Element::new(6, Widget::Text("No menu actions".into())));
@@ -374,20 +528,31 @@ impl Application for Menu {
     }
 }
 /// Private shell role; endpoints are passed by the tray worker, never interpreted as commands.
-pub fn run(owner: String, path: String, x: f32) -> Result<(), String> {
+pub fn run(
+    owner: String,
+    item_path: String,
+    menu_path: String,
+    cached_rows_json: String,
+    x: f32,
+    y: f32,
+    theme: Theme,
+) -> Result<(), String> {
     zbus::names::BusName::try_from(owner.as_str()).map_err(|e| e.to_string())?;
-    zbus::zvariant::ObjectPath::try_from(path.as_str()).map_err(|e| e.to_string())?;
-    if !x.is_finite() {
+    zbus::zvariant::ObjectPath::try_from(item_path.as_str()).map_err(|e| e.to_string())?;
+    zbus::zvariant::ObjectPath::try_from(menu_path.as_str()).map_err(|e| e.to_string())?;
+    let cached_rows = decode_cached_rows(&cached_rows_json)?;
+    if !x.is_finite() || !y.is_finite() {
         return Err("invalid menu position".into());
     }
-    crate::run_application(
+    crate::run_application_with_theme(
         SurfaceOptions {
             keyboard: KeyboardMode::Exclusive,
             layer: SurfaceLayer::Overlay,
             namespace: "knave-shell-tray-menu".into(),
             ..Default::default()
         },
-        Menu::new(owner, path, x),
+        Menu::new(owner, item_path, menu_path, cached_rows, x, y, theme),
+        theme,
     )
     .map_err(|e| e.to_string())
 }
@@ -395,6 +560,215 @@ pub fn run(owner: String, path: String, x: f32) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Child, Command, Stdio},
+        sync::atomic::{AtomicBool, Ordering},
+    };
+
+    struct PrivateBus(Child);
+    impl PrivateBus {
+        fn start() -> Result<(Self, String), String> {
+            let mut child = Command::new("dbus-daemon")
+                .args(["--session", "--nofork", "--print-address=1"])
+                .stdout(Stdio::piped())
+                .spawn()
+                .map_err(|error| error.to_string())?;
+            let mut address = String::new();
+            BufReader::new(
+                child
+                    .stdout
+                    .take()
+                    .ok_or_else(|| "dbus-daemon stdout unavailable".to_owned())?,
+            )
+            .read_line(&mut address)
+            .map_err(|error| error.to_string())?;
+            let address = address.trim();
+            if address.is_empty() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("dbus-daemon did not provide an address".into());
+            }
+            Ok((Self(child), address.into()))
+        }
+    }
+    impl Drop for PrivateBus {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    struct FixtureMenu {
+        delay_about: Arc<AtomicBool>,
+        delay_layout: Arc<AtomicBool>,
+    }
+    struct FixtureItem(Arc<AtomicBool>);
+    #[zbus::interface(name = "org.kde.StatusNotifierItem")]
+    impl FixtureItem {
+        #[zbus(property)]
+        async fn menu(&self) -> zbus::zvariant::OwnedObjectPath {
+            if self.0.load(Ordering::Relaxed) {
+                std::future::pending::<()>().await;
+            }
+            "/menu".try_into().unwrap()
+        }
+    }
+    #[zbus::interface(name = "com.canonical.dbusmenu")]
+    impl FixtureMenu {
+        async fn about_to_show(&self, _id: i32) -> bool {
+            if self.delay_about.load(Ordering::Relaxed) {
+                std::future::pending::<()>().await;
+            }
+            false
+        }
+        async fn get_layout(
+            &self,
+            id: i32,
+            _depth: i32,
+            _properties: Vec<String>,
+        ) -> (u32, WireLayout) {
+            if self.delay_layout.load(Ordering::Relaxed) {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+            let mut properties: HashMap<String, OwnedValue> = HashMap::new();
+            properties.insert(
+                "label".into(),
+                Value::from("Cached action").try_into().unwrap(),
+            );
+            let item = Value::from((7_i32, properties, Vec::<OwnedValue>::new()))
+                .try_into()
+                .unwrap();
+            (1, (id, HashMap::new(), vec![item]))
+        }
+    }
+
+    #[tokio::test]
+    async fn delayed_about_to_show_keeps_cached_actions_and_bounds_initial_loading() {
+        let (_bus, address) = PrivateBus::start().expect("private D-Bus fixture must start");
+        let delayed_about = Arc::new(AtomicBool::new(false));
+        let delayed_layout = Arc::new(AtomicBool::new(false));
+        let delayed_property = Arc::new(AtomicBool::new(false));
+        let server = zbus::connection::Builder::address(address.as_str())
+            .unwrap()
+            .name("org.knave.TrayMenuFixture")
+            .unwrap()
+            .serve_at(
+                "/menu",
+                FixtureMenu {
+                    delay_about: delayed_about.clone(),
+                    delay_layout: delayed_layout.clone(),
+                },
+            )
+            .unwrap()
+            .serve_at("/item", FixtureItem(delayed_property.clone()))
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        let client = zbus::connection::Builder::address(address.as_str())
+            .unwrap()
+            .build()
+            .await
+            .unwrap();
+        let proxy = Proxy::new(
+            &client,
+            "org.knave.TrayMenuFixture",
+            "/menu",
+            "com.canonical.dbusmenu",
+        )
+        .await
+        .unwrap();
+        let (_, menu_path) = item_menu(&client, "org.knave.TrayMenuFixture", "/item")
+            .await
+            .unwrap();
+        assert_eq!(menu_path.as_str(), "/menu");
+        delayed_property.store(true, Ordering::Relaxed);
+        let property_read = tokio::time::timeout(
+            Duration::from_millis(30),
+            item_menu(&client, "org.knave.TrayMenuFixture", "/item"),
+        )
+        .await;
+        assert!(
+            property_read.is_err(),
+            "fixture should hold Menu property open"
+        );
+        delayed_property.store(false, Ordering::Relaxed);
+        let mut cached = HashMap::new();
+        let initial = load_layout(&proxy, 0).await.unwrap();
+        assert_eq!(initial[0].label, "Cached action");
+        let page = update_cached_page(&mut cached, 0, None, Ok(initial));
+        assert_eq!(page.rows[0].id, 7);
+
+        delayed_about.store(true, Ordering::Relaxed);
+        let start = tokio::time::Instant::now();
+        let fetched =
+            tokio::time::timeout(Duration::from_millis(500), load_layout(&proxy, 0)).await;
+        assert!(
+            fetched.is_ok(),
+            "GetLayout should proceed when AboutToShow hangs"
+        );
+        assert_eq!(fetched.unwrap().unwrap()[0].label, "Cached action");
+        assert!(start.elapsed() < Duration::from_millis(300));
+
+        delayed_layout.store(true, Ordering::Relaxed);
+        let fetched = tokio::time::timeout(Duration::from_millis(30), load_layout(&proxy, 0)).await;
+        assert!(fetched.is_err(), "fixture should hold GetLayout open");
+        let page = update_cached_page(
+            &mut cached,
+            0,
+            None,
+            Err("Timed out waiting for the application menu".into()),
+        );
+        assert_eq!(page.rows[0].label, "Cached action");
+        assert_eq!(
+            page.error.as_deref(),
+            Some("Timed out waiting for the application menu")
+        );
+
+        let unavailable = update_cached_page(
+            &mut HashMap::new(),
+            0,
+            None,
+            Err("Timed out waiting for the application menu".into()),
+        );
+        assert!(unavailable.rows.is_empty());
+        assert!(unavailable.error.is_some());
+        drop(server);
+    }
+
+    #[test]
+    fn unavailable_refresh_keeps_cached_rows_and_exposes_error() {
+        let mut cached = HashMap::new();
+        let first = update_cached_page(
+            &mut cached,
+            0,
+            None,
+            Ok(vec![Row {
+                id: 7,
+                label: "Cached action".into(),
+                enabled: true,
+                separator: false,
+                submenu: false,
+            }]),
+        );
+        assert_eq!(first.rows[0].id, 7);
+        let encoded = serde_json::to_string(&first.rows).unwrap();
+        let restored = initial_page(decode_cached_rows(&encoded).unwrap());
+        assert_eq!(restored.rows[0].label, "Cached action");
+        assert!(!restored.loading);
+        assert_eq!(restored.error.as_deref(), Some("Showing last known menu"));
+        let mut reopened_cache = HashMap::from([(0, restored.rows.clone())]);
+        let page = update_cached_page(
+            &mut reopened_cache,
+            0,
+            None,
+            Err("Timed out waiting for the application menu".into()),
+        );
+        assert_eq!(page.rows[0].label, "Cached action");
+        assert!(page.error.is_some());
+    }
+
     fn child(id: i32, properties: HashMap<String, OwnedValue>) -> OwnedValue {
         Value::from((id, properties, Vec::<OwnedValue>::new()))
             .try_into()

@@ -173,11 +173,19 @@ pub fn run_application(
     options: SurfaceOptions,
     app: impl Application + 'static,
 ) -> Result<(), super::WaylandError> {
+    run_application_with_theme(options, app, knave_ui::toolkit::Theme::Dark)
+}
+
+pub fn run_application_with_theme(
+    options: SurfaceOptions,
+    app: impl Application + 'static,
+    theme: knave_ui::toolkit::Theme,
+) -> Result<(), super::WaylandError> {
     validate_options(&options)?;
     super::run_internal(
         super::ShellRole::Overview,
         Some((options, Box::new(app))),
-        knave_ui::toolkit::Theme::Dark,
+        theme,
     )
 }
 

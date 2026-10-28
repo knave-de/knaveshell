@@ -1,6 +1,7 @@
 //! Session-bus StatusNotifier watcher and host. One cancellable worker owns all
 //! transport, icon decoding and action calls; the frame thread sees snapshots.
 use crate::Waker;
+use crate::tray_menu::MenuRow;
 use futures_util::StreamExt;
 use knave_icons::IconLookup;
 use knave_shell_ui::status_bar::Applet;
@@ -19,6 +20,9 @@ const KDE: &str = "org.kde.StatusNotifierWatcher";
 const FDO: &str = "org.freedesktop.StatusNotifierWatcher";
 const MAX_ITEMS: usize = 32;
 const TIMEOUT: Duration = Duration::from_secs(2);
+const ITEM_REFRESH_TIMEOUT: Duration = Duration::from_millis(700);
+const MENU_CACHE_TIMEOUT: Duration = Duration::from_millis(350);
+const MAX_MENU_CACHE_ARG_BYTES: usize = 64 * 1024;
 type Update = Result<Vec<Applet>, String>;
 type Pixmaps = Vec<(i32, i32, Vec<u8>)>;
 
@@ -35,6 +39,14 @@ struct Command {
     x: i32,
     y: i32,
 }
+struct AbortTask<T>(tokio::task::JoinHandle<T>);
+type RefreshResult = zbus::Result<(Vec<Endpoint>, u64)>;
+type RefreshTask = AbortTask<RefreshResult>;
+impl<T> Drop for AbortTask<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
 #[derive(Clone)]
 struct Endpoint {
     id: u64,
@@ -42,6 +54,10 @@ struct Endpoint {
     path: String,
     menu_only: bool,
     registration: String,
+    item_interface: String,
+    menu_path: Option<String>,
+    menu_rows: Option<Vec<MenuRow>>,
+    applet: Option<Applet>,
 }
 #[derive(Default)]
 struct Registry {
@@ -98,6 +114,10 @@ impl Watcher {
                 path: path.into(),
                 menu_only: false,
                 registration: name.to_string(),
+                item_interface: "org.kde.StatusNotifierItem".into(),
+                menu_path: None,
+                menu_rows: None,
+                applet: None,
             });
         }
         emit(conn, "StatusNotifierItemRegistered", &(key,)).await;
@@ -311,37 +331,40 @@ async fn serve(jobs: &mut mpsc::Receiver<Command>, publish: &impl Fn(Update)) ->
     proxy
         .call::<_, _, ()>("RegisterStatusNotifierHost", &(host_name.as_str(),))
         .await?;
-    let mut lookup = IconLookup::from_process();
     let mut endpoints = Vec::new();
     let mut next_id = 0;
     let mut dirty = true;
+    let mut refresh: Option<RefreshTask> = None;
+    let mut actions = tokio::task::JoinSet::new();
     let mut menu: Option<tokio::process::Child> = None;
     loop {
         tokio::select! {
             _ = watcher.changed.notified() => dirty = true,
-            _ = tokio::time::sleep(Duration::from_millis(40)), if dirty => {
-                let fresh = Proxy::new(&conn, KDE, PATH, KDE).await?;
-                let registered: Vec<String> = fresh.get_property("RegisteredStatusNotifierItems").await?;
-                let old: HashMap<_, _> = endpoints.iter().map(|e: &Endpoint| (e.registration.clone(), e.id)).collect();
-                let mut items = Vec::new();
-                endpoints.clear();
-                for key in registered.into_iter().take(MAX_ITEMS) {
-                    let Some((owner, tail)) = key.split_once('/') else { continue };
-                    let path = format!("/{tail}");
-                    let id = old.get(&key).copied().unwrap_or_else(|| { next_id += 1; next_id });
-                    let name = match zbus::names::BusName::try_from(owner) { Ok(name) => name, Err(_) => continue };
-                    let bus = zbus::fdo::DBusProxy::new(&conn).await?;
-                    let owner = match bus.get_name_owner(name).await { Ok(owner) => owner.to_string(), Err(_) => continue };
-                    let mut endpoint = Endpoint { id, owner, path, menu_only: false, registration: key.clone() };
-                    match read_item(&conn, &mut endpoint, &mut lookup).await {
-                        Ok(Some(item)) => { items.push(item); endpoints.push(endpoint); },
-                        Ok(None) => endpoints.push(endpoint),
-                        Err(error) => eprintln!("knave-shell: tray item {key}: {error}"),
-                    }
-                }
-                publish(Ok(items));
+            _ = tokio::time::sleep(Duration::from_millis(40)), if dirty && refresh.is_none() => {
                 dirty = false;
+                refresh = Some(AbortTask(tokio::spawn(refresh_items(conn.clone(), endpoints.clone(), next_id))));
             }
+            result = async {
+                match refresh.as_mut() {
+                    Some(task) => (&mut task.0).await,
+                    None => std::future::pending().await,
+                }
+            }, if refresh.is_some() => {
+                refresh = None;
+                match result {
+                    Ok(Ok((fresh, id))) => {
+                        next_id = id;
+                        endpoints = fresh;
+                        publish(Ok(endpoints.iter().filter_map(|e| e.applet.clone()).collect()));
+                    }
+                    Ok(Err(error)) => {
+                        eprintln!("knave-shell: tray refresh failed: {error}");
+                        if dirty { continue; }
+                    }
+                    Err(error) => eprintln!("knave-shell: tray refresh task failed: {error}"),
+                }
+            }
+            _ = actions.join_next(), if !actions.is_empty() => {}
             message = signals.next() => {
                 let message = message.ok_or_else(|| zbus::Error::Failure("tray bus disconnected".into()))??;
                 let header = message.header();
@@ -369,13 +392,124 @@ async fn serve(jobs: &mut mpsc::Receiver<Command>, publish: &impl Fn(Update)) ->
             _ = async { menu.as_mut().unwrap().wait().await }, if menu.is_some() => { menu = None; },
             job = jobs.recv() => {
                 let Some(job) = job else { return Ok(()) };
-                if let Some(endpoint) = endpoints.iter().find(|e| e.id == job.id)
-                    && let Err(error) = activate(&conn, endpoint, job, &mut menu).await {
-                    eprintln!("knave-shell: tray action failed: {error}");
+                if let Some(endpoint) = endpoints.iter().find(|e| e.id == job.id) {
+                    let opens_menu = matches!(job.action, Action::ContextMenu)
+                        || (matches!(job.action, Action::Activate) && endpoint.menu_only);
+                    if opens_menu {
+                        if let Err(error) = activate(&conn, endpoint, job, &mut menu).await {
+                            eprintln!("knave-shell: tray action failed: {error}");
+                        }
+                    } else if actions.len() < 16 {
+                        let conn = conn.clone();
+                        let endpoint = endpoint.clone();
+                        actions.spawn(async move {
+                            if let Err(error) = activate(&conn, &endpoint, job, &mut None).await {
+                                eprintln!("knave-shell: tray action failed: {error}");
+                            }
+                        });
+                    } else {
+                        eprintln!("knave-shell: tray action queue is full");
+                    }
                 }
             }
         }
     }
+}
+
+async fn refresh_items(
+    conn: Connection,
+    old_endpoints: Vec<Endpoint>,
+    mut next_id: u64,
+) -> zbus::Result<(Vec<Endpoint>, u64)> {
+    let fresh = Proxy::new(&conn, KDE, PATH, KDE).await?;
+    let registered: Vec<String> = fresh.get_property("RegisteredStatusNotifierItems").await?;
+    let old: HashMap<_, _> = old_endpoints
+        .into_iter()
+        .map(|endpoint| (endpoint.registration.clone(), endpoint))
+        .collect();
+    let bus = zbus::fdo::DBusProxy::new(&conn).await?;
+    let mut lookup = IconLookup::from_process();
+    let mut endpoints = Vec::new();
+    for key in registered.into_iter().take(MAX_ITEMS) {
+        let Some((name, tail)) = key.split_once('/') else {
+            continue;
+        };
+        let path = format!("/{tail}");
+        let previous = old.get(&key);
+        let id = previous.map(|e| e.id).unwrap_or_else(|| {
+            next_id += 1;
+            next_id
+        });
+        let name = match zbus::names::BusName::try_from(name) {
+            Ok(name) => name,
+            Err(_) => continue,
+        };
+        let owner = match bus.get_name_owner(name).await {
+            Ok(owner) => owner.to_string(),
+            Err(_) => {
+                if let Some(prior) = previous {
+                    endpoints.push(prior.clone());
+                }
+                continue;
+            }
+        };
+        let prior = previous.filter(|endpoint| endpoint.owner == owner);
+        let mut endpoint = Endpoint {
+            id,
+            owner,
+            path,
+            menu_only: prior.is_some_and(|e| e.menu_only),
+            registration: key.clone(),
+            item_interface: prior
+                .map(|e| e.item_interface.clone())
+                .unwrap_or_else(|| "org.kde.StatusNotifierItem".into()),
+            menu_path: prior.and_then(|e| e.menu_path.clone()),
+            menu_rows: prior.and_then(|e| e.menu_rows.clone()),
+            applet: prior.and_then(|e| e.applet.clone()),
+        };
+        match tokio::time::timeout(
+            ITEM_REFRESH_TIMEOUT,
+            read_item(&conn, &mut endpoint, &mut lookup),
+        )
+        .await
+        {
+            Ok(Ok(applet)) => endpoint.applet = applet,
+            Ok(Err(error)) => eprintln!("knave-shell: tray item {key}: {error}"),
+            Err(_) => eprintln!("knave-shell: tray item {key}: refresh timed out"),
+        }
+        if let Some(menu_path) = endpoint.menu_path.as_deref() {
+            match tokio::time::timeout(
+                MENU_CACHE_TIMEOUT,
+                read_menu_rows(&conn, &endpoint, menu_path),
+            )
+            .await
+            {
+                Ok(Ok(rows)) => endpoint.menu_rows = Some(rows),
+                Ok(Err(error)) => eprintln!("knave-shell: tray item {key} menu cache: {error}"),
+                Err(_) => eprintln!("knave-shell: tray item {key} menu cache timed out"),
+            }
+        }
+        endpoints.push(endpoint);
+    }
+    Ok((endpoints, next_id))
+}
+
+async fn read_menu_rows(
+    conn: &Connection,
+    endpoint: &Endpoint,
+    menu_path: &str,
+) -> zbus::Result<Vec<MenuRow>> {
+    let proxy = Proxy::new(
+        conn,
+        endpoint.owner.as_str(),
+        menu_path,
+        "com.canonical.dbusmenu",
+    )
+    .await?;
+    let (_, layout): (u32, crate::tray_menu::WireLayout) = proxy
+        .call("GetLayout", &(0_i32, 1_i32, Vec::<&str>::new()))
+        .await?;
+    crate::tray_menu::rows(layout)
 }
 
 async fn item_proxy<'a>(conn: &'a Connection, endpoint: &'a Endpoint) -> zbus::Result<Proxy<'a>> {
@@ -383,7 +517,7 @@ async fn item_proxy<'a>(conn: &'a Connection, endpoint: &'a Endpoint) -> zbus::R
         conn,
         endpoint.owner.as_str(),
         endpoint.path.as_str(),
-        "org.kde.StatusNotifierItem",
+        endpoint.item_interface.as_str(),
     )
     .await?;
     // The original freedesktop dialect is less common but has the same properties.
@@ -405,8 +539,33 @@ async fn read_item(
     lookup: &mut IconLookup,
 ) -> zbus::Result<Option<Applet>> {
     let proxy = item_proxy(conn, endpoint).await?;
+    let item_interface = proxy.interface().to_string();
+    let cached_menu_path = endpoint.menu_path.clone();
+    let menu_property = proxy
+        .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
+        .await
+        .ok();
+    let menu_path = match menu_property.as_ref() {
+        Some(path) if path.as_str() != "/" => Some(path.to_string()),
+        Some(_) => None,
+        None => cached_menu_path.clone(),
+    };
+    let clear_menu_cache = menu_property.as_ref().is_some_and(|path| {
+        path.as_str() == "/" || Some(path.as_str()) != cached_menu_path.as_deref()
+    });
     let status: String = proxy.get_property("Status").await?;
+    let menu_only = proxy
+        .get_property::<bool>("ItemIsMenu")
+        .await
+        .unwrap_or(false);
     if status == "Passive" {
+        drop(proxy);
+        endpoint.item_interface = item_interface;
+        endpoint.menu_path = menu_path;
+        if clear_menu_cache {
+            endpoint.menu_rows = None;
+        }
+        endpoint.menu_only = menu_only;
         return Ok(None);
     }
     let attention = matches!(status.as_str(), "NeedsAttention" | "RequestingAttention");
@@ -414,16 +573,17 @@ async fn read_item(
         .get_property("Title")
         .await
         .unwrap_or_else(|_| "Application".into());
-    let menu_only = proxy
-        .get_property::<bool>("ItemIsMenu")
-        .await
-        .unwrap_or(false);
     let prefix = if attention { "AttentionIcon" } else { "Icon" };
     let mut image = read_icon(&proxy, prefix, lookup).await;
     if image.is_none() && attention {
         image = read_icon(&proxy, "Icon", lookup).await;
     }
     drop(proxy);
+    endpoint.item_interface = item_interface;
+    endpoint.menu_path = menu_path;
+    if clear_menu_cache {
+        endpoint.menu_rows = None;
+    }
     endpoint.menu_only = menu_only;
     Ok(Some(Applet {
         id: endpoint.id,
@@ -465,30 +625,31 @@ async fn activate(
     command: Command,
     menu: &mut Option<tokio::process::Child>,
 ) -> zbus::Result<()> {
-    let proxy = item_proxy(conn, endpoint).await?;
     let method = match command.action {
         Action::Activate if endpoint.menu_only => "ContextMenu",
         Action::Activate => "Activate",
         Action::ContextMenu => "ContextMenu",
         Action::SecondaryActivate => "SecondaryActivate",
-        Action::Scroll(delta) => return proxy.call("Scroll", &(delta, "vertical")).await,
+        Action::Scroll(delta) => {
+            let proxy = item_proxy(conn, endpoint).await?;
+            return proxy.call("Scroll", &(delta, "vertical")).await;
+        }
     };
-    if method == "ContextMenu"
-        && let Ok(path) = proxy
-            .get_property::<zbus::zvariant::OwnedObjectPath>("Menu")
-            .await
-        && path.as_str() != "/"
-    {
+    if method == "ContextMenu" {
         // Replace and reap the previous popup; no detached children survive the host.
         *menu = None;
+        let cached_rows = serialize_menu_rows(endpoint.menu_rows.as_deref().unwrap_or(&[]))?;
         let child = tokio::process::Command::new(
             std::env::current_exe().map_err(|e| zbus::Error::Failure(e.to_string()))?,
         )
         .args([
             "tray-menu",
             &endpoint.owner,
-            path.as_str(),
+            &endpoint.path,
+            endpoint.menu_path.as_deref().unwrap_or("/"),
+            &cached_rows,
             &command.x.to_string(),
+            &command.y.to_string(),
         ])
         .kill_on_drop(true)
         .spawn()
@@ -496,7 +657,25 @@ async fn activate(
         *menu = Some(child);
         return Ok(());
     }
+    let proxy = item_proxy(conn, endpoint).await?;
     proxy.call(method, &(command.x, command.y)).await
+}
+
+fn serialize_menu_rows(rows: &[MenuRow]) -> zbus::Result<String> {
+    let mut rows = rows.to_vec();
+    loop {
+        let encoded = serde_json::to_string(&rows)
+            .map_err(|error| zbus::Error::Failure(error.to_string()))?;
+        if encoded.len() <= MAX_MENU_CACHE_ARG_BYTES {
+            return Ok(encoded);
+        }
+        if rows.is_empty() {
+            return Err(zbus::Error::Failure(
+                "could not fit cached tray menu within argument limit".into(),
+            ));
+        }
+        rows.pop();
+    }
 }
 
 #[cfg(test)]
