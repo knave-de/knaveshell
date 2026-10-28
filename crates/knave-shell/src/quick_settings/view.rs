@@ -37,7 +37,7 @@ impl Palette {
         e
     }
     fn panel(&self, id: u64) -> Element {
-        let mut e = self.element(id, Widget::Panel);
+        let mut e = self.element(id, Widget::Panel).without_surface();
         e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }

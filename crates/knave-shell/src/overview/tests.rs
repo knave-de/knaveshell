@@ -1053,19 +1053,13 @@ fn overview_backdrop_preserves_wallpaper_visibility() {
     let mut app = app();
     let list = app.frame([1200.0, 800.0], &mut Metrics);
     assert_eq!(list.clear_color, knave_ui::Color::rgba(0, 0, 0, 0));
-    let backdrop = list
-        .commands
-        .iter()
-        .find_map(|command| match command {
-            knave_ui::DisplayCommand::Shape { bounds, paint, .. }
-                if bounds.width == 1200.0 && bounds.height == 800.0 =>
-            {
-                Some(paint)
-            }
-            _ => None,
-        })
-        .expect("full output backdrop");
-    assert_eq!(backdrop.fill, Some(knave_ui::Color::rgba(0, 0, 0, 0)));
+    assert!(
+        !list.commands.iter().any(|command| matches!(command,
+            knave_ui::DisplayCommand::Shape { bounds, .. }
+                if bounds.width == 1200.0 && bounds.height == 800.0
+        )),
+        "a structural fullscreen root must not emit a surface shape"
+    );
 }
 
 #[test]
@@ -1288,8 +1282,8 @@ fn the_shared_bar_strip_is_rendered_by_the_statusbar_widgets() {
     };
     assert_eq!(
         strip,
-        vec![Some(knave_ui::Color::rgba(0, 0, 0, 0)), background],
-        "transparent target container followed by toolkit statusbar"
+        vec![background],
+        "only the real status bar paints the strip; its input container does not"
     );
 }
 
@@ -1505,4 +1499,32 @@ fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
         .bounds(ElementId(0x200_0000_0000 + 2))
         .expect("current workspace dot");
     assert!(dot.y + dot.height <= 800.0 - 24.0);
+}
+
+#[test]
+fn full_named_themes_leave_compositor_preview_windows_unpainted() {
+    for theme in [
+        knave_ui::toolkit::Theme::Dark,
+        knave_ui::toolkit::Theme::Light,
+    ] {
+        let mut app = app();
+        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
+        let pane = app
+            .panes
+            .iter()
+            .find(|pane| pane.workspace == WorkspaceId(2))
+            .unwrap();
+        let x = pane.x as f32 + pane.width as f32 / 2.0;
+        let y = pane.y as f32 + pane.height as f32 / 2.0;
+        assert!(
+            !list.commands.iter().any(|command| matches!(command,
+                knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                    if bounds.x <= x && bounds.y <= y
+                        && bounds.x + bounds.width > x && bounds.y + bounds.height > y
+                        && paint.fill.is_some_and(|color| color.alpha > 0)
+            )),
+            "{theme:?} shell chrome must not obscure compositor-rendered windows"
+        );
+    }
 }

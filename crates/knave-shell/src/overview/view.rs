@@ -76,6 +76,7 @@ impl Overview {
             gap: 0.0,
             ..Default::default()
         });
+        root = root.without_surface();
         root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         let pad = (width * 0.045).clamp(12.0, 64.0);
         let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
@@ -278,6 +279,7 @@ impl Overview {
             Element::new(BAR_ELEMENT_ID_BASE, Widget::Panel),
             Rect::new(0.0, 0.0, width, STATUS_BAR_HEIGHT),
         );
+        bar = bar.without_surface();
         bar.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         for (index, (bounds, action)) in component.scene.hit_targets().enumerate() {
             let id = BAR_ELEMENT_ID_BASE + 10 + index as u64;
@@ -285,6 +287,7 @@ impl Overview {
                 .insert(ElementId(id), Target::StatusBar(action));
             let mut button = placed(Element::new(id, Widget::Button(String::new())), bounds);
             let transparent = Color::rgba(0, 0, 0, 0);
+            button = button.without_surface();
             button.style.background = Some(ShapePaint::fill(transparent));
             if let knave_shell_ui::UiAction::Applet(id) = action {
                 button.tooltip = self
@@ -317,6 +320,7 @@ impl Overview {
             "overview-card-idle".into()
         });
         // The compositor supplies each workspace preview through this window.
+        card = card.without_surface();
         card.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         card.layout.clip = ClipMode::Bounds;
         self.targets.insert(

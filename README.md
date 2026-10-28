@@ -53,7 +53,8 @@ these shell rules, from `$XDG_DATA_HOME/knave/themes/<theme-name>/dark.css` or
 file changes apply live. Invalid edits retain the last valid theme; missing files
 use the toolkit defaults. Application CSS overrides remain the final layer.
 Layout and hit targets remain in the Rust compositions;
-fullscreen structural roots and compositor preview regions stay transparent.
+fullscreen structural roots and compositor preview regions use non-painting
+Rust elements, so general theme rules cannot cover the desktop or previewed windows.
 
 ## Build
 

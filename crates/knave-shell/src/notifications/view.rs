@@ -19,6 +19,7 @@ impl Palette {
     }
     fn panel(&self, id: u64) -> Element {
         let mut e = Element::new(id, Widget::Panel)
+            .without_surface()
             .class("shell-structure")
             .class("notifications-structure");
         self.style(&mut e);

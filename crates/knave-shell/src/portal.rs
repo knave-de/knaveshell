@@ -161,6 +161,7 @@ impl Picker {
         );
         if self.request.operation == Operation::Share {
             let mut tabs = Element::new(10, Widget::Panel)
+                .without_surface()
                 .class("shell-structure")
                 .layout(Layout {
                     flow: Flow::Row,
@@ -194,6 +195,7 @@ impl Picker {
         }
         if self.request.operation != Operation::Sharing {
             let mut grid = Element::new(6, Widget::Panel)
+                .without_surface()
                 .class("shell-structure")
                 .layout(Layout {
                     flow: Flow::Grid {
@@ -298,6 +300,7 @@ impl Picker {
             );
         }
         let mut buttons = Element::new(8, Widget::Panel)
+            .without_surface()
             .class("shell-structure")
             .layout(Layout {
                 flow: Flow::Row,

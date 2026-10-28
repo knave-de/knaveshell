@@ -468,6 +468,7 @@ impl Application for Menu {
                 gap: 0.0,
                 ..Default::default()
             });
+            root = root.without_surface();
             root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             let mut panel = Element::new(1, Widget::Panel).layout(Layout {
                 width: Length::Px(width),
@@ -486,6 +487,7 @@ impl Application for Menu {
                 height: Length::Px(28.0),
                 ..Default::default()
             });
+            header = header.without_surface();
             header.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             header.layout.padding = 0.0;
             if self.page.parent.is_some() {

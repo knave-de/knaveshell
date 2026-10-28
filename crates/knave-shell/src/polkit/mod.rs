@@ -101,6 +101,7 @@ impl Agent {
             ..Default::default()
         });
         let mut content = Element::new(12, Widget::Panel)
+            .without_surface()
             .class("shell-structure")
             .layout(Layout {
                 gap: 12.0,
@@ -153,6 +154,7 @@ impl Agent {
         scroll.children.push(content);
         root.children.push(scroll);
         let mut row = Element::new(10, Widget::Panel)
+            .without_surface()
             .class("shell-structure")
             .layout(Layout {
                 flow: Flow::Row,

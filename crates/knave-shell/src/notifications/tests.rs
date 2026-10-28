@@ -526,3 +526,21 @@ fn shell_panels_do_not_add_decorative_outlines() {
         );
     }
 }
+
+#[test]
+fn full_named_themes_cannot_paint_the_fullscreen_positioning_host() {
+    for theme in [Theme::Dark, Theme::Light] {
+        let mut app = app(1);
+        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        let list = app.frame([1280.0, 800.0], &mut Metrics);
+        assert!(
+            !list.commands.iter().any(|command| matches!(command,
+                knave_ui::DisplayCommand::Shape { bounds, paint, .. }
+                    if bounds.x <= 400.0 && bounds.y <= 400.0
+                        && bounds.x + bounds.width > 400.0 && bounds.y + bounds.height > 400.0
+                        && paint.fill.is_some_and(|color| color.alpha > 0)
+            )),
+            "a full {theme:?} theme must not cover the desktop outside the panel"
+        );
+    }
+}
