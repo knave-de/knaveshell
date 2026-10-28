@@ -109,7 +109,7 @@ impl Overview {
     pub fn with_theme(theme: knave_ui::toolkit::Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
         scene
-            .set_theme(theme)
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
             .expect("bundled shell theme stylesheet is valid");
         Self {
             display: DisplayList::default(),
@@ -310,7 +310,7 @@ impl Overview {
         // so a late key release cannot copy the old query back into state.
         self.scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
         self.scene
-            .set_theme(self.theme)
+            .set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
             .expect("bundled shell theme stylesheet is valid");
         self.targets.clear();
         self.panes.clear();
@@ -339,7 +339,7 @@ impl Overview {
         self.size = size;
         let mut scene = Scene::new(self.compose())?;
         scene
-            .set_theme(self.theme)
+            .set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
             .expect("bundled shell theme stylesheet is valid");
         Ok(())
     }
@@ -419,12 +419,10 @@ impl Overview {
         let root = self.compose();
         match Scene::new(root) {
             Ok(mut scene) => {
-                if let Err(error) = scene.set_theme(self.theme) {
+                if let Err(error) =
+                    scene.set_desktop_theme(self.theme, knave_shell_ui::styles::STYLESHEET)
+                {
                     self.host_error(&format!("Could not apply appearance theme: {error}"));
-                    return;
-                }
-                if let Err(error) = scene.set_stylesheet(view::OVERVIEW_STYLESHEET) {
-                    self.host_error(&format!("Could not apply overview stylesheet: {error}"));
                     return;
                 }
                 scene.layout(self.size, text);

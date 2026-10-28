@@ -1,8 +1,6 @@
 use super::*;
 use knave_ui::toolkit::{ButtonVariant, ComponentKind};
-use knave_ui::{ShapePaint, TextAlign, TextWrap};
-
-pub(super) const ACCESSIBILITY_STYLESHEET: &str = ".high-contrast card, .high-contrast alert { border-color: var(--text); border-width: 2px; } .notification-critical { border-left-color: var(--danger); } button.keyboard-focus-visible { outline-color: var(--accent); outline-width: 2px; }";
+use knave_ui::{ShapePaint, TextWrap};
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
     knave_shell_ui::status_icons::bell()
@@ -20,7 +18,9 @@ impl Palette {
         e.style.text.wrap = TextWrap::WordOrGlyph;
     }
     fn panel(&self, id: u64) -> Element {
-        let mut e = Element::new(id, Widget::Panel);
+        let mut e = Element::new(id, Widget::Panel)
+            .class("shell-structure")
+            .class("notifications-structure");
         self.style(&mut e);
         e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
@@ -31,9 +31,11 @@ impl Palette {
         } else {
             Element::new(id, Widget::Text(value))
         };
+        e = e.class("shell-text").class("notifications-text");
+        if muted {
+            e = e.class("shell-muted").class("notifications-muted");
+        }
         self.style(&mut e);
-        e.style.text.font_size = 12.0;
-        e.style.text.line_height = 16.0;
         e
     }
     fn close_button(&self, id: u64, keyboard_focus: bool) -> Element {
@@ -42,12 +44,15 @@ impl Palette {
             height: Length::Px(32.0),
             ..Default::default()
         });
+        e = e
+            .class("shell-control")
+            .class("notifications-button")
+            .class("notifications-close");
         self.style(&mut e);
-        e.style.text.font_size = 11.0;
-        e.style.text.align = TextAlign::Center;
         e.button_variant = Some(ButtonVariant::Ghost);
         if keyboard_focus {
             e.classes.push("keyboard-focus-visible".into());
+            e.classes.push("notifications-keyboard-focus".into());
         }
         e
     }
@@ -56,7 +61,7 @@ impl Palette {
         e.layout.width = Length::Px(36.0);
         e.layout.height = Length::Px(36.0);
         e.layout.padding = 0.0;
-        e.style.text.align = TextAlign::Center;
+        e = e.class("notifications-page-button");
         e
     }
     fn button(&self, id: u64, value: &str) -> Element {
@@ -64,9 +69,8 @@ impl Palette {
             padding: 8.0,
             ..Default::default()
         });
+        e = e.class("shell-control").class("notifications-button");
         self.style(&mut e);
-        e.style.text.font_size = 11.0;
-        e.style.text.line_height = 14.0;
         e
     }
     fn text_button(&self, id: u64, value: &str) -> Element {
@@ -76,9 +80,8 @@ impl Palette {
             padding: 4.0,
             ..Default::default()
         });
+        e = e.class("shell-control").class("notifications-text-button");
         self.style(&mut e);
-        e.style.text.font_size = 10.0;
-        e.style.text.line_height = 13.0;
         e.button_variant = Some(ButtonVariant::Ghost);
         e
     }
@@ -105,6 +108,7 @@ impl Notifications {
         let mut root = p.panel(0);
         root.layout.flow = Flow::Overlay;
         root.layout.height = Length::Fill;
+        root = root.class("notifications-root");
         root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         if self.state.high_contrast {
             root.classes.push("high-contrast".into());
@@ -122,6 +126,7 @@ impl Notifications {
             ..Default::default()
         });
         if self.state.center_open {
+            panel = panel.class("notifications-panel");
             panel.component = Some(ComponentKind::Card);
             panel.style.background = None;
             let mut heading = p.panel(10).layout(Layout {
@@ -133,9 +138,7 @@ impl Notifications {
             });
             let mut title = p.text(11, "Notifications".into(), false);
             title.layout.height = Length::Auto;
-            title.style.text.weight = 600;
-            title.style.text.font_size = 17.0;
-            title.style.text.line_height = 22.0;
+            title = title.class("notifications-title");
             heading.children.push(title);
             let mut close = p.close_button(CLOSE, self.keyboard_focus_visible);
             close.tooltip = Some("Close notification center".into());
@@ -148,6 +151,7 @@ impl Notifications {
                 padding: 12.0,
                 ..Default::default()
             });
+            dnd = dnd.class("notifications-dnd");
             dnd.component = Some(ComponentKind::Card);
             dnd.style.background = None;
             let mut dnd_copy = p.panel(21).layout(Layout {
@@ -155,9 +159,7 @@ impl Notifications {
                 ..Default::default()
             });
             let mut dnd_title = p.text(22, "Do not disturb".into(), false);
-            dnd_title.style.text.weight = 600;
-            dnd_title.style.text.font_size = 12.0;
-            dnd_title.style.text.line_height = 16.0;
+            dnd_title = dnd_title.class("notifications-dnd-title");
             dnd_copy.children.push(dnd_title);
             let mut dnd_subtitle = p.text(
                 23,
@@ -168,8 +170,7 @@ impl Notifications {
                 },
                 true,
             );
-            dnd_subtitle.style.text.font_size = 10.0;
-            dnd_subtitle.style.text.line_height = 13.0;
+            dnd_subtitle = dnd_subtitle.class("notifications-dnd-subtitle");
             dnd_copy.children.push(dnd_subtitle);
             dnd.children.push(dnd_copy);
             let mut toggle = Element::new(
@@ -184,6 +185,7 @@ impl Notifications {
                 height: Length::Px(24.0),
                 ..Default::default()
             });
+            toggle = toggle.class("shell-control").class("notifications-toggle");
             p.style(&mut toggle);
             toggle.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             toggle.enabled = self.state.owned;
@@ -209,17 +211,14 @@ impl Notifications {
                 format!("RECENT · {}", self.state.history().count()),
                 true,
             );
-            recent.style.text.font_size = 10.0;
-            recent.style.text.line_height = 13.0;
-            recent.style.text.weight = 600;
             recent.layout.height = Length::Auto;
+            recent = recent.class("notifications-recent");
             controls.children.push(recent);
             let mut read = p.text_button(READ, "Mark all read");
             read.layout.width = Length::Px(84.0);
             read.enabled = self.state.history().next().is_some();
             controls.children.push(read);
             let mut clear = p.text_button(CLEAR, "Clear all");
-            clear.button_variant = Some(ButtonVariant::Destructive);
             clear.layout.width = Length::Px(64.0);
             clear.enabled = self.state.history().next().is_some();
             controls.children.push(clear);
@@ -299,8 +298,7 @@ impl Notifications {
                 true,
             );
             page_label.layout.height = Length::Auto;
-            page_label.style.text.font_size = 10.0;
-            page_label.style.text.line_height = 13.0;
+            page_label = page_label.class("notifications-page-label");
             footer.children.push(page_label);
             let mut next = p.page_button(NEXT, "›");
             next.enabled = self.page + 1 < pages;
@@ -330,25 +328,22 @@ impl Notifications {
             panel.children.push(scroll);
         }
         root.children.push(panel);
-        root
+        knave_shell_ui::styles::root(root, self.theme)
     }
     fn card(&mut self, n: &Notification, p: &Palette, banner: bool) -> Element {
         let id = card_id(n.id);
-        let mut card = p
-            .panel(id)
-            .component(if n.urgency == 2 || n.unread {
-                ComponentKind::Alert
-            } else {
-                ComponentKind::Card
-            })
-            .layout(Layout {
-                padding: 12.0,
-                gap: 7.0,
-                ..Default::default()
-            });
+        let mut card = p.panel(id).component(ComponentKind::Card).layout(Layout {
+            padding: 12.0,
+            gap: 7.0,
+            ..Default::default()
+        });
         card.style.background = None;
+        card = card.class("notifications-card");
+        if n.unread {
+            card = card.class("notifications-unread");
+        }
         if n.urgency == 2 {
-            card.classes.push("notification-critical".into());
+            card = card.class("notifications-critical");
         }
         let mut head = p.panel(id + 1).layout(Layout {
             flow: Flow::Row,
@@ -395,8 +390,7 @@ impl Notifications {
             ),
             true,
         );
-        metadata.style.text.font_size = 10.0;
-        metadata.style.text.line_height = 13.0;
+        metadata = metadata.class("notifications-metadata");
         head.children.push(metadata);
         let mut dismiss = p.close_button(id + 4, self.keyboard_focus_visible);
         dismiss.tooltip = Some("Dismiss notification".into());
@@ -405,9 +399,7 @@ impl Notifications {
         card.children.push(head);
         let summary = short(&n.summary, if banner { 150 } else { 512 });
         let mut title = p.text(id + 5, summary, false);
-        title.style.text.weight = 600;
-        title.style.text.font_size = 12.0;
-        title.style.text.line_height = 16.0;
+        title = title.class("notifications-summary");
         card.children.push(title);
         let expanded = self.expanded.contains(&n.id);
         let body = short(
@@ -422,8 +414,7 @@ impl Notifications {
         );
         if !body.is_empty() {
             let mut body = p.text(id + 6, body, false);
-            body.style.text.font_size = 11.0;
-            body.style.text.line_height = 15.0;
+            body = body.class("notifications-body");
             card.children.push(body);
         }
         if let Some(source) = &n.image {
@@ -477,7 +468,8 @@ impl Notifications {
                 .layout(Layout {
                     height: Length::Px(4.0),
                     ..Default::default()
-                }),
+                })
+                .class("notifications-progress"),
             );
         }
         if n.live {

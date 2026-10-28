@@ -1,0 +1,126 @@
+/* The original shell palette, scoped so application widgets keep their own theme. */
+.knave-shell {
+    --shell-surface: #202427;
+    --shell-card: #292F33;
+    --shell-text: #DCE0E4;
+    --shell-muted: #929BA3;
+    --shell-accent: #95B9EE;
+    --shell-border: #FFFFFF14;
+    --shell-border-strong: #FFFFFF28;
+    --shell-hover: #2F4057;
+    --shell-selected: #313E4D;
+    --shell-danger: #FF9DA2;
+    --shell-slider-track: #566171;
+    --shell-slider-fill: #5DADE2;
+    --shell-slider-thumb: #F0F3F6;
+    --shell-bar: #15181B;
+    --shell-island: #20262B;
+    --shell-bar-text: #B9C0C6;
+    --shell-workspace-idle: #7D858C;
+    --shell-workspace-empty: #7D858C;
+    --shell-workspace-occupied: #B9C0C6;
+    --shell-on-selected: #FFFFFF;
+    --shell-badge-text: #15181B;
+    --shell-workspace-active: #BAD5FF;
+    --shell-workspace-selected: #313C49;
+    --shell-badge: #AEDCF2;
+    --shell-on-accent: #15181B;
+    --shell-overview-ink: #111721;
+    --shell-overview-panel: #202A38;
+    --shell-overview-muted: #A5B4C8;
+    --shell-overview-accent: #8BB8FF;
+    --shell-overview-search: #2C3745;
+    --shell-overview-border: #4C5B6E;
+    --shell-overview-hover: #2F4057;
+    --shell-overview-dot: #47566D;
+    --shell-overview-tray: #182128ED;
+    --shell-dialog: #141D2A;
+    --shell-field: #1F2B3C;
+    --shell-portal: #181F2B;
+    --shell-portal-card: #263141;
+    --shell-portal-selected: #30527E;
+    --text: var(--shell-text);
+    --text-secondary: var(--shell-muted);
+    --text-accent: var(--shell-accent);
+    --accent: var(--shell-accent);
+    --surface: var(--shell-card);
+    --panel-surface: var(--shell-surface);
+    --surface-raised: var(--shell-card);
+    --surface-menu: var(--shell-card);
+    --surface-hover: var(--shell-hover);
+    --surface-pressed: var(--shell-surface);
+    --surface-selected: var(--shell-selected);
+    --border: var(--shell-border);
+    --border-strong: var(--shell-border-strong);
+    --danger: var(--shell-danger);
+    color: var(--shell-text);
+}
+.shell-light {
+    --shell-surface: #F4F7FB;
+    --shell-card: #FFFFFF;
+    --shell-text: #121C2B;
+    --shell-muted: #415064;
+    --shell-accent: #125B9E;
+    --shell-border: #B4C1D2D2;
+    --shell-border-strong: #788CA0;
+    --shell-hover: #E4EBF3;
+    --shell-selected: #DCE8F8;
+    --shell-danger: #AA2331;
+    --shell-slider-track: #C3CEDC;
+    --shell-slider-fill: #125B9E;
+    --shell-slider-thumb: #415064;
+    --shell-bar: #EEF2F6;
+    --shell-island: #E1E8EF;
+    --shell-bar-text: #415064;
+    --shell-workspace-idle: #667487;
+    --shell-workspace-empty: #667487;
+    --shell-workspace-occupied: #415064;
+    --shell-on-selected: #125B9E;
+    --shell-badge-text: #FFFFFF;
+    --shell-workspace-active: #125B9E;
+    --shell-workspace-selected: #CFDFF1;
+    --shell-badge: #125B9E;
+    --shell-on-accent: #FFFFFF;
+    --shell-overview-ink: #F4F7FB;
+    --shell-overview-panel: #E5ECF5;
+    --shell-overview-muted: #415064;
+    --shell-overview-accent: #125B9E;
+    --shell-overview-search: #FFFFFF;
+    --shell-overview-border: #9AAEC5;
+    --shell-overview-hover: #DCE8F8;
+    --shell-overview-dot: #AAB8C9;
+    --shell-overview-tray: #F4F7FBED;
+    --shell-dialog: #F4F7FB;
+    --shell-field: #E6EDF5;
+    --shell-portal: #F4F7FB;
+    --shell-portal-card: #FFFFFF;
+    --shell-portal-selected: #DCE8F8;
+}
+.shell-structure, .shell-overlay { background-color: transparent; }
+.shell-panel {
+    background-color: var(--shell-surface);
+    outline: 1px solid var(--shell-border);
+    border-radius: 7px;
+}
+.shell-card {
+    background-color: var(--shell-card);
+    outline: 1px solid var(--shell-border);
+    border-radius: 7px;
+}
+.shell-control {
+    color: var(--shell-text);
+    background-color: var(--shell-card);
+    outline: 1px solid var(--shell-border);
+    border-radius: 7px;
+}
+.shell-control:hover { background-color: var(--shell-hover); }
+.shell-control:pressed { background-color: var(--shell-surface); }
+.shell-control:focus { outline-color: var(--shell-accent); }
+.shell-text { color: var(--shell-text); }
+.shell-muted { color: var(--shell-muted); }
+.shell-ghost { background-color: transparent; outline-width: 0; }
+.shell-ghost:hover { background-color: #80808028; }
+.shell-ghost:pressed { background-color: #80808046; }
+.high-contrast .shell-panel, .high-contrast .shell-card {
+    outline: 2px solid var(--shell-text);
+}

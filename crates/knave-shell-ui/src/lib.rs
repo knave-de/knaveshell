@@ -2,6 +2,7 @@
 mod brand;
 pub mod status_bar;
 pub mod status_icons;
+pub mod styles;
 use knave_desktop_api::{DesktopSnapshot, WindowId, WindowSummary, WorkspaceId};
 use knave_ui::{Color, DisplayList, DisplayListBuilder, ImageStyle, Rect, TextStyle, UiImage};
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -538,7 +539,7 @@ mod tests {
     fn overview_scene_does_not_require_a_gpu() {
         let scene = UiScene::overview(1, 1920.0, 1080.0);
         assert_eq!(scene.clear_color(), Color::rgba(8, 12, 18, 245));
-        assert_eq!(scene.nodes().len(), 7);
+        assert_eq!(scene.nodes().len(), 10);
         assert_eq!(
             scene.nodes()[0],
             UiNode::Panel {
@@ -552,11 +553,10 @@ mod tests {
             UiNode::Panel { bounds, .. }
                 if *bounds == Rect::new(0.0, 0.0, 1920.0, 36.0)
         ));
-        assert!(matches!(
-            &scene.nodes()[2],
+        assert!(scene.nodes().iter().any(|node| matches!(node,
             UiNode::Image { bounds, .. }
                 if *bounds == Rect::new(11.0, 7.0, 22.0, 22.0)
-        ));
+        )));
         // The icon-only mark introduces the overview from the shared strip.
         assert_eq!(scene.hit_test(20.0, 18.0), Some(UiAction::OpenOverview));
     }

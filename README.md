@@ -44,9 +44,13 @@ compositor-rendered workspace surfaces inside the cards;
 the surfaces are visual only and card controls retain input. Both roles consume
 Knave's desktop contract and keep desktop IPC off the Wayland frame thread.
 
-Shell controls and content surfaces use Knave UI's bundled light/dark CSS.
-Only fullscreen dismissal hosts and compositor preview regions stay explicitly
-transparent; they do not supply a competing shell color palette.
+Shell-specific CSS in `crates/knave-shell-ui/src/styles/` restores the compact
+charcoal cards, rounded bar groups and blue highlights over Knave UI widgets.
+`common.css` owns the scoped dark/light palette; component files target named
+classes such as `statusbar__workspace-action`, `overview-search`,
+`notifications-card` and `quick-settings-active`. CSS stays below application
+overrides. Layout and hit targets remain in the Rust compositions; fullscreen
+dismissal hosts and compositor preview regions stay transparent.
 
 ## Build
 

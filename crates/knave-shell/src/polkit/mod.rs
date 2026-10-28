@@ -53,7 +53,9 @@ struct Agent {
 impl Agent {
     fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
-        scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .expect("shell stylesheet is valid");
         Self {
             theme,
             shared: Arc::new(Mutex::new(Shared::default())),
@@ -98,10 +100,12 @@ impl Agent {
             height: Length::Fill,
             ..Default::default()
         });
-        let mut content = Element::new(12, Widget::Panel).layout(Layout {
-            gap: 12.0,
-            ..Default::default()
-        });
+        let mut content = Element::new(12, Widget::Panel)
+            .class("shell-structure")
+            .layout(Layout {
+                gap: 12.0,
+                ..Default::default()
+            });
         let heading = self
             .state
             .prompt
@@ -128,6 +132,7 @@ impl Agent {
                 FIELD.0,
                 Widget::Button(if value.is_empty() { " ".into() } else { value }),
             );
+            field.classes.push("polkit-field".into());
             field.layout.height = Length::Px(44.0);
             content.children.push(field);
         }
@@ -147,12 +152,14 @@ impl Agent {
         }
         scroll.children.push(content);
         root.children.push(scroll);
-        let mut row = Element::new(10, Widget::Panel).layout(Layout {
-            flow: Flow::Row,
-            gap: 12.0,
-            height: Length::Px(44.0),
-            ..Default::default()
-        });
+        let mut row = Element::new(10, Widget::Panel)
+            .class("shell-structure")
+            .layout(Layout {
+                flow: Flow::Row,
+                gap: 12.0,
+                height: Length::Px(44.0),
+                ..Default::default()
+            });
         for (id, label) in [(CANCEL, "Cancel"), (CONFIRM, "Continue")] {
             let mut button = Element::new(id.0, Widget::Button(label.into()));
             button.layout.height = Length::Px(44.0);
@@ -160,7 +167,7 @@ impl Agent {
             row.children.push(button);
         }
         root.children.push(row);
-        root
+        knave_shell_ui::styles::root(root.class("polkit-dialog"), self.theme)
     }
 }
 impl Application for Agent {

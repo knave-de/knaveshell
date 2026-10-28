@@ -1,20 +1,5 @@
 use super::*;
-use knave_ui::{
-    Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap, UiImage,
-};
-
-pub(super) const OVERVIEW_STYLESHEET: &str = "\
-    .overview-muted { color: var(--text-secondary); } \
-    .overview-error { color: var(--danger); } \
-    .overview-search { background-color: var(--surface-sunken); outline: 1px solid var(--border-strong); border-radius: 27px; } \
-    .overview-results { background-color: var(--surface-menu); border-radius: 18px; } \
-    .overview-tray { background-color: var(--surface-menu); outline: 1px solid var(--border-strong); border-radius: 11px; } \
-    .overview-card-selected, .overview-card-idle { border-radius: 24px; } \
-    .overview-card-selected { outline: 1px solid var(--accent); } \
-    .overview-card-idle { outline: 1px solid var(--border-strong); } \
-    .overview-current-dot, .overview-other-dot { border-radius: 8px; } \
-    .overview-current-dot { background-color: var(--accent); } \
-    .overview-other-dot { background-color: var(--surface-hover); }";
+use knave_ui::{Color, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap, UiImage};
 
 fn placed(mut e: Element, r: Rect) -> Element {
     e.layout = Layout {
@@ -39,8 +24,11 @@ fn text(id: u64, value: impl Into<String>, r: Rect, size: f32, class: &str) -> E
     e
 }
 fn control(id: u64, value: impl Into<String>, r: Rect) -> Element {
-    let mut e = placed(Element::new(id, Widget::Button(value.into())), r);
-    // Let the bundled CSS own surface, hover, pressed and keyboard-focus paint.
+    let mut e = placed(
+        Element::new(id, Widget::Button(value.into())).class("overview-control"),
+        r,
+    );
+    // Shell CSS owns surface and interaction paint; layout stays in the composition.
     e.layout = e.layout.with_padding(Insets::symmetric(10.0, 14.0));
     e
 }
@@ -280,7 +268,7 @@ impl Overview {
         }
         // Drawn last so the status bar strip stays on top of overview content.
         root.children.push(self.status_bar(width));
-        root
+        knave_shell_ui::styles::root(root.class("shell-overlay"), self.theme)
     }
     // Retained controls route the shared component's hit targets; all pixels
     // come directly from its display list in frame().
@@ -399,7 +387,7 @@ impl Overview {
                     Rect::new(6.0 + n as f32 * pitch, 6.0, icon_size, icon_size),
                 );
                 icon.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
-                icon.style.radii = Some(CornerRadii::uniform(7.0));
+                icon.classes.push("overview-window-icon".into());
                 // Hover and accessibility name the exact window, not its application.
                 icon.tooltip = Some(format!("Restore {}", short(title, 120)));
                 icon.enabled = !self.pending;

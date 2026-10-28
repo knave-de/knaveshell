@@ -331,7 +331,9 @@ impl Menu {
         theme: Theme,
     ) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
-        scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .expect("shell stylesheet is valid");
         Self {
             owner,
             item_path,
@@ -470,6 +472,9 @@ impl Application for Menu {
                 ..Default::default()
             });
             panel.component = Some(ComponentKind::Card);
+            panel
+                .classes
+                .extend(["shell-card".into(), "tray-menu-panel".into()]);
             let mut header = Element::new(2, Widget::Panel).layout(Layout {
                 flow: Flow::Row,
                 height: Length::Px(28.0),
@@ -497,7 +502,7 @@ impl Application for Menu {
                 } else {
                     format!("Menu unavailable: {error}")
                 };
-                let mut status = Element::new(6, Widget::Text(text));
+                let mut status = Element::new(6, Widget::Text(text)).class("tray-menu-status");
                 status.style.text.wrap = knave_ui::TextWrap::WordOrGlyph;
                 list.children.push(status);
             } else if self.page.loading {
@@ -525,12 +530,16 @@ impl Application for Menu {
                     height: Length::Px(if row.separator { 10.0 } else { 32.0 }),
                     ..Default::default()
                 });
+                item.classes.push("tray-menu-action".into());
                 item.enabled = row.enabled && !row.separator;
                 list.children.push(item);
             }
             panel.children.push(list);
             root.children.push(panel);
-            if let Err(error) = self.scene.replace(root) {
+            if let Err(error) = self.scene.replace(knave_shell_ui::styles::root(
+                root.class("shell-overlay"),
+                self.scene.theme(),
+            )) {
                 eprintln!("knave-shell: tray menu layout: {error}");
                 self.close = true;
             }

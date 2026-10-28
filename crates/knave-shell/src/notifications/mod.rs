@@ -64,9 +64,8 @@ impl Notifications {
     }
     pub fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
-        scene.set_theme(theme).expect("built-in theme is valid");
         scene
-            .set_stylesheet(view::ACCESSIBILITY_STYLESHEET)
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
             .expect("panel accessibility stylesheet is valid");
         Self {
             theme,

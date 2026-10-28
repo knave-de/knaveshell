@@ -1,31 +1,39 @@
 use super::*;
 use knave_ui::toolkit::{ButtonVariant, ComponentKind};
-use knave_ui::{ShapePaint, TextAlign, TextWrap, UiImage};
+use knave_ui::{ShapePaint, TextWrap, UiImage};
 use std::sync::{Mutex, OnceLock};
 
-pub(super) const ACCESSIBILITY_STYLESHEET: &str = ".high-contrast card { border-color: var(--text); border-width: 2px; } .quick-settings-active { background-color: var(--surface-selected); outline: 1px solid var(--accent); }";
 struct Palette;
 impl Palette {
     fn new() -> Self {
         Self
     }
     fn element(&self, id: u64, w: Widget) -> Element {
+        let class = match &w {
+            Widget::Panel => Some(("shell-structure", "quick-settings-structure")),
+            Widget::Button(_) | Widget::Menu { .. } => {
+                Some(("shell-control", "quick-settings-button"))
+            }
+            Widget::Slider(_) => Some(("shell-control", "quick-settings-slider")),
+            Widget::Text(_) => Some(("shell-text", "quick-settings-text")),
+            _ => None,
+        };
         let mut e = Element::new(id, w);
-        e.style.text.font_size = 12.0;
-        e.style.text.line_height = 16.0;
+        if let Some((shared, local)) = class {
+            e = e.class(shared).class(local);
+        }
         e.style.text.wrap = TextWrap::WordOrGlyph;
         e
     }
     fn text(&self, id: u64, s: impl Into<String>, muted: bool) -> Element {
         let mut e = if muted {
             Element::subtitle(id, s)
+                .class("shell-muted")
+                .class("quick-settings-muted")
         } else {
             self.element(id, Widget::Text(s.into()))
         };
-        if muted {
-            e.style.text.font_size = 10.0;
-            e.style.text.line_height = 14.0;
-        }
+        e.style.text.wrap = TextWrap::WordOrGlyph;
         e
     }
     fn panel(&self, id: u64) -> Element {
@@ -47,8 +55,7 @@ impl Palette {
         e.layout.padding = 0.0;
         e.layout.padding_edges = Some(Insets::all(0.0));
         e.layout.align = Align::Center;
-        e.style.text.align = TextAlign::Center;
-        e
+        e.class("quick-settings-header-button")
     }
     fn slider(&self, id: u64, min: f64, max: f64, value: f64, step: f64, enabled: bool) -> Element {
         let mut e = self.element(
@@ -277,9 +284,14 @@ fn text_color(theme: Theme) -> Color {
     static LIGHT: OnceLock<Color> = OnceLock::new();
     let cache = if theme == Theme::Light { &LIGHT } else { &DARK };
     *cache.get_or_init(|| {
-        let mut scene = Scene::new(Element::new(1, Widget::Text(String::new())))
-            .expect("icon text style scene is valid");
-        scene.set_theme(theme).expect("built-in theme is valid");
+        let mut scene = Scene::new(knave_shell_ui::styles::root(
+            Element::new(1, Widget::Text(String::new())).class("quick-settings-icon"),
+            theme,
+        ))
+        .expect("icon text style scene is valid");
+        scene
+            .set_desktop_theme(theme, knave_shell_ui::styles::STYLESHEET)
+            .expect("shell stylesheet is valid");
         scene
             .computed_style(ElementId(1))
             .map(|style| style.style.text.color)
@@ -371,6 +383,7 @@ impl QuickSettings {
             gap: 8.0,
             ..Default::default()
         });
+        group = group.class("quick-settings-card");
         group.style.background = None;
         group
     }
@@ -417,15 +430,18 @@ impl QuickSettings {
         control.layout.padding = 6.0;
         control.layout.padding_edges = None;
         control.button_variant = Some(ButtonVariant::Ghost);
+        control = control.class("quick-settings-icon-control");
         control.tooltip = Some(label.into());
         control.children.push(self.icon(icon));
         control
     }
     fn separator(&mut self) -> Element {
-        Element::new(self.id(), Widget::Separator).layout(Layout {
-            height: Length::Px(1.0),
-            ..Default::default()
-        })
+        Element::new(self.id(), Widget::Separator)
+            .class("quick-settings-separator")
+            .layout(Layout {
+                height: Length::Px(1.0),
+                ..Default::default()
+            })
     }
     fn tile(
         &mut self,
@@ -443,6 +459,7 @@ impl QuickSettings {
         b.layout.align = Align::Center;
         b.layout.gap = 8.0;
         b.layout.height = Length::Px(64.0);
+        b = b.class("quick-settings-tile");
         b.children.push(self.icon(icon));
         let mut copy = self.stack(p);
         copy.layout.gap = 2.0;
@@ -453,7 +470,7 @@ impl QuickSettings {
         copy.children.push(sub);
         b.children.push(copy);
         if active {
-            b.classes.push("quick-settings-active".into());
+            b = b.class("quick-settings-active");
         }
         b
     }
@@ -507,7 +524,7 @@ impl QuickSettings {
         value.layout.width = Length::Px(90.0);
         value.layout.height = Length::Auto;
         value.layout.padding_edges = Some(Insets::all(0.0));
-        value.style.text.align = TextAlign::End;
+        value = value.class("quick-settings-value");
         heading.children.push(value);
         group.children.push(heading);
         group.children.push(p.slider(
@@ -532,6 +549,7 @@ impl QuickSettings {
             height: Length::Fill,
             ..Default::default()
         });
+        root = root.class("quick-settings-root");
         root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         if self.state.high_contrast {
             root.classes.push("high-contrast".into());
@@ -544,6 +562,7 @@ impl QuickSettings {
             gap: 10.0,
             ..Default::default()
         });
+        panel = panel.class("quick-settings-panel");
         panel.component = Some(ComponentKind::Card);
         panel.style.background = None;
         let mut header = self.row(&p);
@@ -560,8 +579,7 @@ impl QuickSettings {
         let mut title = self.label(&p, title, false);
         title.layout.height = Length::Auto;
         title.layout.padding_edges = Some(Insets::all(0.0));
-        title.style.text.font_size = 17.0;
-        title.style.text.line_height = 22.0;
+        title = title.class("quick-settings-title");
         header.children.push(title);
         if self.page == Page::Main {
             let mut power = p.header_button(POWER, "", 30.0);
@@ -627,7 +645,7 @@ impl QuickSettings {
                 );
                 profile.layout.width = Length::Px(112.0);
                 profile.layout.height = Length::Px(32.0);
-                profile.style.text.font_size = 10.0;
+                profile = profile.class("quick-settings-profile");
                 profile.tooltip = Some("Power mode".into());
                 profile.widget = Widget::Menu {
                     label: self
@@ -693,7 +711,7 @@ impl QuickSettings {
                     Target::Command(QuickSettingsCommand::OpenAudio),
                     true,
                 );
-                devices.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+                devices = devices.class("quick-settings-device-link");
                 devices.layout.height = Length::Px(32.0);
                 audio.children.push(devices);
                 content.children.push(audio);
@@ -711,7 +729,7 @@ impl QuickSettings {
                     true,
                 );
                 value.layout.width = Length::Px(80.0);
-                value.style.text.align = TextAlign::End;
+                value = value.class("quick-settings-value");
                 brightness.children.push(value);
                 display.children.push(brightness);
                 display.children.push(p.slider(
@@ -736,7 +754,7 @@ impl QuickSettings {
                     Target::Page(Page::Night),
                     true,
                 );
-                night.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+                night = night.class("quick-settings-navigation");
                 night.layout.height = Length::Px(34.0);
                 display.children.push(night);
                 content.children.push(display);
@@ -985,6 +1003,7 @@ impl QuickSettings {
                 ..Default::default()
             });
         dialog.visible = self.confirmation.is_some();
+        dialog = dialog.class("quick-settings-dialog");
         dialog.component = Some(ComponentKind::Card);
         dialog.style.background = None;
         if let Some(command) = self.confirmation.clone() {
@@ -1004,12 +1023,12 @@ impl QuickSettings {
                 .children
                 .push(p.button(CANCEL_CONFIRMATION, "Cancel", true));
             let mut confirm = p.button(CONFIRM_ACTION, action, true);
-            confirm.style.text.align = TextAlign::Center;
+            confirm = confirm.class("quick-settings-confirm");
             actions.children.push(confirm);
             dialog.children.push(actions);
         }
         root.children.push(dialog);
-        root
+        knave_shell_ui::styles::root(root, self.theme)
     }
 }
 

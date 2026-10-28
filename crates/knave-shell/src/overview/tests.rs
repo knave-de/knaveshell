@@ -1067,11 +1067,11 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
     let search_paint = search.style.background.as_ref().unwrap();
     assert_eq!(
         search_paint.fill,
-        Some(knave_ui::Color::rgba(232, 237, 240, 255))
+        Some(knave_ui::Color::rgba(255, 255, 255, 255))
     );
     assert_eq!(
         search.outline.map(|outline| outline.color),
-        Some(knave_ui::Color::rgba(175, 187, 196, 255))
+        Some(knave_ui::Color::rgba(154, 174, 197, 255))
     );
     assert_eq!(search.style.radius, 27.0);
     assert_eq!(
@@ -1081,7 +1081,7 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
             .style
             .text
             .color,
-        knave_ui::Color::rgba(53, 65, 74, 255)
+        knave_ui::Color::rgba(65, 80, 100, 255)
     );
 
     let selected_card = app
@@ -1099,7 +1099,7 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
     );
     assert_eq!(
         selected_card.outline.unwrap().color,
-        knave_ui::Color::rgba(8, 169, 216, 255)
+        knave_ui::Color::rgba(18, 91, 158, 255)
     );
     assert_eq!(selected_card.outline.unwrap().width, 1.0);
     assert_eq!(selected_card.style.radius, 24.0);
