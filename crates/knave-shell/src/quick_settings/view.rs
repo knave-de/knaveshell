@@ -3,8 +3,7 @@ use knave_ui::toolkit::{ButtonVariant, ComponentKind};
 use knave_ui::{ShapePaint, TextAlign, TextWrap, UiImage};
 use std::sync::{Mutex, OnceLock};
 
-pub(super) const ACCESSIBILITY_STYLESHEET: &str =
-    ".high-contrast card { border-color: var(--text); border-width: 2px; }";
+pub(super) const ACCESSIBILITY_STYLESHEET: &str = ".high-contrast card { border-color: var(--text); border-width: 2px; } .quick-settings-active { background-color: var(--surface-selected); outline: 1px solid var(--accent); }";
 struct Palette;
 impl Palette {
     fn new() -> Self {
@@ -454,7 +453,7 @@ impl QuickSettings {
         copy.children.push(sub);
         b.children.push(copy);
         if active {
-            b.button_variant = Some(ButtonVariant::Primary);
+            b.classes.push("quick-settings-active".into());
         }
         b
     }
