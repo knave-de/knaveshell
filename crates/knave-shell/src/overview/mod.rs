@@ -423,6 +423,10 @@ impl Overview {
                     self.host_error(&format!("Could not apply appearance theme: {error}"));
                     return;
                 }
+                if let Err(error) = scene.set_stylesheet(view::OVERVIEW_STYLESHEET) {
+                    self.host_error(&format!("Could not apply overview stylesheet: {error}"));
+                    return;
+                }
                 scene.layout(self.size, text);
                 if !self.surface_focused {
                     scene.event(Input::FocusLost);

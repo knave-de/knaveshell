@@ -65,6 +65,9 @@ impl Notifications {
     pub fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
         scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_stylesheet(view::ACCESSIBILITY_STYLESHEET)
+            .expect("panel accessibility stylesheet is valid");
         Self {
             theme,
             state: NotificationSnapshot::default(),
@@ -99,6 +102,11 @@ impl Notifications {
         }
     }
     fn apply(&mut self, state: NotificationSnapshot) {
+        self.theme = if state.light {
+            Theme::Light
+        } else {
+            Theme::Dark
+        };
         if !self.state.center_open && state.center_open {
             self.focus_on_open = true;
             self.keyboard_focus_visible = false;

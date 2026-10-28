@@ -60,6 +60,7 @@ fn app(count: u64) -> Notifications {
     app
 }
 fn click(app: &mut Notifications, id: ElementId) {
+    assert!(app.error.is_none(), "{:?}", app.error);
     let r = app.scene.bounds(id).unwrap();
     let point = [r.x + r.width / 2.0, r.y + r.height / 2.0];
     app.input(Input::PointerMove(point));
@@ -81,8 +82,23 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                 let mut app = app(500);
                 app.state.light = light;
                 app.state.high_contrast = contrast;
+                app.apply(app.state.clone());
                 let list = app.frame(size, &mut Metrics).clone();
+                assert!(app.error.is_none(), "{:?}", app.error);
                 assert_eq!(list.clear_color.alpha, 0);
+                assert_eq!(app.theme, if light { Theme::Light } else { Theme::Dark });
+                assert_eq!(
+                    app.scene
+                        .computed_style(ElementId(0))
+                        .unwrap()
+                        .style
+                        .background
+                        .and_then(|paint| paint.fill)
+                        .unwrap()
+                        .alpha,
+                    0,
+                    "overlay root must stay transparent at {size:?}"
+                );
                 let panel = app.scene.bounds(PANEL).unwrap();
                 assert!(panel.x >= 0.0 && panel.y >= 0.0);
                 assert!(panel.x + panel.width <= size[0]);
@@ -130,8 +146,10 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                 for command in &list.commands {
                     if let DisplayCommand::Shape { paint, .. } = command {
                         let radius = paint.radii.top_left;
-                        assert!([0.0, 4.0, 6.0, 7.0, 9.0].contains(&radius));
-                        assert_eq!(paint.radii, knave_ui::CornerRadii::uniform(radius));
+                        assert!(radius.is_finite() && (0.0..=32.0).contains(&radius));
+                        assert!(paint.radii.top_right.is_finite());
+                        assert!(paint.radii.bottom_right.is_finite());
+                        assert!(paint.radii.bottom_left.is_finite());
                     }
                 }
                 let scroll = app.scene.bounds(ElementId(SCROLL)).unwrap();
@@ -180,18 +198,16 @@ fn notification_panel_uses_proposed_surface_and_a_real_dnd_toggle() {
     );
     assert!(app.scene.bounds(ElementId(READ)).unwrap().width > 0.0);
     assert!(app.scene.bounds(ElementId(CLEAR)).unwrap().width > 0.0);
-    assert!(list.commands.iter().any(|command| matches!(
-        command,
-        DisplayCommand::Shape { paint, .. }
-            if paint.fill == Some(Color::rgba(32, 36, 39, 255))
-                && paint.radii == knave_ui::CornerRadii::uniform(7.0)
-    )));
-    assert!(list.commands.iter().any(|command| matches!(
-        command,
-        DisplayCommand::Shape { paint, .. }
-            if paint.fill == Some(Color::rgba(41, 47, 51, 255))
-                && paint.radii == knave_ui::CornerRadii::uniform(7.0)
-    )));
+    for id in [PANEL.0, 20, view::card_id(1)] {
+        let paint = app
+            .scene
+            .computed_style(ElementId(id))
+            .unwrap()
+            .style
+            .background
+            .expect("semantic panel component should receive a theme surface");
+        assert!(paint.fill.is_some_and(|fill| fill.alpha > 0));
+    }
     assert!(list.commands.iter().any(|command| matches!(
         command,
         DisplayCommand::Text { text, style, .. }
@@ -330,7 +346,7 @@ fn reopening_hidden_center_resets_keyboard_focus_to_close() {
 }
 
 #[test]
-fn progress_tracks_card_content_width_at_every_percentage_and_surface_size() {
+fn progress_widget_tracks_card_content_width_and_accessible_percentage() {
     for width in [320.0, 400.0, 1280.0] {
         for banner in [false, true] {
             for value in [0, 1, 25, 50, 99, 100] {
@@ -340,11 +356,13 @@ fn progress_tracks_card_content_width_at_every_percentage_and_surface_size() {
                 app.state.notifications[0].progress = Some(value);
                 app.frame([width, 800.0], &mut Metrics);
                 let id = view::card_id(1);
-                let track = app.scene.bounds(ElementId(id + 9)).unwrap();
-                let fill = app.scene.bounds(ElementId(id + 10)).unwrap();
-                assert!(
-                    (fill.width - track.width * f32::from(value) / 100.0).abs() < 0.1,
-                    "{width} {banner} {value}: {fill:?} {track:?}"
+                let bounds = app.scene.bounds(ElementId(id + 9)).unwrap();
+                assert!(bounds.width > 0.0 && bounds.width <= 340.0);
+                assert_eq!(
+                    app.scene.widget(ElementId(id + 9)),
+                    Some(&Widget::Progress {
+                        value: Some(f64::from(value) / 100.0)
+                    })
                 );
             }
         }

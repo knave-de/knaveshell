@@ -1,12 +1,20 @@
 use super::*;
 use knave_ui::{
-    Border, Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap,
-    UiImage,
+    Color, CornerRadii, ImageFit, ImageStyle, Rect, ShapePaint, TextAlign, TextWrap, UiImage,
 };
 
-const INK: Color = Color::rgba(17, 23, 33, 255);
-const MUTED: Color = Color::rgba(165, 180, 200, 255);
-const BLUE: Color = Color::rgba(139, 184, 255, 255);
+pub(super) const OVERVIEW_STYLESHEET: &str = "\
+    .overview-muted { color: var(--text-secondary); } \
+    .overview-error { color: var(--danger); } \
+    .overview-search { background-color: var(--surface-sunken); outline: 1px solid var(--border-strong); border-radius: 27px; } \
+    .overview-results { background-color: var(--surface-menu); border-radius: 18px; } \
+    .overview-tray { background-color: var(--surface-menu); outline: 1px solid var(--border-strong); border-radius: 11px; } \
+    .overview-card-selected, .overview-card-idle { border-radius: 24px; } \
+    .overview-card-selected { outline: 1px solid var(--accent); } \
+    .overview-card-idle { outline: 1px solid var(--border-strong); } \
+    .overview-current-dot, .overview-other-dot { border-radius: 8px; } \
+    .overview-current-dot { background-color: var(--accent); } \
+    .overview-other-dot { background-color: var(--surface-hover); }";
 
 fn placed(mut e: Element, r: Rect) -> Element {
     e.layout = Layout {
@@ -19,30 +27,20 @@ fn placed(mut e: Element, r: Rect) -> Element {
     };
     e
 }
-fn paint(fill: Color, radius: f32, border: Option<Color>) -> ShapePaint {
-    ShapePaint {
-        radii: CornerRadii::uniform(radius),
-        border: border.map(|color| Border { color, width: 1.0 }),
-        ..ShapePaint::fill(fill)
-    }
+fn panel(id: u64, rect: Rect) -> Element {
+    placed(Element::new(id, Widget::Panel), rect)
 }
-fn panel(id: u64, rect: Rect, fill: Color, radius: f32) -> Element {
-    let mut e = placed(Element::new(id, Widget::Panel), rect);
-    e.style.background = Some(paint(fill, radius, None));
-    e
-}
-fn text(id: u64, value: impl Into<String>, r: Rect, size: f32, color: Color) -> Element {
+fn text(id: u64, value: impl Into<String>, r: Rect, size: f32, class: &str) -> Element {
     let mut e = placed(Element::new(id, Widget::Text(value.into())), r);
     e.style.text.font_size = size;
     e.style.text.line_height = size * 1.35;
-    e.style.text.color = color;
+    e.classes.push(class.into());
     e.style.text.wrap = TextWrap::None;
     e
 }
 fn control(id: u64, value: impl Into<String>, r: Rect) -> Element {
     let mut e = placed(Element::new(id, Widget::Button(value.into())), r);
     // Let the bundled CSS own surface, hover, pressed and keyboard-focus paint.
-    e.style.radius = 12.0;
     e.layout = e.layout.with_padding(Insets::symmetric(10.0, 14.0));
     e
 }
@@ -109,11 +107,7 @@ impl Overview {
             bottom: 10.0,
             left: 22.0,
         });
-        search.style.background = Some(paint(
-            Color::rgba(44, 55, 69, 255),
-            27.0,
-            Some(Color::rgba(76, 91, 110, 255)),
-        ));
+        search.classes.push("overview-search".into());
         search.style.text.font_size = 16.0;
         search.style.text.line_height = 22.0;
         if self.query.text().is_empty() {
@@ -122,7 +116,7 @@ impl Overview {
                 "Search applications…",
                 Rect::new(22.0, 16.0, (search_width - 44.0).max(0.0), 22.0),
                 16.0,
-                MUTED,
+                "overview-muted",
             ));
         }
         // Child offsets are relative to the content area; search decorations use the border box.
@@ -203,15 +197,11 @@ impl Overview {
                     ),
                 );
                 dot.layout.padding_edges = None;
-                dot.style.background = Some(paint(
-                    if workspace == ws {
-                        BLUE
-                    } else {
-                        Color::rgba(71, 86, 109, 255)
-                    },
-                    8.0,
-                    None,
-                ));
+                dot.classes.push(if workspace == ws {
+                    "overview-current-dot".into()
+                } else {
+                    "overview-other-dot".into()
+                });
                 dot.tooltip = Some(format!("Workspace {}", workspace.0));
                 self.targets
                     .insert(ElementId(id), Target::Workspace(workspace));
@@ -255,7 +245,7 @@ impl Overview {
                 message,
                 Rect::new(pad, height * 0.4, (width - pad * 2.0).max(0.0), 40.0),
                 22.0,
-                MUTED,
+                "overview-muted",
             );
             e.style.text.align = TextAlign::Center;
             root.children.push(e);
@@ -280,9 +270,9 @@ impl Overview {
                 ),
                 12.0,
                 if self.error.is_some() {
-                    Color::rgba(255, 179, 166, 255)
+                    "overview-error"
                 } else {
-                    MUTED
+                    "overview-muted"
                 },
             );
             status.style.text.align = TextAlign::Center;
@@ -333,15 +323,13 @@ impl Overview {
     fn workspace_card(&mut self, ws: WorkspaceId, rect: Rect, selected: bool) -> Element {
         let id = 0x100_0000_0000 + u64::from(ws.0) * 32;
         let mut card = placed(Element::new(id, Widget::Button(String::new())), rect);
-        card.style.background = Some(paint(
-            Color::rgba(0, 0, 0, 0),
-            24.0,
-            Some(if selected {
-                BLUE
-            } else {
-                Color::rgba(77, 94, 115, 255)
-            }),
-        ));
+        card.classes.push(if selected {
+            "overview-card-selected".into()
+        } else {
+            "overview-card-idle".into()
+        });
+        // The compositor supplies each workspace preview through this window.
+        card.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         card.layout.clip = ClipMode::Bounds;
         self.targets.insert(
             ElementId(id),
@@ -388,14 +376,9 @@ impl Overview {
             let mut tray = panel(
                 id + 3,
                 Rect::new(12.0, (rect.height - tray_h - 12.0).max(0.0), tray_w, tray_h),
-                Color::rgba(24, 33, 40, 237),
-                11.0,
             );
-            tray.style.background = Some(paint(
-                Color::rgba(24, 33, 40, 237),
-                11.0,
-                Some(Color::rgba(255, 255, 255, 40)),
-            ));
+            tray.classes.push("overview-tray".into());
+            tray.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             tray.layout.clip = ClipMode::Bounds;
             for (n, window) in min.iter().skip(first).take(shown).enumerate() {
                 let wid = self.window_ids[&window.id];
@@ -442,7 +425,7 @@ impl Overview {
                         "▣",
                         Rect::new(0.0, 0.0, icon_size, icon_size),
                         icon_size * 0.72,
-                        Color::rgba(202, 215, 233, 255),
+                        "overview-muted",
                     );
                     fallback.style.text.align = TextAlign::Center;
                     icon.children.push(fallback);
@@ -522,9 +505,8 @@ impl Overview {
                 search.width,
                 66.0 + rows.len() as f32 * 60.0,
             ),
-            INK,
-            18.0,
         );
+        panel.classes.push("overview-results".into());
         if matches!(self.apps, Apps::Ready(_)) && !matches.is_empty() {
             panel.children.push(text(
                 41,
@@ -534,7 +516,7 @@ impl Overview {
                 },
                 Rect::new(18.0, 10.0, (search.width - 150.0).max(0.0), 22.0),
                 13.0,
-                MUTED,
+                "overview-muted",
             ));
         }
         for (n, (index, label, image)) in rows.into_iter().enumerate() {
@@ -590,7 +572,7 @@ impl Overview {
                 },
                 Rect::new(18.0, 36.0, (search.width - 36.0).max(0.0), 24.0),
                 13.0,
-                MUTED,
+                "overview-muted",
             ));
         }
         if matches.len() > page_size {

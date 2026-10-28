@@ -1,7 +1,7 @@
 //! Native portal selection and sharing controls on Knave's retained UI toolkit.
 use base64::{Engine, engine::general_purpose::STANDARD};
 use knave_portal_api::{MAX_REQUEST, Operation, Reply, Request, SourceKind};
-use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, UiImage, toolkit::*};
+use knave_ui::{DisplayList, TextWrap, UiImage, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
 use std::{
     collections::BTreeSet,
@@ -11,6 +11,7 @@ const CANCEL: ElementId = ElementId(2);
 const CONFIRM: ElementId = ElementId(3);
 const SOURCE: u64 = 100;
 const TAB: u64 = 20;
+const PORTAL_STYLESHEET: &str = ".portal-selected { background-color: var(--surface-selected); }";
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Screen,
@@ -76,6 +77,9 @@ impl Picker {
             .collect();
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).map_err(|e| e.to_string())?;
         scene.set_theme(theme).map_err(|e| e.to_string())?;
+        scene
+            .set_stylesheet(PORTAL_STYLESHEET)
+            .map_err(|e| e.to_string())?;
         Ok(Self {
             theme,
             workspace_frozen: false,
@@ -125,7 +129,6 @@ impl Picker {
             gap: 16.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
         let title = match self.request.operation {
             Operation::Share => "Choose what to share",
             Operation::Screenshot => "Choose a screen to capture",
@@ -180,7 +183,7 @@ impl Picker {
                     .iter()
                     .any(|source| mode.matches(source.kind));
                 if self.mode == mode {
-                    button.style.background = Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                    button.classes.push("portal-selected".into());
                 }
                 tabs.children.push(button);
             }
@@ -217,8 +220,7 @@ impl Picker {
                         ..Default::default()
                     });
                     if selected {
-                        checkbox.style.background =
-                            Some(ShapePaint::fill(Color::rgba(48, 82, 126, 255)));
+                        checkbox.classes.push("portal-selected".into());
                     }
                     grid.children.push(checkbox);
                     continue;
@@ -230,11 +232,9 @@ impl Picker {
                         gap: 8.0,
                         ..Default::default()
                     });
-                card.style.background = Some(ShapePaint::fill(if selected {
-                    Color::rgba(48, 82, 126, 255)
-                } else {
-                    Color::rgba(38, 49, 65, 255)
-                }));
+                if selected {
+                    card.classes.push("portal-selected".into());
+                }
                 if let Some(image) = &self.images[index] {
                     card.children.push(
                         Element::new(
@@ -350,7 +350,6 @@ impl Picker {
             gap: 6.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(24, 31, 43, 255)));
         let app = if self.request.app_id.is_empty() {
             "Application"
         } else {
@@ -392,11 +391,11 @@ impl Picker {
             ..Default::default()
         });
         label.style.text.wrap = TextWrap::None;
-        label.style.text.color = if self.workspace_frozen {
-            Color::rgba(240, 190, 100, 255)
+        label.classes.push(if self.workspace_frozen {
+            "warning".into()
         } else {
-            Color::rgba(137, 207, 240, 255)
-        };
+            "highlight".into()
+        });
         root.children.push(label);
         root.children.push(
             Element::new(CONFIRM.0, Widget::Button("Stop sharing".into())).layout(Layout {
@@ -491,6 +490,9 @@ impl Application for Picker {
                 scene
                     .set_theme(self.theme)
                     .expect("built-in theme is valid");
+                scene
+                    .set_stylesheet(PORTAL_STYLESHEET)
+                    .expect("portal stylesheet is valid");
                 scene.layout(size, text);
                 let initial = (self.request.operation != Operation::Sharing).then_some(CANCEL);
                 let _ = scene.set_focus(focus.or(initial));
@@ -641,6 +643,22 @@ mod tests {
         picker.frame([820.0, 640.0], &mut Metrics);
         click(&mut picker, CONFIRM);
         assert!(picker.should_close());
+    }
+    #[test]
+    fn portal_surfaces_and_selection_follow_the_selected_theme() {
+        let mut picker = Picker::with_theme(request(), Theme::Light).unwrap();
+        picker.frame([820.0, 640.0], &mut Metrics);
+
+        let root = picker.scene.computed_style(ElementId(0)).unwrap();
+        assert_eq!(
+            root.style.background.and_then(|paint| paint.fill),
+            Some(knave_ui::Color::rgba(245, 246, 248, 255))
+        );
+        let selected_tab = picker.scene.computed_style(ElementId(TAB)).unwrap();
+        assert_eq!(
+            selected_tab.style.background.and_then(|paint| paint.fill),
+            Some(knave_ui::Color::rgba(8, 169, 216, 61))
+        );
     }
     #[test]
     fn sharing_stop_button_closes_without_source_selection() {

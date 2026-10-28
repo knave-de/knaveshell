@@ -75,6 +75,7 @@ fn selected_theme_survives_quick_settings_scene_recomposition() {
     assert_eq!(light.scene.theme(), Theme::Light);
     light.apply(QuickSettingsSnapshot {
         open: true,
+        light: true,
         ..Default::default()
     });
     light.frame([1280.0, 800.0], &mut Metrics);
@@ -97,6 +98,26 @@ fn all_pages_fit_narrow_and_short_outputs() {
             app.page = page;
             let list = app.frame(size, &mut Metrics).clone();
             assert_eq!(list.clear_color.alpha, 0);
+            assert_eq!(
+                app.theme,
+                if app.state.light {
+                    Theme::Light
+                } else {
+                    Theme::Dark
+                }
+            );
+            assert_eq!(
+                app.scene
+                    .computed_style(ElementId(0))
+                    .unwrap()
+                    .style
+                    .background
+                    .and_then(|paint| paint.fill)
+                    .unwrap()
+                    .alpha,
+                0,
+                "overlay root must stay transparent at {size:?}"
+            );
             let panel = app.scene.bounds(PANEL).unwrap();
             assert!(panel.x >= 0.0 && panel.y >= 0.0);
             assert!(panel.x + panel.width <= size[0]);
@@ -320,7 +341,7 @@ fn trimmed_subtitles_keep_status_and_charge_policy_text() {
 #[test]
 fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
     let mut app = app();
-    let list = app.frame([1280.0, 800.0], &mut Metrics).clone();
+    app.frame([1280.0, 800.0], &mut Metrics);
     let panel = app.scene.bounds(PANEL).unwrap();
     assert_eq!(panel.width, 340.0);
     let target = |predicate: fn(&Target) -> bool| {
@@ -351,7 +372,14 @@ fn compact_root_keeps_device_controls_visible_and_tiles_side_by_side() {
             "{rect:?} outside {panel:?}"
         );
     }
-    assert!(list.commands.iter().any(|c|matches!(c,knave_ui::DisplayCommand::Shape{paint,..} if paint.fill==Some(Color::rgba(32,36,39,255)))));
+    let panel_surface = app
+        .scene
+        .computed_style(PANEL)
+        .unwrap()
+        .style
+        .background
+        .expect("quick-settings card should receive its theme surface");
+    assert!(panel_surface.fill.is_some_and(|fill| fill.alpha > 0));
     click(&mut app, POWER);
     assert!(app.scene.interaction(ElementId(POWER)).unwrap().expanded);
 }
@@ -364,7 +392,7 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
     );
     for light in [false, true] {
         app.state.light = light;
-        app.dirty = true;
+        app.apply(app.state.clone());
         let keys = |list: &DisplayList| {
             list.commands
                 .iter()

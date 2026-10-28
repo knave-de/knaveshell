@@ -1,5 +1,8 @@
 use super::*;
-use knave_ui::{Border, CornerRadii, ShapePaint, TextAlign, TextWrap};
+use knave_ui::toolkit::{ButtonVariant, ComponentKind};
+use knave_ui::{ShapePaint, TextAlign, TextWrap};
+
+pub(super) const ACCESSIBILITY_STYLESHEET: &str = ".high-contrast card, .high-contrast alert { border-color: var(--text); border-width: 2px; } .notification-critical { border-left-color: var(--danger); } button.keyboard-focus-visible { outline-color: var(--accent); outline-width: 2px; }";
 
 fn fallback_icon() -> Option<knave_ui::UiImage> {
     knave_shell_ui::status_icons::bell()
@@ -8,66 +11,29 @@ fn fallback_icon() -> Option<knave_ui::UiImage> {
 pub(super) fn card_id(id: u64) -> u64 {
     1000 + id * 32
 }
-struct Palette {
-    surface: Color,
-    card: Color,
-    text: Color,
-    muted: Color,
-    accent: Color,
-    border: Color,
-    critical: Color,
-}
+struct Palette;
 impl Palette {
-    fn new(light: bool, contrast: bool) -> Self {
-        if light {
-            Self {
-                surface: Color::rgba(244, 247, 251, 255),
-                card: Color::rgba(255, 255, 255, 255),
-                text: Color::rgba(18, 28, 43, 255),
-                muted: Color::rgba(65, 80, 100, 255),
-                accent: Color::rgba(18, 91, 158, 255),
-                border: if contrast {
-                    Color::rgba(18, 28, 43, 255)
-                } else {
-                    Color::rgba(180, 193, 210, 210)
-                },
-                critical: Color::rgba(170, 35, 49, 255),
-            }
-        } else {
-            Self {
-                surface: Color::rgba(32, 36, 39, 255),
-                card: Color::rgba(41, 47, 51, 255),
-                text: Color::rgba(220, 224, 228, 255),
-                muted: Color::rgba(146, 155, 163, 255),
-                accent: Color::rgba(149, 185, 238, 255),
-                border: if contrast {
-                    Color::TEXT
-                } else {
-                    Color::rgba(255, 255, 255, 20)
-                },
-                critical: Color::rgba(255, 157, 162, 255),
-            }
-        }
+    fn new() -> Self {
+        Self
     }
     fn style(&self, e: &mut Element) {
-        e.style.text.color = self.text;
         e.style.text.wrap = TextWrap::WordOrGlyph;
-        e.style.hover = self.surface;
-        e.style.pressed = self.card;
-        e.style.focus = self.accent;
-        e.style.radii = Some(CornerRadii::uniform(7.0));
     }
     fn panel(&self, id: u64) -> Element {
         let mut e = Element::new(id, Widget::Panel);
         self.style(&mut e);
+        e.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         e
     }
     fn text(&self, id: u64, value: String, muted: bool) -> Element {
-        let mut e = Element::new(id, Widget::Text(value));
+        let mut e = if muted {
+            Element::subtitle(id, value)
+        } else {
+            Element::new(id, Widget::Text(value))
+        };
         self.style(&mut e);
         e.style.text.font_size = 12.0;
         e.style.text.line_height = 16.0;
-        e.style.text.color = if muted { self.muted } else { self.text };
         e
     }
     fn close_button(&self, id: u64, keyboard_focus: bool) -> Element {
@@ -79,17 +45,10 @@ impl Palette {
         self.style(&mut e);
         e.style.text.font_size = 11.0;
         e.style.text.align = TextAlign::Center;
-        e.style.hover = Color::rgba(128, 128, 128, 40);
-        e.style.pressed = Color::rgba(128, 128, 128, 70);
-        e.style.focus = if keyboard_focus {
-            self.muted
-        } else {
-            Color::rgba(0, 0, 0, 0)
-        };
-        e.style.background = Some(ShapePaint {
-            radii: CornerRadii::uniform(6.0),
-            ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
-        });
+        e.button_variant = Some(ButtonVariant::Ghost);
+        if keyboard_focus {
+            e.classes.push("keyboard-focus-visible".into());
+        }
         e
     }
     fn page_button(&self, id: u64, value: &str) -> Element {
@@ -108,14 +67,6 @@ impl Palette {
         self.style(&mut e);
         e.style.text.font_size = 11.0;
         e.style.text.line_height = 14.0;
-        e.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: self.border,
-                width: 1.0,
-            }),
-            radii: CornerRadii::uniform(6.0),
-            ..ShapePaint::fill(self.card)
-        });
         e
     }
     fn text_button(&self, id: u64, value: &str) -> Element {
@@ -126,15 +77,9 @@ impl Palette {
             ..Default::default()
         });
         self.style(&mut e);
-        e.style.text.color = self.muted;
         e.style.text.font_size = 10.0;
         e.style.text.line_height = 13.0;
-        e.style.hover = Color::rgba(255, 255, 255, 16);
-        e.style.pressed = Color::rgba(255, 255, 255, 28);
-        e.style.background = Some(ShapePaint {
-            radii: CornerRadii::uniform(4.0),
-            ..ShapePaint::fill(Color::rgba(0, 0, 0, 0))
-        });
+        e.button_variant = Some(ButtonVariant::Ghost);
         e
     }
 }
@@ -151,7 +96,7 @@ fn panel_geometry(width: f32) -> (f32, f32) {
 }
 impl Notifications {
     pub(super) fn compose(&mut self) -> Element {
-        let p = Palette::new(self.state.light, self.state.high_contrast);
+        let p = Palette::new();
         self.targets.clear();
         let width = self.size[0].max(1.0);
         let height = self.size[1].max(1.0);
@@ -160,6 +105,10 @@ impl Notifications {
         let mut root = p.panel(0);
         root.layout.flow = Flow::Overlay;
         root.layout.height = Length::Fill;
+        root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
+        if self.state.high_contrast {
+            root.classes.push("high-contrast".into());
+        }
         let mut panel = p.panel(PANEL.0).layout(Layout {
             width: Length::Px(panel_width),
             height: if self.state.center_open {
@@ -173,14 +122,8 @@ impl Notifications {
             ..Default::default()
         });
         if self.state.center_open {
-            panel.style.background = Some(ShapePaint {
-                border: Some(Border {
-                    color: p.border,
-                    width: 1.0,
-                }),
-                radii: CornerRadii::uniform(7.0),
-                ..ShapePaint::fill(p.surface)
-            });
+            panel.component = Some(ComponentKind::Card);
+            panel.style.background = None;
             let mut heading = p.panel(10).layout(Layout {
                 flow: Flow::Row,
                 align: Align::Center,
@@ -205,14 +148,8 @@ impl Notifications {
                 padding: 12.0,
                 ..Default::default()
             });
-            dnd.style.background = Some(ShapePaint {
-                border: Some(Border {
-                    color: p.border,
-                    width: 1.0,
-                }),
-                radii: CornerRadii::uniform(7.0),
-                ..ShapePaint::fill(p.card)
-            });
+            dnd.component = Some(ComponentKind::Card);
+            dnd.style.background = None;
             let mut dnd_copy = p.panel(21).layout(Layout {
                 height: Length::Auto,
                 ..Default::default()
@@ -282,6 +219,7 @@ impl Notifications {
             read.enabled = self.state.history().next().is_some();
             controls.children.push(read);
             let mut clear = p.text_button(CLEAR, "Clear all");
+            clear.button_variant = Some(ButtonVariant::Destructive);
             clear.layout.width = Length::Px(64.0);
             clear.enabled = self.state.history().next().is_some();
             controls.children.push(clear);
@@ -396,25 +334,22 @@ impl Notifications {
     }
     fn card(&mut self, n: &Notification, p: &Palette, banner: bool) -> Element {
         let id = card_id(n.id);
-        let mut card = p.panel(id).layout(Layout {
-            padding: 12.0,
-            gap: 7.0,
-            ..Default::default()
-        });
-        card.style.background = Some(ShapePaint {
-            border: Some(Border {
-                color: if n.urgency == 2 {
-                    p.critical
-                } else if n.unread {
-                    p.accent
-                } else {
-                    p.border
-                },
-                width: if n.unread || n.urgency == 2 { 2.0 } else { 1.0 },
-            }),
-            radii: CornerRadii::uniform(7.0),
-            ..ShapePaint::fill(p.card)
-        });
+        let mut card = p
+            .panel(id)
+            .component(if n.urgency == 2 || n.unread {
+                ComponentKind::Alert
+            } else {
+                ComponentKind::Card
+            })
+            .layout(Layout {
+                padding: 12.0,
+                gap: 7.0,
+                ..Default::default()
+            });
+        card.style.background = None;
+        if n.urgency == 2 {
+            card.classes.push("notification-critical".into());
+        }
         let mut head = p.panel(id + 1).layout(Layout {
             flow: Flow::Row,
             align: Align::Center,
@@ -532,23 +467,18 @@ impl Notifications {
         if let Some(value) = n.progress {
             card.children
                 .push(p.text(id + 8, format!("Progress: {value}%"), true));
-            let mut track = p.panel(id + 9).layout(Layout {
-                height: Length::Px(4.0),
-                flow: Flow::Overlay,
-                ..Default::default()
-            });
-            track.style.background = Some(ShapePaint::fill(p.border));
-            // Percentage is also printed, so it remains clear without relying on color.
-            let (_, panel_width) = panel_geometry(self.size[0]);
-            let available = (panel_width - if banner { 24.0 } else { 48.0 }).max(0.0);
-            let mut fill = p.panel(id + 10).layout(Layout {
-                width: Length::Px(available * f32::from(value) / 100.0),
-                height: Length::Fill,
-                ..Default::default()
-            });
-            fill.style.background = Some(ShapePaint::fill(p.accent));
-            track.children.push(fill);
-            card.children.push(track);
+            card.children.push(
+                Element::new(
+                    id + 9,
+                    Widget::Progress {
+                        value: Some(f64::from(value) / 100.0),
+                    },
+                )
+                .layout(Layout {
+                    height: Length::Px(4.0),
+                    ..Default::default()
+                }),
+            );
         }
         if n.live {
             for (index, action) in n.actions.iter().take(MAX_ACTIONS).enumerate() {

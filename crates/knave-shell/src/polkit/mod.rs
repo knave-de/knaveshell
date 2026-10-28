@@ -2,7 +2,7 @@
 mod backend;
 mod cache;
 pub use cache::status as cache_status;
-use knave_ui::{Color, DisplayList, ShapePaint, TextWrap, toolkit::*};
+use knave_ui::{DisplayList, TextWrap, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, Waker};
 use std::sync::{Arc, Mutex};
 use zeroize::{Zeroize, Zeroizing};
@@ -89,7 +89,6 @@ impl Agent {
             gap: 12.0,
             ..Default::default()
         });
-        root.style.background = Some(ShapePaint::fill(Color::rgba(20, 29, 42, 255)));
         let text = |id, value: String| {
             let mut element = Element::new(id, Widget::Text(value));
             element.style.text.wrap = TextWrap::WordOrGlyph;
@@ -130,7 +129,6 @@ impl Agent {
                 Widget::Button(if value.is_empty() { " ".into() } else { value }),
             );
             field.layout.height = Length::Px(44.0);
-            field.style.background = Some(ShapePaint::fill(Color::rgba(31, 43, 60, 255)));
             content.children.push(field);
         }
         if let Some(retained) = self.state.retention {

@@ -17,9 +17,9 @@ license = "MIT"
 knave-shell-ui = { path = "crates/knave-shell-ui" }
 knave-apps = { path = "crates/knave-apps" }
 knave-icons = { path = "crates/knave-icons" }
-knave-renderer = { git = "https://github.com/knave-de/knave-ui.git", rev = "89a8ed69a73c39eb845a1d1ae67dea55c1464deb" }
+knave-renderer = { git = "https://github.com/knave-de/knave-ui.git", rev = "cbc98fc81874edf63a66fd88c191fea7ce751b09" }
 knave-wayland = { path = "crates/knave-wayland" }
-knave-ui = { git = "https://github.com/knave-de/knave-ui.git", rev = "89a8ed69a73c39eb845a1d1ae67dea55c1464deb" }
+knave-ui = { git = "https://github.com/knave-de/knave-ui.git", rev = "cbc98fc81874edf63a66fd88c191fea7ce751b09" }
 base64 = "0.22"
 png = "0.18"
 wgpu = "30.0.1"

@@ -1058,6 +1058,54 @@ fn overview_backdrop_preserves_wallpaper_visibility() {
 }
 
 #[test]
+fn overview_controls_follow_the_selected_toolkit_theme() {
+    let mut app = Overview::with_theme(knave_ui::toolkit::Theme::Light);
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+
+    let search = app.scene.computed_style(SEARCH).unwrap();
+    let search_paint = search.style.background.as_ref().unwrap();
+    assert_eq!(
+        search_paint.fill,
+        Some(knave_ui::Color::rgba(232, 237, 240, 255))
+    );
+    assert_eq!(
+        search.outline.map(|outline| outline.color),
+        Some(knave_ui::Color::rgba(175, 187, 196, 255))
+    );
+    assert_eq!(search.style.radius, 27.0);
+    assert_eq!(
+        app.scene
+            .computed_style(ElementId(3))
+            .unwrap()
+            .style
+            .text
+            .color,
+        knave_ui::Color::rgba(53, 65, 74, 255)
+    );
+
+    let selected_card = app
+        .scene
+        .computed_style(ElementId(0x100_0000_0000 + 2 * 32))
+        .unwrap();
+    assert_eq!(
+        selected_card
+            .style
+            .background
+            .as_ref()
+            .and_then(|paint| paint.fill),
+        Some(knave_ui::Color::rgba(0, 0, 0, 0)),
+        "workspace content remains visible through the compositor preview"
+    );
+    assert_eq!(
+        selected_card.outline.unwrap().color,
+        knave_ui::Color::rgba(8, 169, 216, 255)
+    );
+    assert_eq!(selected_card.outline.unwrap().width, 1.0);
+    assert_eq!(selected_card.style.radius, 24.0);
+}
+
+#[test]
 fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
     let mut app = app();
     app.frame([1280.0, 800.0], &mut Metrics);

@@ -85,6 +85,9 @@ impl QuickSettings {
     pub fn with_theme(theme: Theme) -> Self {
         let mut scene = Scene::new(Element::new(0, Widget::Panel)).unwrap();
         scene.set_theme(theme).expect("built-in theme is valid");
+        scene
+            .set_stylesheet(view::ACCESSIBILITY_STYLESHEET)
+            .expect("panel accessibility stylesheet is valid");
         Self {
             theme,
             state: Default::default(),
@@ -127,6 +130,11 @@ impl QuickSettings {
         }
     }
     fn apply(&mut self, mut state: QuickSettingsSnapshot) {
+        self.theme = if state.light {
+            Theme::Light
+        } else {
+            Theme::Dark
+        };
         if self.closing {
             if state.open {
                 state.open = false;
