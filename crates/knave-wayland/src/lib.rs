@@ -1164,7 +1164,7 @@ impl Runtime {
                 self.scene = bar.scene;
                 self.render_list = bar.display;
             } else {
-                self.scene = self.role.scene(
+                let mut scene = self.role.scene(
                     self.revision,
                     self.width as f32,
                     self.height as f32,
@@ -1175,6 +1175,8 @@ impl Runtime {
                         previews: &self.previews,
                     },
                 );
+                scene.set_theme_policy(self.theme_policy);
+                self.scene = scene;
                 self.render_list = self.scene.display_list();
             }
             self.scene_dirty = false;

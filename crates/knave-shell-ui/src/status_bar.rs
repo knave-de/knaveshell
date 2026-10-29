@@ -122,6 +122,7 @@ impl StatusBar {
         policy: knave_ui::toolkit::ThemePolicy,
         css: &str,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.scene.set_theme_policy(policy);
         self.toolkit_scene
             .replace(crate::styles::root(
                 self.toolkit_root.clone(),
