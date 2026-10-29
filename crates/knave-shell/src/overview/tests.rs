@@ -1094,6 +1094,33 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
 }
 
 #[test]
+fn workspace_dots_use_primary_for_current_and_secondary_for_occupied() {
+    let app = app();
+    let style = |workspace: u64| {
+        app.scene
+            .computed_style(ElementId(0x200_0000_0000 + workspace))
+            .unwrap()
+            .style
+            .background
+            .and_then(|paint| paint.fill)
+    };
+    let variant_fill = |variant| {
+        let mut scene = Scene::new(Element::action_button(1, "", variant)).unwrap();
+        scene.set_theme(Theme::Dark).unwrap();
+        scene
+            .computed_style(ElementId(1))
+            .unwrap()
+            .style
+            .background
+            .and_then(|paint| paint.fill)
+    };
+
+    assert_eq!(style(2), variant_fill(ButtonVariant::Primary));
+    assert_eq!(style(1), variant_fill(ButtonVariant::Secondary));
+    assert_eq!(style(3), variant_fill(ButtonVariant::Secondary));
+}
+
+#[test]
 fn workspace_panes_fill_cards_without_reserved_empty_shelf() {
     let mut app = app();
     app.frame([1280.0, 800.0], &mut Metrics);
