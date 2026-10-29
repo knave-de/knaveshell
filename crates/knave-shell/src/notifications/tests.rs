@@ -167,6 +167,9 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                         | DisplayCommand::Text { bounds, clip, .. }
                         | DisplayCommand::RichText { bounds, clip, .. }
                         | DisplayCommand::Image { bounds, clip, .. } => (*bounds, *clip),
+                        DisplayCommand::BeginOpacity { .. } | DisplayCommand::EndOpacity => {
+                            continue;
+                        }
                     };
                     assert!(
                         r.x.is_finite() && r.y.is_finite() && r.width >= 0.0 && r.height >= 0.0

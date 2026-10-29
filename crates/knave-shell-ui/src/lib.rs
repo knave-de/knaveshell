@@ -839,6 +839,7 @@ mod projection_tests {
                 DisplayCommand::RichText { spans, .. } => {
                     spans.iter().all(|span| span.color.is_none_or(grayscale))
                 }
+                DisplayCommand::BeginOpacity { .. } | DisplayCommand::EndOpacity => true,
             }
         }));
     }
