@@ -160,49 +160,6 @@ impl Overview {
                 ));
             }
             root.children.push(self.workspace_card(ws, rect, true));
-            let count = self.snapshot.as_ref().unwrap().workspaces.len();
-            let first = index.saturating_sub(4).min(count.saturating_sub(9));
-            let dots: Vec<_> = self
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .workspaces
-                .iter()
-                .skip(first)
-                .take(9)
-                .map(|w| (w.workspace, w.window_count > 0))
-                .collect();
-            let dot_width = dots.len() as f32 * 24.0;
-            for (n, (workspace, occupied)) in dots.into_iter().enumerate() {
-                let id = 0x200_0000_0000 + u64::from(workspace.0);
-                let mut dot = control(
-                    id,
-                    "",
-                    Rect::new(
-                        (width - dot_width) / 2.0 + n as f32 * 24.0,
-                        y + preview_height + 20.0,
-                        16.0,
-                        16.0,
-                    ),
-                );
-                dot.layout.padding_edges = None;
-                dot.button_variant = Some(if workspace == ws {
-                    ButtonVariant::Primary
-                } else if occupied {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Ghost
-                });
-                dot.classes.push(if workspace == ws {
-                    "overview-current-dot".into()
-                } else {
-                    "overview-other-dot".into()
-                });
-                dot.tooltip = Some(format!("Workspace {}", workspace.0));
-                self.targets
-                    .insert(ElementId(id), Target::Workspace(workspace));
-                root.children.push(dot);
-            }
             let prev = index
                 .checked_sub(1)
                 .and_then(|i| self.snapshot.as_ref()?.workspaces.get(i))

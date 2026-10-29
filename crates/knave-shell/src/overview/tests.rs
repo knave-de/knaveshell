@@ -465,7 +465,6 @@ fn failed_navigation_and_repeated_input_preserve_confirmed_workspace() {
 fn workspace_controls_switch_without_hiding() {
     for id in [
         ElementId(21),
-        ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
         bar_target(
             &app(),
@@ -1094,30 +1093,21 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
 }
 
 #[test]
-fn workspace_dots_use_primary_for_current_and_secondary_for_occupied() {
+fn overview_uses_preview_and_arrows_without_redundant_workspace_dots() {
     let app = app();
-    let style = |workspace: u64| {
+    assert!(app.scene.bounds(ElementId(21)).is_some());
+    assert!(
         app.scene
-            .computed_style(ElementId(0x200_0000_0000 + workspace))
-            .unwrap()
-            .style
-            .background
-            .and_then(|paint| paint.fill)
-    };
-    let variant_fill = |variant| {
-        let mut scene = Scene::new(Element::action_button(1, "", variant)).unwrap();
-        scene.set_theme(Theme::Dark).unwrap();
-        scene
-            .computed_style(ElementId(1))
-            .unwrap()
-            .style
-            .background
-            .and_then(|paint| paint.fill)
-    };
-
-    assert_eq!(style(2), variant_fill(ButtonVariant::Primary));
-    assert_eq!(style(1), variant_fill(ButtonVariant::Secondary));
-    assert_eq!(style(3), variant_fill(ButtonVariant::Secondary));
+            .bounds(ElementId(0x100_0000_0000 + 3 * 32))
+            .is_some()
+    );
+    for workspace in 1..=3 {
+        assert!(
+            app.scene
+                .bounds(ElementId(0x200_0000_0000 + workspace))
+                .is_none()
+        );
+    }
 }
 
 #[test]
@@ -1520,12 +1510,8 @@ fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
         .unwrap();
     assert!(search.y >= STATUS_BAR_HEIGHT);
     assert!(card.height >= 550.0);
-    // The card no longer reserves the previous 100-pixel footer band.
-    let dot = app
-        .scene
-        .bounds(ElementId(0x200_0000_0000 + 2))
-        .expect("current workspace dot");
-    assert!(dot.y + dot.height <= 800.0 - 24.0);
+    // The overview no longer renders its redundant workspace dot row.
+    assert!(app.scene.bounds(ElementId(0x200_0000_0000 + 2)).is_none());
 }
 
 #[test]
