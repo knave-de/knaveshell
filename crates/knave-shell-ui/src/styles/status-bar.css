@@ -5,6 +5,10 @@
     text-align: center;
 }
 
+.statusbar__workspace-label--active {
+    color: var(--on-accent);
+}
+
 .statusbar__focused-title,
 .statusbar__applet-label,
 .statusbar__content {

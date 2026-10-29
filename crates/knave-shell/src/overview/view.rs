@@ -170,10 +170,10 @@ impl Overview {
                 .iter()
                 .skip(first)
                 .take(9)
-                .map(|w| w.workspace)
+                .map(|w| (w.workspace, w.window_count > 0))
                 .collect();
             let dot_width = dots.len() as f32 * 24.0;
-            for (n, workspace) in dots.into_iter().enumerate() {
+            for (n, (workspace, occupied)) in dots.into_iter().enumerate() {
                 let id = 0x200_0000_0000 + u64::from(workspace.0);
                 let mut dot = control(
                     id,
@@ -186,6 +186,13 @@ impl Overview {
                     ),
                 );
                 dot.layout.padding_edges = None;
+                dot.button_variant = Some(if workspace == ws {
+                    ButtonVariant::Primary
+                } else if occupied {
+                    ButtonVariant::Secondary
+                } else {
+                    ButtonVariant::Ghost
+                });
                 dot.classes.push(if workspace == ws {
                     "overview-current-dot".into()
                 } else {
