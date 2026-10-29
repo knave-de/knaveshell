@@ -18,15 +18,18 @@ Applications with background work receive a cloneable `Waker` through
 `Application::set_waker` before the first frame. `wake()` uses the same one-slot
 channel as the host's workers, so completed work schedules one draw without a
 timer, and the application reports finished results through `needs_frame`.
-Keyboard repeat uses the seat's
-repeat settings and an owned event-loop timer. Integer output scale updates the
-buffer and display transforms while scene coordinates stay logical.
+Keyboard repeat uses the seat's repeat settings and an owned event-loop timer.
+When both `wp_fractional_scale_v1` and `wp_viewporter` are available, the host
+renders buffers at the preferred 1/120th scale, leaves `wl_surface` buffer scale
+at 1, and sets the viewport destination to the configured logical surface size.
+Scene, layer configure and pointer coordinates stay logical. Otherwise it uses
+the compositor's integer `wl_output.scale` and buffer-scale fallback.
 
 The first available seat owns input. Capability/seat removal cancels gestures,
 releases proxies and cancels clipboard transfers. The host currently has one
-surface on the compositor-selected output. Per-output hosts, fractional-scale
-protocol support, native popup surfaces and concurrent seats need a later
-host extension; they are not simulated by the scene toolkit.
+surface on the compositor-selected output. Per-output hosts, native popup
+surfaces and concurrent seats need a later host extension; they are not
+simulated by the scene toolkit.
 
 ## Pointer cursors
 

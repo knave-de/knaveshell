@@ -417,10 +417,14 @@ impl Picker {
     }
 }
 impl Application for Picker {
-    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+    fn theme_policy_changed(
+        &mut self,
+        policy: ThemePolicy,
+        css: &str,
+    ) -> Result<(), StylesheetError> {
         self.scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
-        self.theme = theme;
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = policy.scheme;
         self.dirty = true;
         Ok(())
     }
@@ -502,10 +506,11 @@ impl Application for Picker {
         if self.dirty || self.size != size {
             let focus = self.scene.focus();
             let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
+            let policy = self.scene.theme_policy();
             if let Ok(mut scene) = Scene::new(self.compose()) {
                 scene
-                    .set_theme_stylesheets(
-                        self.theme,
+                    .set_theme_policy_stylesheets(
+                        policy,
                         knave_shell_ui::styles::STYLESHEET,
                         &user_theme_css,
                     )

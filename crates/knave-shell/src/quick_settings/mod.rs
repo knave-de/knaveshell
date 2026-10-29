@@ -90,7 +90,8 @@ impl QuickSettings {
             .expect("panel accessibility stylesheet is valid");
         Self {
             theme,
-            icon_color: view::text_color(theme, "").expect("default theme stylesheet is valid"),
+            icon_color: view::text_color(theme.into(), "")
+                .expect("default theme stylesheet is valid"),
             state: Default::default(),
             client: None,
             scene,
@@ -345,11 +346,15 @@ impl QuickSettings {
     }
 }
 impl Application for QuickSettings {
-    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+    fn theme_policy_changed(
+        &mut self,
+        policy: ThemePolicy,
+        css: &str,
+    ) -> Result<(), StylesheetError> {
         self.scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
-        let icon_color = view::text_color(theme, css)?;
-        self.theme = theme;
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, css)?;
+        let icon_color = view::text_color(policy, css)?;
+        self.theme = policy.scheme;
         self.icon_color = icon_color;
         self.dirty = true;
         Ok(())

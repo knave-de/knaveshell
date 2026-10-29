@@ -4,7 +4,10 @@ pub mod status_bar;
 pub mod status_icons;
 pub mod styles;
 use knave_desktop_api::{DesktopSnapshot, WindowId, WindowSummary, WorkspaceId};
-use knave_ui::{Color, DisplayList, DisplayListBuilder, ImageStyle, Rect, TextStyle, UiImage};
+use knave_ui::{
+    Color, DisplayList, DisplayListBuilder, ImageStyle, Rect, TextStyle, UiImage,
+    toolkit::{Chroma, Contrast, Theme, ThemePolicy},
+};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspacePreviewImage {
     pub workspace: WorkspaceId,
@@ -56,7 +59,9 @@ pub enum UiNode {
 pub struct UiScene {
     revision: u64,
     clear_color: Color,
+    theme_policy: ThemePolicy,
     nodes: Vec<UiNode>,
+    brand_node_indices: Vec<usize>,
     targets: Vec<HitTarget>,
     search_actions: Vec<UiAction>,
 }
@@ -154,7 +159,9 @@ impl UiScene {
         Self {
             revision,
             clear_color: Color::BACKGROUND,
+            theme_policy: ThemePolicy::default(),
             nodes: Vec::new(),
+            brand_node_indices: Vec::new(),
             targets: Vec::new(),
             search_actions: Vec::new(),
         }
@@ -170,6 +177,23 @@ impl UiScene {
 
     pub fn set_clear_color(&mut self, color: Color) {
         self.clear_color = color;
+    }
+
+    pub fn set_theme_policy(&mut self, policy: ThemePolicy) {
+        self.theme_policy = policy;
+        if !self.brand_node_indices.is_empty()
+            && let Some(image) = brand::image_for(policy)
+        {
+            for index in &self.brand_node_indices {
+                if let Some(UiNode::Image { image: mark, .. }) = self.nodes.get_mut(*index) {
+                    *mark = image.clone();
+                }
+            }
+        }
+    }
+
+    pub fn theme_policy(&self) -> ThemePolicy {
+        self.theme_policy
     }
 
     pub fn nodes(&self) -> &[UiNode] {
@@ -290,6 +314,7 @@ impl UiScene {
         // The icon-only Knave mark opens the Overview; no wordmark is painted.
         scene.target(Rect::new(0.0, 0.0, 40.0, height), UiAction::OpenOverview);
         if let Some(image) = brand::image() {
+            scene.brand_node_indices.push(scene.nodes.len());
             scene.push(UiNode::Image {
                 id: NodeId(3),
                 bounds: Rect::new(11.0, 7.0, 22.0, 22.0),
@@ -340,6 +365,13 @@ impl UiScene {
                 }
             }
         }
+        let node_offset = self.nodes.len();
+        self.brand_node_indices.extend(
+            status_bar
+                .brand_node_indices
+                .iter()
+                .map(|index| node_offset + index),
+        );
         self.nodes.append(&mut status_bar.nodes);
         self.targets.append(&mut status_bar.targets);
     }
@@ -515,6 +547,29 @@ mod tests {
                 .iter()
                 .any(|node| matches!(node, UiNode::Image { .. }))
         );
+    }
+
+    #[test]
+    fn overview_theme_policy_changes_only_its_registered_brand_node() {
+        let app_image = UiImage::from_rgba(1, 1, vec![12, 34, 56, 255]).unwrap();
+        let mut scene = UiScene::overview(1, 800.0, 600.0);
+        scene.push(UiNode::Image {
+            id: NodeId(90),
+            bounds: Rect::new(1.0, 1.0, 1.0, 1.0),
+            image: app_image.clone(),
+        });
+        let policy = ThemePolicy::new(Theme::Light, Contrast::High, Chroma::Monochrome);
+        scene.set_theme_policy(policy);
+
+        let expected = brand::image_for(policy).unwrap();
+        assert!(scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id: NodeId(10_003), image, .. }
+                if image.cache_key() == expected.cache_key()
+        )));
+        assert!(scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id: NodeId(90), image, .. }
+                if image.cache_key() == app_image.cache_key()
+        )));
     }
 
     #[test]
@@ -709,11 +764,17 @@ mod tests {
 impl UiScene {
     pub fn display_list(&self) -> DisplayList {
         let scene = self;
-        let mut builder = DisplayListBuilder::new(scene.revision(), scene.clear_color());
+        let mut builder = DisplayListBuilder::new(
+            scene.revision(),
+            appearance_color(scene.clear_color(), scene.theme_policy, ColorRole::Surface),
+        );
         for node in scene.nodes() {
             match node {
                 UiNode::Panel { bounds, color, .. } => {
-                    builder.fill_rect(*bounds, *color);
+                    builder.fill_rect(
+                        *bounds,
+                        appearance_color(*color, scene.theme_policy, ColorRole::Surface),
+                    );
                 }
                 UiNode::Label {
                     bounds,
@@ -725,7 +786,7 @@ impl UiScene {
                         *bounds,
                         text.clone(),
                         TextStyle {
-                            color: *color,
+                            color: appearance_color(*color, scene.theme_policy, ColorRole::Text),
                             ..TextStyle::default()
                         },
                     );
@@ -741,10 +802,125 @@ impl UiScene {
     }
 }
 
+#[derive(Clone, Copy)]
+enum ColorRole {
+    Surface,
+    Text,
+}
+
+fn appearance_color(color: Color, policy: ThemePolicy, role: ColorRole) -> Color {
+    if policy.contrast == Contrast::High {
+        if matches!(role, ColorRole::Text) {
+            return match policy.scheme {
+                Theme::Dark => Color::rgba(255, 255, 255, color.alpha),
+                Theme::Light => Color::rgba(0, 0, 0, color.alpha),
+            };
+        }
+        if color.alpha == 0 {
+            return color;
+        }
+        if color == Color::ACCENT {
+            return match (policy.scheme, policy.chroma) {
+                (Theme::Dark, Chroma::FullColor) => Color::rgba(0, 255, 255, color.alpha),
+                (Theme::Light, Chroma::FullColor) => Color::rgba(0, 95, 204, color.alpha),
+                (_, Chroma::Monochrome) => Color::rgba(128, 128, 128, color.alpha),
+            };
+        }
+        return match policy.scheme {
+            Theme::Dark => Color::rgba(0, 0, 0, color.alpha),
+            Theme::Light => Color::rgba(255, 255, 255, color.alpha),
+        };
+    }
+
+    if policy.chroma == Chroma::Monochrome {
+        let gray = ((u32::from(color.red) * 2126
+            + u32::from(color.green) * 7152
+            + u32::from(color.blue) * 722)
+            / 10_000) as u8;
+        Color::rgba(gray, gray, gray, color.alpha)
+    } else {
+        color
+    }
+}
+
 #[cfg(test)]
 mod projection_tests {
     use super::*;
     use knave_ui::DisplayCommand;
+
+    #[test]
+    fn monochrome_policy_grays_shell_chrome_and_preserves_image_content() {
+        let mut scene = UiScene::new(1);
+        scene.set_clear_color(Color::rgba(8, 12, 18, 255));
+        scene.push(UiNode::Panel {
+            id: NodeId(1),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            color: Color::rgba(26, 36, 48, 255),
+        });
+        scene.push(UiNode::Label {
+            id: NodeId(2),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            color: Color::rgba(93, 173, 226, 255),
+            text: "Shell label".into(),
+        });
+        let image = UiImage::from_rgba(1, 1, vec![93, 173, 226, 255]).unwrap();
+        scene.push(UiNode::Image {
+            id: NodeId(3),
+            bounds: Rect::new(0.0, 0.0, 1.0, 1.0),
+            image: image.clone(),
+        });
+        scene.set_theme_policy(ThemePolicy::new(
+            Theme::Dark,
+            Contrast::Standard,
+            Chroma::Monochrome,
+        ));
+        let list = scene.display_list();
+        let grayscale = |color: Color| color.red == color.green && color.green == color.blue;
+        assert!(grayscale(list.clear_color));
+        assert!(list.commands.iter().all(|command| {
+            match command {
+                DisplayCommand::Shape { paint, .. } => paint.fill.is_none_or(grayscale),
+                DisplayCommand::Text { style, .. } => grayscale(style.color),
+                DisplayCommand::Image { image: painted, .. } => painted == &image,
+                DisplayCommand::RichText { spans, .. } => {
+                    spans.iter().all(|span| span.color.is_none_or(grayscale))
+                }
+                DisplayCommand::BeginOpacity { .. } | DisplayCommand::EndOpacity => true,
+            }
+        }));
+    }
+
+    #[test]
+    fn high_contrast_policy_uses_extreme_shell_text_and_surface_colors() {
+        let mut scene = UiScene::new(1);
+        scene.push(UiNode::Panel {
+            id: NodeId(1),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            color: Color::ACCENT,
+        });
+        scene.push(UiNode::Label {
+            id: NodeId(2),
+            bounds: Rect::new(0.0, 0.0, 10.0, 10.0),
+            color: Color::rgba(1, 2, 3, 255),
+            text: "Shell label".into(),
+        });
+        scene.set_theme_policy(ThemePolicy::new(
+            Theme::Dark,
+            Contrast::High,
+            Chroma::FullColor,
+        ));
+        let list = scene.display_list();
+        assert!(matches!(
+            list.commands.first(),
+            Some(DisplayCommand::Shape { paint, .. })
+                if paint.fill == Some(Color::rgba(0, 255, 255, 255))
+        ));
+        assert!(matches!(
+            list.commands.get(1),
+            Some(DisplayCommand::Text { style, .. })
+                if style.color == Color::rgba(255, 255, 255, 255)
+        ));
+    }
     #[test]
     fn scene_projection_preserves_order_revision_and_clear_color() {
         let mut scene = UiScene::new(11);

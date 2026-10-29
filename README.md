@@ -110,7 +110,9 @@ packaging. The installer also writes the README below the selected prefix.
 The supported runtime is Rust/wgpu over Wayland layer-shell. Overview uses the
 retained UI toolkit; both hosts render the shared status bar display list. Individually interactive
 window previews, fullscreen-hidden grouping, application launching/icons,
-fractional scaling and multiple-output hosting remain future work.
+and multiple-output hosting remain future work. Fractional scale is consumed
+through Wayland's fractional-scale and viewporter protocols when the compositor
+advertises both; integer-scale compositors use the existing fallback.
 
 ## Workspace
 

@@ -362,9 +362,13 @@ impl Menu {
     }
 }
 impl Application for Menu {
-    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+    fn theme_policy_changed(
+        &mut self,
+        policy: ThemePolicy,
+        css: &str,
+    ) -> Result<(), StylesheetError> {
         self.scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, css)?;
         self.dirty = true;
         Ok(())
     }

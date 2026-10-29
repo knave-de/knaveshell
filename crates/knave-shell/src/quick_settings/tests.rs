@@ -384,7 +384,7 @@ fn profile_menu_and_bundled_icons_have_bounded_reusable_state() {
         matches!(app.scene.widget(ElementId(PROFILE)),Some(Widget::Menu{items,..}) if items.len()==3)
     );
     for light in [false, true] {
-        app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+        app.theme_policy_changed((if light { Theme::Light } else { Theme::Dark }).into(), "")
             .expect("quick-settings theme should apply");
         app.state.light = light;
         app.apply(app.state.clone());
@@ -623,7 +623,8 @@ fn shell_panels_do_not_add_decorative_outlines() {
 fn full_named_themes_cannot_paint_the_fullscreen_positioning_host() {
     for theme in [Theme::Dark, Theme::Light] {
         let mut app = app();
-        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        app.theme_policy_changed(theme.into(), theme.stylesheet())
+            .unwrap();
         let list = app.frame([1280.0, 800.0], &mut Metrics);
         assert!(
             !list.commands.iter().any(|command| matches!(command,
