@@ -284,7 +284,10 @@ fn is_charging(status: &str) -> bool {
     status.eq_ignore_ascii_case("charging")
 }
 
-pub(super) fn text_color(theme: Theme, user_theme_css: &str) -> Result<Color, StylesheetError> {
+pub(super) fn text_color(
+    policy: ThemePolicy,
+    user_theme_css: &str,
+) -> Result<Color, StylesheetError> {
     let mut scene = Scene::new(knave_shell_ui::styles::root(
         Element::new(
             1,
@@ -294,10 +297,14 @@ pub(super) fn text_color(theme: Theme, user_theme_css: &str) -> Result<Color, St
             }),
         )
         .class("quick-settings-icon"),
-        theme,
+        policy.scheme,
     ))
     .expect("icon text style scene is valid");
-    scene.set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, user_theme_css)?;
+    scene.set_theme_policy_stylesheets(
+        policy,
+        knave_shell_ui::styles::STYLESHEET,
+        user_theme_css,
+    )?;
     Ok(scene
         .computed_style(ElementId(1))
         .map(|style| style.style.text.color)
@@ -1047,13 +1054,13 @@ mod icon_tests {
     #[test]
     fn user_theme_icon_color_updates_and_invalid_css_is_atomic() {
         let mut app = QuickSettings::new();
-        app.theme_changed(Theme::Light, "icon { color: #123456; }")
+        app.theme_policy_changed(Theme::Light.into(), "icon { color: #123456; }")
             .expect("valid user icon color");
         assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
         assert_eq!(app.scene.theme(), Theme::Light);
 
         assert!(
-            app.theme_changed(Theme::Dark, "icon { color: invalid; }")
+            app.theme_policy_changed(Theme::Dark.into(), "icon { color: invalid; }")
                 .is_err()
         );
         assert_eq!(app.icon_color, Color::rgba(0x12, 0x34, 0x56, 255));
@@ -1065,7 +1072,7 @@ mod icon_tests {
         assert_eq!(battery_fill_width(0), 0.0);
         assert_eq!(battery_fill_width(100), 11.0);
         assert_eq!(battery_fill_width(255), 11.0);
-        let color = text_color(Theme::Dark, "").expect("default theme is valid");
+        let color = text_color(Theme::Dark.into(), "").expect("default theme is valid");
         let empty = battery_image(0, "Not charging", color);
         let full = battery_image(100, "Not charging", color);
         let charging = battery_image(100, "Charging", color);
@@ -1082,5 +1089,13 @@ mod icon_tests {
         assert_eq!(filled_columns(&full), 11);
         assert_ne!(empty.pixels(), full.pixels());
         assert_ne!(full.pixels(), charging.pixels());
+    }
+
+    #[test]
+    fn monochrome_policy_tints_shell_icons_neutrally() {
+        let policy = ThemePolicy::new(Theme::Dark, Contrast::High, Chroma::Monochrome);
+        let color = text_color(policy, "").expect("bundled monochrome policy is valid");
+        assert_eq!(color.red, color.green);
+        assert_eq!(color.green, color.blue);
     }
 }

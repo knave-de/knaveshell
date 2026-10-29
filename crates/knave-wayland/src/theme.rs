@@ -1,18 +1,18 @@
 //! Selected desktop theme loading, shared by all shell surface hosts.
-use knave_config::{ConfigDocument, Theme as Preference};
-use knave_ui::toolkit::{Element, Scene, Theme, Widget, theme_file};
+use knave_config::{ChromaPreference, ConfigDocument, ContrastPreference, Theme as Preference};
+use knave_ui::toolkit::{Chroma, Contrast, Element, Scene, Theme, ThemePolicy, Widget, theme_file};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Selection {
-    pub theme: Theme,
+    pub policy: ThemePolicy,
     pub css: String,
 }
 
 impl Selection {
     pub fn fallback(theme: Theme) -> Self {
         Self {
-            theme,
+            policy: ThemePolicy::new(theme, Contrast::Standard, Chroma::FullColor),
             css: String::new(),
         }
     }
@@ -30,6 +30,15 @@ impl Selection {
             Preference::Light => Theme::Light,
             Preference::Dark | Preference::System => Theme::Dark,
         };
+        let contrast = match appearance.contrast {
+            ContrastPreference::Standard => Contrast::Standard,
+            ContrastPreference::High => Contrast::High,
+        };
+        let chroma = match appearance.chroma {
+            ChromaPreference::FullColor => Chroma::FullColor,
+            ChromaPreference::Monochrome => Chroma::Monochrome,
+        };
+        let policy = ThemePolicy::new(theme, contrast, chroma);
         let path = theme_file::theme_css_path(data, &appearance.theme_name, theme)
             .map_err(|error| error.to_string())?;
         let css = theme_file::load_css(&path)
@@ -39,9 +48,9 @@ impl Selection {
         let mut scene =
             Scene::new(Element::new(0, Widget::Panel)).map_err(|error| error.to_string())?;
         scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, &css)
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, &css)
             .map_err(|error| format!("{}: {error}", path.display()))?;
-        Ok(Self { theme, css })
+        Ok(Self { policy, css })
     }
 }
 
@@ -101,11 +110,13 @@ mod tests {
         fs::write(theme.join("light.css"), ":root { --accent: #abcdef; }").unwrap();
         fs::write(
             &config,
-            "[appearance.theme]\ntheme = \"custom\"\nmode = \"light\"\n",
+            "[appearance.theme]\ntheme = \"custom\"\nmode = \"light\"\ncontrast = \"high\"\nchroma = \"monochrome\"\n",
         )
         .unwrap();
         let selected = Selection::at(&config, &base).unwrap();
-        assert_eq!(selected.theme, Theme::Light);
+        assert_eq!(selected.policy.scheme, Theme::Light);
+        assert_eq!(selected.policy.contrast, Contrast::High);
+        assert_eq!(selected.policy.chroma, Chroma::Monochrome);
         assert!(selected.css.contains("#abcdef"));
         fs::write(theme.join("light.css"), "panel { unknown-property: nope; }").unwrap();
         assert!(Selection::at(&config, &base).is_err());

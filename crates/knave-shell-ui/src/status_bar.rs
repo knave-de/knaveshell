@@ -92,13 +92,10 @@ impl StatusBar {
         &mut self,
         theme: knave_ui::toolkit::Theme,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
-        self.toolkit_scene
-            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
-            .expect("status bar element identities are unique");
-        self.toolkit_scene
-            .set_desktop_theme(theme, crate::styles::STYLESHEET)?;
-        self.refresh_toolkit_output();
-        Ok(())
+        let mut policy = self.scene.theme_policy();
+        policy.scheme = theme;
+        let css = self.toolkit_scene.user_theme_stylesheet().to_owned();
+        self.set_user_policy(policy, &css)
     }
 
     /// Apply the shell theme and user theme CSS while retaining any bar-level overrides.
@@ -107,11 +104,30 @@ impl StatusBar {
         theme: knave_ui::toolkit::Theme,
         css: &str,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.set_user_policy(
+            knave_ui::toolkit::ThemePolicy::new(
+                theme,
+                knave_ui::toolkit::Contrast::Standard,
+                knave_ui::toolkit::Chroma::FullColor,
+            ),
+            css,
+        )
+    }
+
+    pub fn set_user_policy(
+        &mut self,
+        policy: knave_ui::toolkit::ThemePolicy,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
         self.toolkit_scene
-            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
+            .replace(crate::styles::root(
+                self.toolkit_root.clone(),
+                policy.scheme,
+            ))
             .expect("status bar element identities are unique");
         self.toolkit_scene
-            .set_theme_stylesheets(theme, crate::styles::STYLESHEET, css)?;
+            .set_theme_policy_stylesheets(policy, crate::styles::STYLESHEET, css)?;
+        self.scene.set_theme_policy(policy);
         self.refresh_toolkit_output();
         Ok(())
     }
@@ -165,6 +181,8 @@ impl StatusBar {
             crate::status_icons::wifi(),
             crate::status_icons::volume(),
         ];
+        let brand_source = crate::brand::image();
+        let themed_brand = crate::brand::image_for(self.scene.theme_policy());
         let (_, tinted) = self
             .tinted_status_icons
             .as_ref()
@@ -178,6 +196,12 @@ impl StatusBar {
                     .as_ref()
                     .is_some_and(|source| source.cache_key() == image.cache_key())
             }) && let Some(replacement) = replacement
+            {
+                *image = replacement.clone();
+            } else if brand_source
+                .as_ref()
+                .is_some_and(|source| source.cache_key() == image.cache_key())
+                && let Some(replacement) = &themed_brand
             {
                 *image = replacement.clone();
             }
@@ -442,7 +466,13 @@ impl StatusBar {
                 true
             }
         });
+        let inserted_islands = island_nodes.len();
         scene.nodes.splice(1..1, island_nodes);
+        for index in &mut scene.brand_node_indices {
+            if *index >= 1 {
+                *index += inserted_islands;
+            }
+        }
         let theme = knave_ui::toolkit::Theme::Dark;
         let toolkit_root = build_toolkit_root(&scene, desktop);
         let toolkit_scene = build_toolkit_scene(toolkit_root.clone(), theme);
@@ -866,6 +896,72 @@ mod tests {
     }
 
     #[test]
+    fn theme_reload_updates_only_the_knave_mark_in_both_bar_render_paths() {
+        let app_icon = knave_ui::UiImage::from_rgba(1, 1, vec![7, 11, 13, 255]).unwrap();
+        let applets = [Applet {
+            id: 1,
+            title: "Applet".into(),
+            image: Some(app_icon.clone()),
+            attention: false,
+        }];
+        let mut bar = StatusBar::new(1, 800.0, 36.0, None, true, None, &applets);
+        let light_mono = knave_ui::toolkit::ThemePolicy::new(
+            knave_ui::toolkit::Theme::Light,
+            knave_ui::toolkit::Contrast::High,
+            knave_ui::toolkit::Chroma::Monochrome,
+        );
+        bar.set_user_policy(light_mono, "").unwrap();
+
+        let scene_mark = bar
+            .scene
+            .nodes()
+            .iter()
+            .find_map(|node| match node {
+                UiNode::Image { id, image, .. } if id.0 == 3 => Some(image),
+                _ => None,
+            })
+            .expect("bar scene retains its registered brand mark");
+        let expected_mark = crate::brand::image_for(light_mono).unwrap();
+        assert_eq!(scene_mark.cache_key(), expected_mark.cache_key());
+        assert!(bar.scene.display_list().commands.iter().any(|command| {
+            matches!(command, knave_ui::DisplayCommand::Image { image, .. }
+                if image.cache_key() == expected_mark.cache_key())
+        }));
+        assert!(bar.display.commands.iter().any(|command| {
+            matches!(command, knave_ui::DisplayCommand::Image { image, .. }
+                if image.cache_key() == expected_mark.cache_key())
+        }));
+        assert!(bar.display.commands.iter().any(|command| {
+            matches!(command, knave_ui::DisplayCommand::Image { image, .. }
+                if image.cache_key() == app_icon.cache_key())
+        }));
+    }
+
+    #[test]
+    fn scheme_setter_updates_brand_and_keeps_accessibility_and_user_css() {
+        let mut bar = StatusBar::new(1, 800.0, 36.0, None, true, None, &[]);
+        let css = ".statusbar { color: #123456; }";
+        let initial = knave_ui::toolkit::ThemePolicy::new(
+            knave_ui::toolkit::Theme::Dark,
+            knave_ui::toolkit::Contrast::High,
+            knave_ui::toolkit::Chroma::Monochrome,
+        );
+        bar.set_user_policy(initial, css).unwrap();
+        bar.set_theme(knave_ui::toolkit::Theme::Light).unwrap();
+
+        let actual = bar.scene.theme_policy();
+        assert_eq!(actual.scheme, knave_ui::toolkit::Theme::Light);
+        assert_eq!(actual.contrast, knave_ui::toolkit::Contrast::High);
+        assert_eq!(actual.chroma, knave_ui::toolkit::Chroma::Monochrome);
+        assert_eq!(bar.toolkit_scene.user_theme_stylesheet(), css);
+        let expected = crate::brand::image_for(actual).unwrap();
+        assert!(bar.display.commands.iter().any(|command| {
+            matches!(command, knave_ui::DisplayCommand::Image { image, .. }
+                if image.cache_key() == expected.cache_key())
+        }));
+    }
+
+    #[test]
     fn statusbar_workspace_buttons_use_primary_secondary_and_ghost_variants() {
         let bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
@@ -909,6 +1005,92 @@ mod tests {
             Color::rgba(0x0A, 0x16, 0x20, 255),
             "the active workspace number should use dark on-accent text"
         );
+    }
+
+    #[test]
+    fn high_contrast_monochrome_keeps_workspace_primary_legible_in_both_schemes() {
+        let mut bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
+        let workspace_style = |bar: &StatusBar, workspace: u32| {
+            let index = bar
+                .scene
+                .targets
+                .iter()
+                .position(|target| {
+                    target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
+                })
+                .expect("workspace action");
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + index as u64))
+                .unwrap()
+                .style
+        };
+
+        let contrast_ratio = |first: Color, second: Color| {
+            let luminance = |color: Color| {
+                let channel = |value: u8| {
+                    let value = f64::from(value) / 255.0;
+                    if value <= 0.04045 {
+                        value / 12.92
+                    } else {
+                        ((value + 0.055) / 1.055).powf(2.4)
+                    }
+                };
+                0.2126 * channel(color.red)
+                    + 0.7152 * channel(color.green)
+                    + 0.0722 * channel(color.blue)
+            };
+            let first = luminance(first);
+            let second = luminance(second);
+            let (lighter, darker) = if first >= second {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            (lighter + 0.05) / (darker + 0.05)
+        };
+
+        for (scheme, expected_fill, expected_text, expected_inactive_text) in [
+            (
+                knave_ui::toolkit::Theme::Dark,
+                Color::rgba(255, 255, 255, 255),
+                Color::rgba(0, 0, 0, 255),
+                Color::rgba(255, 255, 255, 255),
+            ),
+            (
+                knave_ui::toolkit::Theme::Light,
+                Color::rgba(0, 0, 0, 255),
+                Color::rgba(255, 255, 255, 255),
+                Color::rgba(0, 0, 0, 255),
+            ),
+        ] {
+            bar.set_user_policy(
+                knave_ui::toolkit::ThemePolicy::new(
+                    scheme,
+                    knave_ui::toolkit::Contrast::High,
+                    knave_ui::toolkit::Chroma::Monochrome,
+                ),
+                "",
+            )
+            .unwrap();
+
+            let active = workspace_style(&bar, 1);
+            let inactive = workspace_style(&bar, 2);
+            let active_fill = active
+                .background
+                .and_then(|paint| paint.fill)
+                .expect("active workspace has a primary fill");
+            let inactive_fill = inactive
+                .background
+                .and_then(|paint| paint.fill)
+                .expect("occupied inactive workspace has a secondary fill");
+
+            assert_eq!(active_fill, expected_fill);
+            assert_eq!(active.text.color, expected_text);
+            assert_eq!(inactive.text.color, expected_inactive_text);
+            assert_ne!(active_fill, inactive_fill);
+            assert_ne!(active.text.color, inactive.text.color);
+            assert!(contrast_ratio(active.text.color, active_fill) >= 7.0);
+        }
     }
 
     #[test]

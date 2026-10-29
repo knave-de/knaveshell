@@ -197,10 +197,14 @@ impl Notifications {
     }
 }
 impl Application for Notifications {
-    fn theme_changed(&mut self, theme: Theme, css: &str) -> Result<(), StylesheetError> {
+    fn theme_policy_changed(
+        &mut self,
+        policy: ThemePolicy,
+        css: &str,
+    ) -> Result<(), StylesheetError> {
         self.scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
-        self.theme = theme;
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = policy.scheme;
         self.dirty = true;
         Ok(())
     }

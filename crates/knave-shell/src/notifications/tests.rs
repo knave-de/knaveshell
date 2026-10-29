@@ -80,8 +80,11 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
         for light in [false, true] {
             for contrast in [false, true] {
                 let mut app = app(500);
-                app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
-                    .expect("notification theme should apply");
+                app.theme_policy_changed(
+                    (if light { Theme::Light } else { Theme::Dark }).into(),
+                    "",
+                )
+                .expect("notification theme should apply");
                 app.state.light = light;
                 app.state.high_contrast = contrast;
                 app.apply(app.state.clone());
@@ -164,6 +167,9 @@ fn narrow_short_and_large_views_keep_panel_and_navigation_in_bounds() {
                         | DisplayCommand::Text { bounds, clip, .. }
                         | DisplayCommand::RichText { bounds, clip, .. }
                         | DisplayCommand::Image { bounds, clip, .. } => (*bounds, *clip),
+                        DisplayCommand::BeginOpacity { .. } | DisplayCommand::EndOpacity => {
+                            continue;
+                        }
                     };
                     assert!(
                         r.x.is_finite() && r.y.is_finite() && r.width >= 0.0 && r.height >= 0.0
@@ -407,7 +413,7 @@ fn missing_notification_icon_uses_app_identity_without_recoloring() {
     ] {
         for light in [false, true] {
             let mut app = app(1);
-            app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
+            app.theme_policy_changed((if light { Theme::Light } else { Theme::Dark }).into(), "")
                 .expect("notification theme should apply");
             app.state.light = light;
             app.state.notifications[0].icon = icon.into();
@@ -454,8 +460,11 @@ fn image_previews_fit_cards_preserve_pixels_and_release_on_replace_or_dismiss() 
             for light in [false, true] {
                 for (width, height) in [(320, 160), (80, 320), (320, 1), (1, 320)] {
                     let mut app = app(1);
-                    app.theme_changed(if light { Theme::Light } else { Theme::Dark }, "")
-                        .expect("notification theme should apply");
+                    app.theme_policy_changed(
+                        (if light { Theme::Light } else { Theme::Dark }).into(),
+                        "",
+                    )
+                    .expect("notification theme should apply");
                     app.state.light = light;
                     app.state.center_open = !banner;
                     app.state.notifications[0].banner = banner;
@@ -531,7 +540,8 @@ fn shell_panels_do_not_add_decorative_outlines() {
 fn full_named_themes_cannot_paint_the_fullscreen_positioning_host() {
     for theme in [Theme::Dark, Theme::Light] {
         let mut app = app(1);
-        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        app.theme_policy_changed(theme.into(), theme.stylesheet())
+            .unwrap();
         let list = app.frame([1280.0, 800.0], &mut Metrics);
         assert!(
             !list.commands.iter().any(|command| matches!(command,
