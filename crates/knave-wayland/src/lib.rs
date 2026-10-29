@@ -2036,11 +2036,8 @@ impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for Runtime {
         _conn: &Connection,
         qh: &QueueHandle<Self>,
     ) {
-        match event {
-            wp_fractional_scale_v1::Event::PreferredScale { scale } => {
-                state.preferred_scale_changed(scale, qh);
-            }
-            _ => {}
+        if let wp_fractional_scale_v1::Event::PreferredScale { scale } = event {
+            state.preferred_scale_changed(scale, qh);
         }
     }
 }
