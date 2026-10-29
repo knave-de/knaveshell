@@ -67,9 +67,13 @@ use smithay_client_toolkit::{
     shm::{Shm, ShmHandler},
 };
 use wayland_client::{
-    Connection, Proxy, QueueHandle,
+    Connection, Dispatch, Proxy, QueueHandle, delegate_noop,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
+};
+use wayland_protocols::wp::{
+    fractional_scale::v1::client::{wp_fractional_scale_manager_v1, wp_fractional_scale_v1},
+    viewporter::client::{wp_viewport, wp_viewporter},
 };
 use wgpu::rwh::{RawDisplayHandle, RawWindowHandle, WaylandDisplayHandle, WaylandWindowHandle};
 
@@ -601,11 +605,32 @@ fn run_internal(
     let layer_shell = LayerShell::bind(&globals, &queue_handle)
         .map_err(|error| WaylandError::LayerShell(error.to_string()))?;
 
+    let fractional_scale_manager = globals
+        .bind::<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1, _, _>(
+            &queue_handle,
+            1..=1,
+            (),
+        )
+        .ok();
+    let viewporter_manager = globals
+        .bind::<wp_viewporter::WpViewporter, _, _>(&queue_handle, 1..=1, ())
+        .ok();
+
     // Bind seats before configuring the layer: capabilities must be dispatched
     // before configure can map the first buffer under an already-present pointer.
     let seat_state = SeatState::new(&globals, &queue_handle);
 
     let surface = compositor.create_surface(&queue_handle);
+    let (fractional_scale, viewport) = match (
+        fractional_scale_manager.as_ref(),
+        viewporter_manager.as_ref(),
+    ) {
+        (Some(scale_manager), Some(viewport_manager)) => (
+            Some(scale_manager.get_fractional_scale(&surface, &queue_handle, ())),
+            Some(viewport_manager.get_viewport(&surface, &queue_handle, ())),
+        ),
+        _ => (None, None),
+    };
     let layer = layer_shell.create_layer_surface(
         &queue_handle,
         surface,
@@ -639,6 +664,9 @@ fn run_internal(
         layer.set_exclusive_zone(role.exclusive_zone());
         let (width, height) = role.requested_size();
         layer.set_size(width, height);
+    }
+    if fractional_scale.is_some() && viewport.is_some() {
+        layer.wl_surface().set_buffer_scale(1);
     }
     layer.commit();
 
@@ -746,6 +774,10 @@ fn run_internal(
         connection: connection.clone(),
         compositor,
         shm,
+        _fractional_scale_manager: fractional_scale_manager,
+        _viewporter_manager: viewporter_manager,
+        fractional_scale,
+        viewport,
         cursor: cursor::CursorState::default(),
         clipboard: clipboard::Clipboard::new(clipboard_manager),
         ime: ime::Ime::new(ime_manager),
@@ -773,7 +805,8 @@ fn run_internal(
         applets: Vec::new(),
         app_input_region: None,
         app_keyboard_mode: None,
-        scale: 1,
+        integer_scale: 1,
+        preferred_scale: 1.0,
         modifiers: KeyModifiers::default(),
         layer,
         surface,
@@ -840,6 +873,10 @@ struct Runtime {
     connection: Connection,
     compositor: CompositorState,
     shm: Shm,
+    _fractional_scale_manager: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
+    _viewporter_manager: Option<wp_viewporter::WpViewporter>,
+    fractional_scale: Option<wp_fractional_scale_v1::WpFractionalScaleV1>,
+    viewport: Option<wp_viewport::WpViewport>,
     cursor: cursor::CursorState,
     ime: ime::Ime,
     clipboard: clipboard::Clipboard,
@@ -864,7 +901,8 @@ struct Runtime {
     applets: Vec<knave_shell_ui::status_bar::Applet>,
     app_input_region: Option<Vec<knave_ui::Rect>>,
     app_keyboard_mode: Option<KeyboardMode>,
-    scale: u32,
+    integer_scale: u32,
+    preferred_scale: f64,
     modifiers: KeyModifiers,
     layer: LayerSurface,
     surface: wgpu::Surface<'static>,
@@ -905,6 +943,44 @@ struct Runtime {
 }
 
 impl Runtime {
+    fn fractional_scaling(&self) -> bool {
+        self.fractional_scale.is_some() && self.viewport.is_some()
+    }
+
+    fn render_scale(&self) -> f64 {
+        if self.fractional_scaling() {
+            self.preferred_scale
+        } else {
+            f64::from(self.integer_scale)
+        }
+    }
+
+    fn set_viewport_destination(&self) {
+        if let Some(viewport) = &self.viewport {
+            viewport.set_destination(
+                i32::try_from(self.width).unwrap_or(i32::MAX),
+                i32::try_from(self.height).unwrap_or(i32::MAX),
+            );
+        }
+    }
+
+    fn preferred_scale_changed(&mut self, scale_120ths: u32, qh: &QueueHandle<Self>) {
+        let scale = fractional_scale_from_protocol(scale_120ths);
+        if self.preferred_scale == scale {
+            return;
+        }
+        self.preferred_scale = scale;
+        if !self.configured {
+            return;
+        }
+        if let Some(config) = self.configure_surface(self.width, self.height) {
+            self.surface.configure(&self.device, &config);
+        }
+        self.set_viewport_destination();
+        self.scene_dirty = true;
+        self.request_draw(qh);
+    }
+
     fn set_focused_app(&mut self, snapshot: Option<&DesktopSnapshot>) {
         let next = snapshot.and_then(focused_app::identity);
         if next == self.focused_icon_key {
@@ -925,10 +1001,11 @@ impl Runtime {
     }
 
     fn configure_surface(&self, width: u32, height: u32) -> Option<wgpu::SurfaceConfiguration> {
+        let scale = self.render_scale();
         let mut config = self.surface.get_default_config(
             &self.adapter,
-            width.max(1).saturating_mul(self.scale),
-            height.max(1).saturating_mul(self.scale),
+            scaled_buffer_dimension(width.max(1), scale),
+            scaled_buffer_dimension(height.max(1), scale),
         )?;
         let Some(format) = self
             .surface
@@ -1118,9 +1195,10 @@ impl Runtime {
                 })
             });
         desired.truncate(MAX_PREVIEWS);
+        let preview_scale = self.render_scale();
         let preview_size = [
-            self.width.saturating_mul(self.scale),
-            self.height.saturating_mul(self.scale),
+            scaled_buffer_dimension(self.width, preview_scale),
+            scaled_buffer_dimension(self.height, preview_scale),
         ];
         if (self.preview_refresh
             || desired != self.preview_requested
@@ -1260,9 +1338,10 @@ impl Runtime {
         self.sync_ime();
         self.sync_cursor();
         self.application_requests(qh);
+        let scale = self.render_scale();
         let scaled;
-        let render_list = if self.scale > 1 {
-            scaled = scale_list(&self.render_list, self.scale as f32);
+        let render_list = if scale > 1.0 {
+            scaled = scale_list(&self.render_list, scale as f32);
             &scaled
         } else {
             &self.render_list
@@ -1329,8 +1408,8 @@ impl Runtime {
                 &mut encoder,
                 &view,
                 (
-                    self.width.saturating_mul(self.scale),
-                    self.height.saturating_mul(self.scale),
+                    scaled_buffer_dimension(self.width, scale),
+                    scaled_buffer_dimension(self.height, scale),
                 ),
                 render_list,
             )
@@ -1811,9 +1890,16 @@ impl CompositorHandler for Runtime {
         if surface != self.layer.wl_surface() {
             return;
         }
-        self.scale = new_factor.clamp(1, 8) as u32;
-        self.layer.wl_surface().set_buffer_scale(self.scale as i32);
-        if self.configured {
+        let old_scale = self.render_scale();
+        self.integer_scale = new_factor.clamp(1, 8) as u32;
+        if self.fractional_scaling() {
+            self.layer.wl_surface().set_buffer_scale(1);
+            return;
+        }
+        self.layer
+            .wl_surface()
+            .set_buffer_scale(self.integer_scale as i32);
+        if self.configured && old_scale != self.render_scale() {
             if let Some(config) = self.configure_surface(self.width, self.height) {
                 self.surface.configure(&self.device, &config);
             }
@@ -1923,6 +2009,7 @@ impl LayerShellHandler for Runtime {
             return;
         };
         self.surface.configure(&self.device, &config);
+        self.set_viewport_destination();
         if self.painter_format != Some(config.format) {
             match WgpuPainter::new(&self.device, &self.queue, config.format) {
                 Ok(painter) => self.painter = Some(painter),
@@ -1939,6 +2026,28 @@ impl LayerShellHandler for Runtime {
         self.draw(qh);
     }
 }
+
+impl Dispatch<wp_fractional_scale_v1::WpFractionalScaleV1, ()> for Runtime {
+    fn event(
+        state: &mut Self,
+        _proxy: &wp_fractional_scale_v1::WpFractionalScaleV1,
+        event: wp_fractional_scale_v1::Event,
+        _data: &(),
+        _conn: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        match event {
+            wp_fractional_scale_v1::Event::PreferredScale { scale } => {
+                state.preferred_scale_changed(scale, qh);
+            }
+            _ => {}
+        }
+    }
+}
+
+delegate_noop!(Runtime: ignore wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1);
+delegate_noop!(Runtime: ignore wp_viewporter::WpViewporter);
+delegate_noop!(Runtime: ignore wp_viewport::WpViewport);
 
 delegate_registry!(Runtime);
 
@@ -1983,6 +2092,21 @@ impl Runtime {
         self.request_draw(qh);
     }
 }
+fn fractional_scale_from_protocol(scale_120ths: u32) -> f64 {
+    f64::from(scale_120ths.clamp(120, 480)) / 120.0
+}
+
+fn scaled_buffer_dimension(logical: u32, scale: f64) -> u32 {
+    let scale = if scale.is_finite() {
+        scale.clamp(1.0, 8.0)
+    } else {
+        1.0
+    };
+    (f64::from(logical.max(1)) * scale)
+        .round()
+        .clamp(1.0, f64::from(u32::MAX)) as u32
+}
+
 fn scale_list(list: &RenderList, scale: f32) -> RenderList {
     use knave_ui::{DisplayCommand, Transform2D};
     let mut result = list.clone();
@@ -2000,6 +2124,8 @@ fn scale_list(list: &RenderList, scale: f32) -> RenderList {
             | DisplayCommand::Image {
                 transform, clip, ..
             } => (transform, clip),
+            // Marker commands such as opacity scopes have no geometry to scale.
+            _ => continue,
         };
         *transform = Transform2D::scale(scale, scale).compose(*transform);
         *clip = clip.map(|r| Transform2D::scale(scale, scale).transform_rect_bounds(r));
@@ -2016,6 +2142,20 @@ impl ShmHandler for Runtime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fractional_scale_uses_protocol_units_and_logical_destination_rounding() {
+        assert_eq!(fractional_scale_from_protocol(150), 1.25);
+        assert_eq!(fractional_scale_from_protocol(180), 1.5);
+        assert_eq!(fractional_scale_from_protocol(0), 1.0);
+        assert_eq!(fractional_scale_from_protocol(u32::MAX), 4.0);
+
+        assert_eq!(scaled_buffer_dimension(101, 1.25), 126);
+        assert_eq!(scaled_buffer_dimension(102, 1.25), 128);
+        assert_eq!(scaled_buffer_dimension(101, 1.5), 152);
+        assert_eq!(scaled_buffer_dimension(0, 1.5), 2);
+        assert_eq!(scaled_buffer_dimension(u32::MAX, 8.0), u32::MAX);
+    }
 
     #[test]
     fn roles_have_independent_layer_contracts() {

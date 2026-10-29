@@ -21,7 +21,7 @@ thiserror.workspace = true
 wayland-client.workspace = true
 wgpu.workspace = true
 rustix = { version = "1", features = ["fs"] }
-wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
 
 serde_json = "1"
 serde = "1"
