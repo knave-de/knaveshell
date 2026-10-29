@@ -4,8 +4,8 @@ use knave_desktop_api::{DesktopSnapshot, notifications::NotificationSnapshot};
 use knave_ui::{
     Color, Rect, TextStyle,
     toolkit::{
-        Element, ElementId, Flow, Layout, Length, Scene as ToolkitScene, TextLayout, TextMeasurer,
-        Widget,
+        ButtonVariant, Element, ElementId, Flow, Layout, Length, Scene as ToolkitScene, TextLayout,
+        TextMeasurer, Widget,
     },
 };
 
@@ -592,21 +592,36 @@ fn build_toolkit_root(scene: &UiScene, desktop: Option<&DesktopSnapshot>) -> Ele
     let action_elements = scene.targets.iter().enumerate().map(|(index, target)| {
         let element_id = 50_000 + index as u64;
         let class = action_class(target.action);
-        let widget = if let crate::UiAction::FocusWorkspace(workspace_id) = target.action {
-            let selected = desktop.is_some_and(|snapshot| {
+        let (widget, variant) = if let crate::UiAction::FocusWorkspace(workspace_id) = target.action
+        {
+            let workspace = desktop.and_then(|snapshot| {
                 snapshot
                     .workspaces
                     .iter()
-                    .any(|workspace| workspace.workspace == workspace_id && workspace.active)
+                    .find(|workspace| workspace.workspace == workspace_id)
             });
-            Widget::Selectable {
-                label: String::new(),
-                selected,
-            }
+            let variant = if workspace.is_some_and(|workspace| workspace.active) {
+                ButtonVariant::Primary
+            } else if workspace.is_some_and(|workspace| workspace.window_count > 0) {
+                ButtonVariant::Secondary
+            } else {
+                ButtonVariant::Ghost
+            };
+            (Widget::Button(String::new()), Some(variant))
         } else {
-            Widget::Button(String::new())
+            (Widget::Button(String::new()), None)
         };
-        element_at(element_id, widget, target.bounds, class, class)
+        let mut element = element_at(element_id, widget, target.bounds, class, class);
+        element.button_variant = variant;
+        if let crate::UiAction::FocusWorkspace(workspace_id) = target.action {
+            let label = if workspace_id.0 == 10 {
+                "0".to_owned()
+            } else {
+                workspace_id.0.to_string()
+            };
+            element.semantics.name = Some(format!("Workspace {label}"));
+        }
+        element
     });
     let node_element = |node: &crate::UiNode| match node {
         crate::UiNode::Panel { id, .. } if id.0 == 1 => None,
@@ -851,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_zero_and_occupancy_dots_render_with_active_chip() {
+    fn statusbar_workspace_buttons_use_primary_secondary_and_ghost_variants() {
         let bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Label { text, .. } if text == "0")));
@@ -863,6 +878,27 @@ mod tests {
                 .iter()
                 .any(|command| matches!(command, knave_ui::DisplayCommand::Shape { .. }))
         );
+
+        let variant_fill = |workspace: u32| {
+            let index = bar
+                .scene
+                .targets
+                .iter()
+                .position(|target| {
+                    target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
+                })
+                .expect("workspace action");
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + index as u64))
+                .unwrap()
+                .style
+                .background
+                .and_then(|paint| paint.fill)
+        };
+        assert_eq!(variant_fill(1), Some(Color::ACCENT));
+        assert!(variant_fill(2).is_some());
+        assert_ne!(variant_fill(2), variant_fill(1));
+        assert!(variant_fill(0).is_none_or(|color| color.alpha == 0));
     }
 
     #[test]
@@ -1126,7 +1162,7 @@ mod tests {
             .position(|target| target.action == UiAction::FocusWorkspace(WorkspaceId(2)))
             .unwrap();
         let sheet = ".statusbar__workspace-action { margin: 1px; padding: 2px; border-radius: 3px; } \
-            .statusbar__workspace-action:selected { background-color: #123456; } \
+            .statusbar__workspace-action.primary { background-color: #123456; } \
             .statusbar__workspace-action:hover { background-color: #abcdef; } \
             .statusbar__focused-title { font-size: 17px; }";
         bar.set_stylesheet(sheet).unwrap();
