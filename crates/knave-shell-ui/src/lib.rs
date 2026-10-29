@@ -61,6 +61,7 @@ pub struct UiScene {
     clear_color: Color,
     theme_policy: ThemePolicy,
     nodes: Vec<UiNode>,
+    brand_node_indices: Vec<usize>,
     targets: Vec<HitTarget>,
     search_actions: Vec<UiAction>,
 }
@@ -160,6 +161,7 @@ impl UiScene {
             clear_color: Color::BACKGROUND,
             theme_policy: ThemePolicy::default(),
             nodes: Vec::new(),
+            brand_node_indices: Vec::new(),
             targets: Vec::new(),
             search_actions: Vec::new(),
         }
@@ -179,6 +181,19 @@ impl UiScene {
 
     pub fn set_theme_policy(&mut self, policy: ThemePolicy) {
         self.theme_policy = policy;
+        if !self.brand_node_indices.is_empty()
+            && let Some(image) = brand::image_for(policy)
+        {
+            for index in &self.brand_node_indices {
+                if let Some(UiNode::Image { image: mark, .. }) = self.nodes.get_mut(*index) {
+                    *mark = image.clone();
+                }
+            }
+        }
+    }
+
+    pub fn theme_policy(&self) -> ThemePolicy {
+        self.theme_policy
     }
 
     pub fn nodes(&self) -> &[UiNode] {
@@ -299,6 +314,7 @@ impl UiScene {
         // The icon-only Knave mark opens the Overview; no wordmark is painted.
         scene.target(Rect::new(0.0, 0.0, 40.0, height), UiAction::OpenOverview);
         if let Some(image) = brand::image() {
+            scene.brand_node_indices.push(scene.nodes.len());
             scene.push(UiNode::Image {
                 id: NodeId(3),
                 bounds: Rect::new(11.0, 7.0, 22.0, 22.0),
@@ -349,6 +365,13 @@ impl UiScene {
                 }
             }
         }
+        let node_offset = self.nodes.len();
+        self.brand_node_indices.extend(
+            status_bar
+                .brand_node_indices
+                .iter()
+                .map(|index| node_offset + index),
+        );
         self.nodes.append(&mut status_bar.nodes);
         self.targets.append(&mut status_bar.targets);
     }
@@ -524,6 +547,29 @@ mod tests {
                 .iter()
                 .any(|node| matches!(node, UiNode::Image { .. }))
         );
+    }
+
+    #[test]
+    fn overview_theme_policy_changes_only_its_registered_brand_node() {
+        let app_image = UiImage::from_rgba(1, 1, vec![12, 34, 56, 255]).unwrap();
+        let mut scene = UiScene::overview(1, 800.0, 600.0);
+        scene.push(UiNode::Image {
+            id: NodeId(90),
+            bounds: Rect::new(1.0, 1.0, 1.0, 1.0),
+            image: app_image.clone(),
+        });
+        let policy = ThemePolicy::new(Theme::Light, Contrast::High, Chroma::Monochrome);
+        scene.set_theme_policy(policy);
+
+        let expected = brand::image_for(policy).unwrap();
+        assert!(scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id: NodeId(10_003), image, .. }
+                if image.cache_key() == expected.cache_key()
+        )));
+        assert!(scene.nodes().iter().any(|node| matches!(node,
+            UiNode::Image { id: NodeId(90), image, .. }
+                if image.cache_key() == app_image.cache_key()
+        )));
     }
 
     #[test]

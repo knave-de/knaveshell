@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Knave Color Dark</title>
+  <desc id="desc">Transparent-background Knave mark colored for use on a dark surface.</desc>
+  <g transform="translate(71.5 61)">
+    <path fill="#f5f6f8" d="M0 0H174V389L54 275C76 269 90 253 90 233V202H10L97 112H147V94H90L0 0Z"/>
+    <path fill="#08a9d8" d="M194 0H369L279 94H222V112H272L359 202H279V233C279 253 293 269 315 275L194 389V0Z"/>
+  </g>
+</svg>
