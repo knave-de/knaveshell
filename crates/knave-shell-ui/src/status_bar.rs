@@ -899,6 +899,16 @@ mod tests {
         assert!(variant_fill(2).is_some());
         assert_ne!(variant_fill(2), variant_fill(1));
         assert!(variant_fill(0).is_none_or(|color| color.alpha == 0));
+        assert_eq!(
+            bar.toolkit_scene
+                .computed_style(ElementId(60_011))
+                .unwrap()
+                .style
+                .text
+                .color,
+            Color::rgba(0x0A, 0x16, 0x20, 255),
+            "the active workspace number should use dark on-accent text"
+        );
     }
 
     #[test]
