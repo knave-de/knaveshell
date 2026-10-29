@@ -465,7 +465,6 @@ fn failed_navigation_and_repeated_input_preserve_confirmed_workspace() {
 fn workspace_controls_switch_without_hiding() {
     for id in [
         ElementId(21),
-        ElementId(0x200_0000_0000 + 3),
         ElementId(0x100_0000_0000 + 3 * 32),
         bar_target(
             &app(),
@@ -1094,127 +1093,20 @@ fn overview_controls_follow_the_selected_toolkit_theme() {
 }
 
 #[test]
-fn workspace_indicators_have_visible_distinct_paint_for_all_appearance_policies() {
-    const ACTIVE: ElementId = ElementId(0x200_0000_0002);
-    const OCCUPIED: ElementId = ElementId(0x200_0000_0003);
-    const EMPTY: ElementId = ElementId(0x200_0000_0001);
-    const RAIL: ElementId = ElementId(view::WORKSPACE_INDICATOR_RAIL);
-
-    let mut app = app();
-    let mut snapshot = snapshot();
-    snapshot.workspaces[0].window_count = 0;
-    app.desktop_snapshot(&snapshot);
-
-    let contrast_ratio = |first: knave_ui::Color, second: knave_ui::Color| {
-        let luminance = |color: knave_ui::Color| {
-            let channel = |value: u8| {
-                let value = f64::from(value) / 255.0;
-                if value <= 0.04045 {
-                    value / 12.92
-                } else {
-                    ((value + 0.055) / 1.055).powf(2.4)
-                }
-            };
-            0.2126 * channel(color.red)
-                + 0.7152 * channel(color.green)
-                + 0.0722 * channel(color.blue)
-        };
-        let first = luminance(first);
-        let second = luminance(second);
-        let (lighter, darker) = if first >= second {
-            (first, second)
-        } else {
-            (second, first)
-        };
-        (lighter + 0.05) / (darker + 0.05)
-    };
-    for scheme in [Theme::Dark, Theme::Light] {
-        for contrast in [Contrast::Standard, Contrast::High] {
-            for chroma in [Chroma::FullColor, Chroma::Monochrome] {
-                app.theme_policy_changed(ThemePolicy::new(scheme, contrast, chroma), "")
-                    .unwrap();
-                let display = app.frame([1200.0, 800.0], &mut Metrics).clone();
-
-                let rail = app.scene.computed_style(RAIL).unwrap();
-                let active = app.scene.computed_style(ACTIVE).unwrap();
-                let occupied = app.scene.computed_style(OCCUPIED).unwrap();
-                let empty = app.scene.computed_style(EMPTY).unwrap();
-                let rail_fill = rail
-                    .style
-                    .background
-                    .as_ref()
-                    .and_then(|paint| paint.fill)
-                    .expect("indicator rail has a palette-backed fill");
-                let active_fill = active
-                    .style
-                    .background
-                    .as_ref()
-                    .and_then(|paint| paint.fill)
-                    .expect("active workspace uses a filled primary button");
-                let occupied_fill = occupied
-                    .style
-                    .background
-                    .as_ref()
-                    .and_then(|paint| paint.fill)
-                    .expect("occupied workspace uses a filled secondary button");
-                let empty_fill = empty
-                    .style
-                    .background
-                    .as_ref()
-                    .and_then(|paint| paint.fill)
-                    .expect("empty workspace retains its transparent ghost button");
-
-                assert_eq!(rail_fill.alpha, 255, "{scheme:?}/{contrast:?}/{chroma:?}");
-                assert_ne!(
-                    active_fill, occupied_fill,
-                    "{scheme:?}/{contrast:?}/{chroma:?}"
-                );
-                assert_eq!(empty_fill.alpha, 0, "empty stays visually hollow");
-                assert_eq!(active.style.text.color.alpha, 255);
-                assert!(
-                    contrast_ratio(active.style.text.color, active_fill) >= 4.5,
-                    "active label contrast: {scheme:?}/{contrast:?}/{chroma:?}"
-                );
-                assert!(
-                    contrast_ratio(active_fill, rail_fill) >= 3.0
-                        || (active.borders.top.width >= 2.0
-                            && contrast_ratio(active.borders.top.color, rail_fill) >= 3.0),
-                    "active fill or outline contrast against its rail: {scheme:?}/{contrast:?}/{chroma:?}"
-                );
-                assert!(
-                    occupied.borders.top.width >= 2.0
-                        && contrast_ratio(occupied.borders.top.color, rail_fill) >= 3.0,
-                    "occupied indicator outline against rail: {scheme:?}/{contrast:?}/{chroma:?}"
-                );
-                assert!(
-                    empty.borders.top.width >= 2.0
-                        && contrast_ratio(empty.borders.top.color, rail_fill) >= 3.0,
-                    "empty indicator outline against rail: {scheme:?}/{contrast:?}/{chroma:?}"
-                );
-
-                let bounds = |id| app.scene.bounds(id).unwrap();
-                let painted = |id| {
-                    let expected = bounds(id);
-                    display.commands.iter().find_map(|command| match command {
-                        knave_ui::DisplayCommand::Shape { bounds, paint, .. }
-                            if *bounds == expected =>
-                        {
-                            Some(paint)
-                        }
-                        _ => None,
-                    })
-                };
-                let rail_paint = painted(RAIL).expect("rail is present in the display list");
-                let active_paint = painted(ACTIVE).expect("active dot is painted");
-                let occupied_paint = painted(OCCUPIED).expect("occupied dot is painted");
-                let empty_paint = painted(EMPTY).expect("empty outline is painted");
-                assert_eq!(rail_paint.fill, Some(rail_fill));
-                assert_eq!(active_paint.fill, Some(active_fill));
-                assert_eq!(active_paint.edge_borders.as_ref().unwrap().top.width, 2.0);
-                assert_eq!(occupied_paint.fill, Some(occupied_fill));
-                assert_eq!(empty_paint.edge_borders.as_ref().unwrap().top.width, 2.0);
-            }
-        }
+fn overview_uses_preview_and_arrows_without_redundant_workspace_dots() {
+    let app = app();
+    assert!(app.scene.bounds(ElementId(21)).is_some());
+    assert!(
+        app.scene
+            .bounds(ElementId(0x100_0000_0000 + 3 * 32))
+            .is_some()
+    );
+    for workspace in 1..=3 {
+        assert!(
+            app.scene
+                .bounds(ElementId(0x200_0000_0000 + workspace))
+                .is_none()
+        );
     }
 }
 
@@ -1618,12 +1510,8 @@ fn the_workspace_stage_keeps_a_compact_band_under_the_strip() {
         .unwrap();
     assert!(search.y >= STATUS_BAR_HEIGHT);
     assert!(card.height >= 550.0);
-    // The card no longer reserves the previous 100-pixel footer band.
-    let dot = app
-        .scene
-        .bounds(ElementId(0x200_0000_0000 + 2))
-        .expect("current workspace dot");
-    assert!(dot.y + dot.height <= 800.0 - 24.0);
+    // The overview no longer renders its redundant workspace dot row.
+    assert!(app.scene.bounds(ElementId(0x200_0000_0000 + 2)).is_none());
 }
 
 #[test]
@@ -1633,8 +1521,7 @@ fn full_named_themes_leave_compositor_preview_windows_unpainted() {
         knave_ui::toolkit::Theme::Light,
     ] {
         let mut app = app();
-        app.theme_policy_changed(theme.into(), theme.stylesheet())
-            .unwrap();
+        app.theme_changed(theme, theme.stylesheet()).unwrap();
         let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
         let pane = app
             .panes

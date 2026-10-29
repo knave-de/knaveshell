@@ -45,8 +45,6 @@ fn short(value: &str, limit: usize) -> String {
 const BAR_ELEMENT_ID_BASE: u64 = 0x800_0000_0000;
 /// Derived per-tray-icon element id for a window's allocated control id.
 const TRAY_ICON_ELEMENT_BASE: u64 = 0x500_0000_0000;
-/// Theme-backed surface behind the workspace indicators.
-pub(super) const WORKSPACE_INDICATOR_RAIL: u64 = 0x201_0000_0000;
 
 /// Icon theme name for a window's `app_id`, resolved from the loaded catalog.
 /// Wayland app ids may be the desktop file id with or without its suffix, or
@@ -162,67 +160,6 @@ impl Overview {
                 ));
             }
             root.children.push(self.workspace_card(ws, rect, true));
-            let count = self.snapshot.as_ref().unwrap().workspaces.len();
-            let first = index.saturating_sub(4).min(count.saturating_sub(9));
-            let dots: Vec<_> = self
-                .snapshot
-                .as_ref()
-                .unwrap()
-                .workspaces
-                .iter()
-                .skip(first)
-                .take(9)
-                .map(|w| (w.workspace, w.window_count > 0))
-                .collect();
-            let dot_width = dots.len() as f32 * 24.0;
-            let dot_y = y + preview_height + 20.0;
-            if !dots.is_empty() {
-                let rail_width = dot_width + 16.0;
-                let mut rail = placed(
-                    Element::new(WORKSPACE_INDICATOR_RAIL, Widget::Panel)
-                        .class("overview-workspace-indicator-rail"),
-                    Rect::new((width - rail_width) / 2.0, dot_y - 8.0, rail_width, 32.0),
-                );
-                rail.style.radius = 16.0;
-                root.children.push(rail);
-            }
-            for (n, (workspace, occupied)) in dots.into_iter().enumerate() {
-                let id = 0x200_0000_0000 + u64::from(workspace.0);
-                let mut dot = control(
-                    id,
-                    "",
-                    Rect::new(
-                        (width - dot_width) / 2.0 + n as f32 * 24.0,
-                        dot_y,
-                        16.0,
-                        16.0,
-                    ),
-                );
-                dot.layout.padding_edges = None;
-                dot.button_variant = Some(if workspace == ws {
-                    ButtonVariant::Primary
-                } else if occupied {
-                    ButtonVariant::Secondary
-                } else {
-                    ButtonVariant::Ghost
-                });
-                dot.classes.push(if workspace == ws {
-                    "overview-current-dot".into()
-                } else {
-                    "overview-other-dot".into()
-                });
-                if workspace != ws {
-                    dot.classes.push(if occupied {
-                        "overview-workspace-dot-occupied".into()
-                    } else {
-                        "overview-workspace-dot-empty".into()
-                    });
-                }
-                dot.tooltip = Some(format!("Workspace {}", workspace.0));
-                self.targets
-                    .insert(ElementId(id), Target::Workspace(workspace));
-                root.children.push(dot);
-            }
             let prev = index
                 .checked_sub(1)
                 .and_then(|i| self.snapshot.as_ref()?.workspaces.get(i))
