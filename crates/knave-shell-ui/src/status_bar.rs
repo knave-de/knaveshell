@@ -968,49 +968,129 @@ mod tests {
             UiNode::Label { text, .. } if text == "0")));
         assert!(bar.scene.nodes().iter().any(|node| matches!(node,
             UiNode::Panel { id, bounds, .. } if id.0 == 5_001 && bounds.width == 3.0)));
-        assert!(bar.display.commands.iter().any(|command| matches!(command,
-            knave_ui::DisplayCommand::Shape { .. })));
+        assert!(
+            bar.display
+                .commands
+                .iter()
+                .any(|command| matches!(command, knave_ui::DisplayCommand::Shape { .. }))
+        );
 
         let variant_fill = |workspace: u32| {
-            let index = bar.scene.targets.iter().position(|target| {
-                target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
-            }).expect("workspace action");
-            bar.toolkit_scene.computed_style(ElementId(50_000 + index as u64))
-                .unwrap().style.background.and_then(|paint| paint.fill)
+            let index = bar
+                .scene
+                .targets
+                .iter()
+                .position(|target| {
+                    target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
+                })
+                .expect("workspace action");
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + index as u64))
+                .unwrap()
+                .style
+                .background
+                .and_then(|paint| paint.fill)
         };
         assert_eq!(variant_fill(1), Some(Color::ACCENT));
         assert!(variant_fill(2).is_some());
         assert_ne!(variant_fill(2), variant_fill(1));
         assert!(variant_fill(0).is_none_or(|color| color.alpha == 0));
-        assert_eq!(bar.toolkit_scene.computed_style(ElementId(60_011)).unwrap()
-            .style.text.color, Color::rgba(0x0A, 0x16, 0x20, 255),
-            "the active workspace number should use dark on-accent text");
+        assert_eq!(
+            bar.toolkit_scene
+                .computed_style(ElementId(60_011))
+                .unwrap()
+                .style
+                .text
+                .color,
+            Color::rgba(0x0A, 0x16, 0x20, 255),
+            "the active workspace number should use dark on-accent text"
+        );
     }
 
     #[test]
-    fn workspace_zero_and_occupancy_dots_render_with_active_chip() {
-        let bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
-        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
-            UiNode::Label { text, .. } if text == "0")));
-        assert!(bar.scene.nodes().iter().any(|node| matches!(node,
-            UiNode::Panel { id, bounds, .. } if id.0 == 5_001 && bounds.width == 3.0)));
-        assert!(bar.display.commands.iter().any(|command| matches!(command,
-            knave_ui::DisplayCommand::Shape { .. })));
-
-        let variant_fill = |workspace: u32| {
-            let index = bar.scene.targets.iter().position(|target| {
-                target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
-            }).expect("workspace action");
-            bar.toolkit_scene.computed_style(ElementId(50_000 + index as u64))
-                .unwrap().style.background.and_then(|paint| paint.fill)
+    fn high_contrast_monochrome_keeps_workspace_primary_legible_in_both_schemes() {
+        let mut bar = StatusBar::new(1, 600.0, 36.0, Some(&desktop()), true, None, &[]);
+        let workspace_style = |bar: &StatusBar, workspace: u32| {
+            let index = bar
+                .scene
+                .targets
+                .iter()
+                .position(|target| {
+                    target.action == UiAction::FocusWorkspace(WorkspaceId(workspace))
+                })
+                .expect("workspace action");
+            bar.toolkit_scene
+                .computed_style(ElementId(50_000 + index as u64))
+                .unwrap()
+                .style
         };
-        assert_eq!(variant_fill(1), Some(Color::ACCENT));
-        assert!(variant_fill(2).is_some());
-        assert_ne!(variant_fill(2), variant_fill(1));
-        assert!(variant_fill(0).is_none_or(|color| color.alpha == 0));
-        assert_eq!(bar.toolkit_scene.computed_style(ElementId(60_011)).unwrap()
-            .style.text.color, Color::rgba(0x0A, 0x16, 0x20, 255),
-            "the active workspace number should use dark on-accent text");
+
+        let contrast_ratio = |first: Color, second: Color| {
+            let luminance = |color: Color| {
+                let channel = |value: u8| {
+                    let value = f64::from(value) / 255.0;
+                    if value <= 0.04045 {
+                        value / 12.92
+                    } else {
+                        ((value + 0.055) / 1.055).powf(2.4)
+                    }
+                };
+                0.2126 * channel(color.red)
+                    + 0.7152 * channel(color.green)
+                    + 0.0722 * channel(color.blue)
+            };
+            let first = luminance(first);
+            let second = luminance(second);
+            let (lighter, darker) = if first >= second {
+                (first, second)
+            } else {
+                (second, first)
+            };
+            (lighter + 0.05) / (darker + 0.05)
+        };
+
+        for (scheme, expected_fill, expected_text, expected_inactive_text) in [
+            (
+                knave_ui::toolkit::Theme::Dark,
+                Color::rgba(255, 255, 255, 255),
+                Color::rgba(0, 0, 0, 255),
+                Color::rgba(255, 255, 255, 255),
+            ),
+            (
+                knave_ui::toolkit::Theme::Light,
+                Color::rgba(0, 0, 0, 255),
+                Color::rgba(255, 255, 255, 255),
+                Color::rgba(0, 0, 0, 255),
+            ),
+        ] {
+            bar.set_user_policy(
+                knave_ui::toolkit::ThemePolicy::new(
+                    scheme,
+                    knave_ui::toolkit::Contrast::High,
+                    knave_ui::toolkit::Chroma::Monochrome,
+                ),
+                "",
+            )
+            .unwrap();
+
+            let active = workspace_style(&bar, 1);
+            let inactive = workspace_style(&bar, 2);
+            let active_fill = active
+                .background
+                .and_then(|paint| paint.fill)
+                .expect("active workspace has a primary fill");
+            let inactive_fill = inactive
+                .background
+                .and_then(|paint| paint.fill)
+                .expect("occupied inactive workspace has a secondary fill");
+
+            assert_eq!(active_fill, expected_fill);
+            assert_eq!(active.text.color, expected_text);
+            assert_eq!(inactive.text.color, expected_inactive_text);
+            assert_ne!(active_fill, inactive_fill);
+            assert_ne!(active.text.color, inactive.text.color);
+            assert!(contrast_ratio(active.text.color, active_fill) >= 7.0);
+        }
     }
 
     #[test]
