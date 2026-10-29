@@ -1535,7 +1535,8 @@ fn full_named_themes_leave_compositor_preview_windows_unpainted() {
         knave_ui::toolkit::Theme::Light,
     ] {
         let mut app = app();
-        app.theme_changed(theme, theme.stylesheet()).unwrap();
+        app.theme_policy_changed(theme.into(), theme.stylesheet())
+            .unwrap();
         let list = app.frame([1200.0, 800.0], &mut Metrics).clone();
         let pane = app
             .panes

@@ -99,8 +99,11 @@ impl Overview {
             &self.applets,
             self.focused_icon.as_ref(),
         );
-        bar.set_user_theme(self.theme, self.scene.user_theme_stylesheet())
-            .expect("selected shell theme stylesheet is valid");
+        bar.set_user_policy(
+            self.scene.theme_policy(),
+            self.scene.user_theme_stylesheet(),
+        )
+        .expect("selected shell theme stylesheet is valid");
         bar
     }
     pub fn new() -> Self {
@@ -309,10 +312,11 @@ impl Overview {
         // Drop the old text widget and its captured input as well as the model,
         // so a late key release cannot copy the old query back into state.
         let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
+        let policy = self.scene.theme_policy();
         self.scene = Scene::new(Element::new(0, Widget::Panel)).expect("valid empty scene");
         self.scene
-            .set_theme_stylesheets(
-                self.theme,
+            .set_theme_policy_stylesheets(
+                policy,
                 knave_shell_ui::styles::STYLESHEET,
                 &user_theme_css,
             )
@@ -344,8 +348,8 @@ impl Overview {
         self.size = size;
         let mut scene = Scene::new(self.compose())?;
         scene
-            .set_theme_stylesheets(
-                self.theme,
+            .set_theme_policy_stylesheets(
+                self.scene.theme_policy(),
                 knave_shell_ui::styles::STYLESHEET,
                 self.scene.user_theme_stylesheet(),
             )
@@ -427,10 +431,11 @@ impl Overview {
         let focus = self.scene.focus();
         let root = self.compose();
         let user_theme_css = self.scene.user_theme_stylesheet().to_owned();
+        let policy = self.scene.theme_policy();
         match Scene::new(root) {
             Ok(mut scene) => {
-                if let Err(error) = scene.set_theme_stylesheets(
-                    self.theme,
+                if let Err(error) = scene.set_theme_policy_stylesheets(
+                    policy,
                     knave_shell_ui::styles::STYLESHEET,
                     &user_theme_css,
                 ) {
@@ -467,14 +472,14 @@ impl Overview {
     }
 }
 impl Application for Overview {
-    fn theme_changed(
+    fn theme_policy_changed(
         &mut self,
-        theme: knave_ui::toolkit::Theme,
+        policy: knave_ui::toolkit::ThemePolicy,
         css: &str,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
         self.scene
-            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, css)?;
-        self.theme = theme;
+            .set_theme_policy_stylesheets(policy, knave_shell_ui::styles::STYLESHEET, css)?;
+        self.theme = policy.scheme;
         self.dirty = true;
         Ok(())
     }

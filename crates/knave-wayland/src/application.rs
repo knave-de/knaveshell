@@ -110,6 +110,16 @@ pub trait Application {
         Ok(())
     }
 
+    /// Apply the selected scheme and accessibility palette. Legacy applications
+    /// continue to receive the scheme through `theme_changed`.
+    fn theme_policy_changed(
+        &mut self,
+        policy: knave_ui::toolkit::ThemePolicy,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.theme_changed(policy.scheme, css)
+    }
+
     /// Drain completed background work before visibility and rendering are evaluated.
     fn update(&mut self) {}
     /// Dynamic input regions in logical surface coordinates; None uses the whole surface.

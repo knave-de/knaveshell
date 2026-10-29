@@ -107,11 +107,29 @@ impl StatusBar {
         theme: knave_ui::toolkit::Theme,
         css: &str,
     ) -> Result<(), knave_ui::toolkit::StylesheetError> {
+        self.set_user_policy(
+            knave_ui::toolkit::ThemePolicy::new(
+                theme,
+                knave_ui::toolkit::Contrast::Standard,
+                knave_ui::toolkit::Chroma::FullColor,
+            ),
+            css,
+        )
+    }
+
+    pub fn set_user_policy(
+        &mut self,
+        policy: knave_ui::toolkit::ThemePolicy,
+        css: &str,
+    ) -> Result<(), knave_ui::toolkit::StylesheetError> {
         self.toolkit_scene
-            .replace(crate::styles::root(self.toolkit_root.clone(), theme))
+            .replace(crate::styles::root(
+                self.toolkit_root.clone(),
+                policy.scheme,
+            ))
             .expect("status bar element identities are unique");
         self.toolkit_scene
-            .set_theme_stylesheets(theme, crate::styles::STYLESHEET, css)?;
+            .set_theme_policy_stylesheets(policy, crate::styles::STYLESHEET, css)?;
         self.refresh_toolkit_output();
         Ok(())
     }

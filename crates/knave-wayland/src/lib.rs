@@ -699,7 +699,7 @@ fn run_internal(
         }
     };
     if let Some(app) = &mut app {
-        app.theme_changed(selected_theme.theme, &selected_theme.css)
+        app.theme_policy_changed(selected_theme.policy, &selected_theme.css)
             .map_err(|error| WaylandError::Dispatch(format!("theme: {error}")))?;
     }
     // Recheck after watch registration so an edit during startup cannot be missed.
@@ -757,7 +757,7 @@ fn run_internal(
         keyboard: None,
         pointer: None,
         role,
-        theme: selected_theme.theme,
+        theme_policy: selected_theme.policy,
         user_theme_css: selected_theme.css,
         theme_pending,
         _theme_watcher: theme_watcher,
@@ -851,7 +851,7 @@ struct Runtime {
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<ThemedPointer>,
     role: ShellRole,
-    theme: knave_ui::toolkit::Theme,
+    theme_policy: knave_ui::toolkit::ThemePolicy,
     user_theme_css: String,
     theme_pending: Arc<AtomicBool>,
     _theme_watcher: Option<knave_ui::toolkit::theme_file::FileWatcher>,
@@ -968,10 +968,10 @@ impl Runtime {
         if self.theme_pending.swap(false, Ordering::AcqRel) {
             let result = theme::Selection::load().and_then(|selected| {
                 if let Some(app) = &mut self.app {
-                    app.theme_changed(selected.theme, &selected.css)
+                    app.theme_policy_changed(selected.policy, &selected.css)
                         .map_err(|error| error.to_string())?;
                 }
-                self.theme = selected.theme;
+                self.theme_policy = selected.policy;
                 self.user_theme_css = selected.css;
                 self.scene_dirty = true;
                 Ok(())
@@ -1159,7 +1159,7 @@ impl Runtime {
                     &self.applets,
                     self.focused_app_icon.as_ref(),
                 );
-                bar.set_user_theme(self.theme, &self.user_theme_css)
+                bar.set_user_policy(self.theme_policy, &self.user_theme_css)
                     .expect("bundled shell theme stylesheet is valid");
                 self.scene = bar.scene;
                 self.render_list = bar.display;
