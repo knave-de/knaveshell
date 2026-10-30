@@ -317,6 +317,9 @@ impl Overview {
     fn clear_query(&mut self) {
         let _ = self.scene.set_focus(None);
         self.query = TextEdit::new("").expect("empty text");
+        self.scene
+            .set_widget(SEARCH, Widget::TextInput(self.query.clone()))
+            .expect("search input exists in the overview scene");
         self.result_page = 0;
         self.all_apps = false;
         self.dirty = true;
