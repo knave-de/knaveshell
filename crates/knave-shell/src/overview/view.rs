@@ -543,13 +543,12 @@ impl Overview {
             }
             let name_id = 0x600_0000_0000 + index as u64 * 2;
             let description_id = name_id + 1;
-            let mut name_text = text(
-                name_id,
-                name,
+            let mut name_text = placed(
+                Element::new(name_id, Widget::Text(name)),
                 Rect::new(0.0, 0.0, (row.width - pad.left - pad.right).max(0.0), 21.0),
-                15.0,
-                "",
             );
+            name_text.style.text.font_size = 15.0;
+            name_text.style.text.line_height = 20.0;
             name_text.style.text.align = TextAlign::Start;
             name_text.style.text.weight = 600;
             result.children.push(name_text);
