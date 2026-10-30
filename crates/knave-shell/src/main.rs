@@ -8,10 +8,16 @@ use std::{
 use knave_shell_ui::UiScene;
 use knave_wayland::ShellRole;
 
-fn configured_theme() -> Result<knave_ui::toolkit::Theme, String> {
+fn configured_settings() -> Result<knave_config::Config, String> {
     let config = knave_config::ConfigDocument::at_default_path()
-        .map_err(|error| format!("could not load Knave appearance preference: {error}"))?;
-    Ok(knave_shell::toolkit_theme(config.config().appearance.theme))
+        .map_err(|error| format!("could not load Knave settings: {error}"))?;
+    Ok(config.config().clone())
+}
+
+fn configured_theme() -> Result<knave_ui::toolkit::Theme, String> {
+    Ok(knave_shell::toolkit_theme(
+        configured_settings()?.appearance.theme,
+    ))
 }
 
 fn usage() -> &'static str {
@@ -119,6 +125,7 @@ fn run() -> Result<(), String> {
             return Err("overview is managed by knave-session".into());
         }
         let _overview_lock = overview_lock()?;
+        let settings = configured_settings()?;
         knave_wayland::run_application(
             knave_wayland::SurfaceOptions {
                 keyboard: knave_wayland::KeyboardMode::Exclusive,
@@ -126,7 +133,10 @@ fn run() -> Result<(), String> {
                 namespace: "knave-shell-overview".into(),
                 ..Default::default()
             },
-            knave_shell::overview::Overview::with_theme(configured_theme()?),
+            knave_shell::overview::Overview::with_theme(knave_shell::toolkit_theme(
+                settings.appearance.theme,
+            ))
+            .with_pinned_apps(settings.shell.pinned_apps),
         )
         .map_err(|error| error.to_string())
     } else {
