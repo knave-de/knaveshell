@@ -121,11 +121,7 @@ impl Overview {
         root.children.push(search);
         let mut all_apps = control(
             4,
-            if self.all_apps {
-                "Workspaces"
-            } else {
-                "All applications"
-            },
+            "All applications",
             Rect::new(
                 search_rect.x + search_rect.width + gap,
                 search_rect.y,
