@@ -285,6 +285,8 @@ impl Overview {
                 self.result_page = 0;
                 if self.all_apps {
                     self.ensure_catalog();
+                } else {
+                    self.clear_query();
                 }
                 self.dirty = true;
             }
