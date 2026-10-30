@@ -1,3 +1,4 @@
+use super::view::DOCK_ELEMENT_ID_BASE;
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
 use knave_shell_ui::UiNode;
