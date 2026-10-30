@@ -150,6 +150,39 @@ fn app() -> Overview {
     app.frame([1200.0, 800.0], &mut Metrics);
     app
 }
+fn dock_app() -> Overview {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(true))
+        .with_pinned_apps(vec!["tool01.desktop".into(), "editor.desktop".into()]);
+    let mut desktop = snapshot();
+    desktop.windows.retain(|window| window.id.0 != 14);
+    desktop.windows.push(WindowSummary {
+        id: WindowId(14),
+        title: "Other workspace".into(),
+        app_id: "Other Workspace App".into(),
+        workspace: WorkspaceId(3),
+        focused: false,
+        minimized: false,
+        floating: false,
+        fullscreen: false,
+        maximized: false,
+    });
+    desktop.windows.push(WindowSummary {
+        id: WindowId(15),
+        title: "Minimized tool".into(),
+        app_id: "Tool 03".into(),
+        workspace: WorkspaceId(2),
+        focused: false,
+        minimized: true,
+        floating: false,
+        fullscreen: false,
+        maximized: false,
+    });
+    app.desktop_snapshot(&desktop);
+    app.frame([1200.0, 800.0], &mut Metrics);
+    app
+}
 fn key(app: &mut Overview, key: Key, pressed: bool) {
     app.input(Input::Key {
         key,
@@ -721,6 +754,64 @@ fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
     assert!(!app.should_close());
     assert_eq!(app.error.as_deref(), Some("No such file"));
 }
+
+#[test]
+fn dock_keeps_pins_in_order_and_adds_only_unpinned_apps_from_the_active_workspace() {
+    let app = dock_app();
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 1))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 2))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 3))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 4))
+            .is_none()
+    );
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 1)),
+        Some(Target::App(index))
+            if matches!(&app.apps, Apps::Ready(catalog) if catalog.get(*index).is_some_and(|app| app.id == "tool01.desktop"))
+    ));
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 2)),
+        Some(Target::DockWindow(WindowId(1)))
+    ));
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 3)),
+        Some(Target::DockWindow(WindowId(15)))
+    ));
+}
+
+#[test]
+fn dock_launches_idle_pins() {
+    let mut app = dock_app();
+    click(&mut app, ElementId(DOCK_ELEMENT_ID_BASE + 1));
+    assert_eq!(spawned(&mut app), Some(vec!["tool01".into()]));
+}
+
+#[test]
+fn dock_restores_running_minimized_apps() {
+    let mut app = dock_app();
+    click(&mut app, ElementId(DOCK_ELEMENT_ID_BASE + 3));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::RestoreWindow {
+            window: WindowId(15)
+        }))
+    ));
+}
+
 #[test]
 fn results_are_applications_only_and_paginate() {
     {

@@ -11,7 +11,7 @@ button.overview-dock-app {
     border-radius: 12px;
 }
 button.overview-dock-app:hover,
-button.overview-dock-app:focus-visible {
+button.overview-dock-app:focus {
     background-color: var(--surface-selected);
     border-color: var(--border-strong);
 }
