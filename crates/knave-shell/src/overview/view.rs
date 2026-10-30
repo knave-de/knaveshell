@@ -45,7 +45,7 @@ fn short(value: &str, limit: usize) -> String {
 const BAR_ELEMENT_ID_BASE: u64 = 0x800_0000_0000;
 /// Derived per-tray-icon element id for a window's allocated control id.
 const TRAY_ICON_ELEMENT_BASE: u64 = 0x500_0000_0000;
-const DOCK_ELEMENT_ID_BASE: u64 = 0x600_0000_0000;
+pub(super) const DOCK_ELEMENT_ID_BASE: u64 = 0x600_0000_0000;
 
 struct DockItem {
     name: String,
