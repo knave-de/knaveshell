@@ -79,9 +79,12 @@ impl Overview {
         root = root.without_surface();
         root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         let pad = (width * 0.045).clamp(12.0, 64.0);
-        let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
+        let button_width = 154.0f32.min((width - pad * 2.0).max(1.0) * 0.44);
+        let gap = 10.0;
+        let search_width = (width - pad * 2.0 - button_width - gap).clamp(1.0, 760.0);
+        let group_width = search_width + gap + button_width;
         let search_rect = Rect::new(
-            (width - search_width) / 2.0,
+            (width - group_width) / 2.0,
             STATUS_BAR_HEIGHT + 28.0f32.min(height * 0.04),
             search_width,
             54.0f32.min(height * 0.15),
@@ -116,7 +119,25 @@ impl Overview {
             child.layout.offset[1] -= 10.0;
         }
         root.children.push(search);
+        let mut all_apps = control(
+            4,
+            if self.all_apps {
+                "Workspaces"
+            } else {
+                "All applications"
+            },
+            Rect::new(
+                search_rect.x + search_rect.width + gap,
+                search_rect.y,
+                button_width,
+                search_rect.height,
+            ),
+        );
+        all_apps.enabled = !self.pending;
+        self.targets.insert(ElementId(4), Target::AllApps);
+        root.children.push(all_apps);
         if self.query.text().is_empty()
+            && !self.all_apps
             && let (Some(snapshot), Some(ws)) = (&self.snapshot, self.workspace)
         {
             let index = snapshot
@@ -187,7 +208,7 @@ impl Overview {
                     root.children.push(b);
                 }
             }
-        } else if self.query.text().is_empty() {
+        } else if self.query.text().is_empty() && !self.all_apps {
             let message = if self.snapshot.is_some() {
                 "No workspaces available"
             } else {
@@ -203,7 +224,7 @@ impl Overview {
             e.style.text.align = TextAlign::Center;
             root.children.push(e);
         }
-        if !self.query.text().is_empty() {
+        if !self.query.text().is_empty() || self.all_apps {
             root.children.push(self.search_results(search_rect));
         }
         let footer = if self.pending {
