@@ -26,6 +26,7 @@ enum Target {
     StatusBar(knave_shell_ui::UiAction),
     Window(WindowId),
     App(usize),
+    AllApps,
     Page(bool),
 }
 
@@ -71,6 +72,7 @@ pub struct Overview {
     launch_when_ready: bool,
     page: usize,
     result_page: usize,
+    all_apps: bool,
     connected: bool,
     size: [f32; 2],
     dirty: bool,
@@ -140,6 +142,7 @@ impl Overview {
             launch_when_ready: false,
             page: 0,
             result_page: 0,
+            all_apps: false,
             connected: false,
             size: [0.0; 2],
             dirty: true,
@@ -277,8 +280,19 @@ impl Overview {
                 }
             }
             Some(Target::App(index)) => self.launch(index),
+            Some(Target::AllApps) => {
+                self.all_apps = !self.all_apps;
+                self.result_page = 0;
+                if self.all_apps {
+                    self.clear_search();
+                    self.ensure_catalog();
+                } else {
+                    self.clear_query();
+                }
+                self.dirty = true;
+            }
             Some(Target::Page(next)) => {
-                let page = if self.query.text().is_empty() {
+                let page = if self.query.text().is_empty() && !self.all_apps {
                     &mut self.page
                 } else {
                     &mut self.result_page
@@ -302,8 +316,15 @@ impl Overview {
         }
     }
     fn clear_query(&mut self) {
+        self.clear_search();
+        self.all_apps = false;
+    }
+    fn clear_search(&mut self) {
         let _ = self.scene.set_focus(None);
         self.query = TextEdit::new("").expect("empty text");
+        self.scene
+            .set_widget(SEARCH, Widget::TextInput(self.query.clone()))
+            .expect("search input exists in the overview scene");
         self.result_page = 0;
         self.dirty = true;
     }
@@ -326,6 +347,7 @@ impl Overview {
         self.workspace = None;
         self.page = 0;
         self.result_page = 0;
+        self.all_apps = false;
         self.launch_when_ready = false;
         self.hide_after_action = false;
         self.background_pressed = false;
@@ -409,6 +431,9 @@ impl Overview {
     /// Catalog indexes for the current query, best match first.
     fn search(&self) -> Vec<usize> {
         match &self.apps {
+            Apps::Ready(catalog) if self.all_apps && self.query.text().trim().is_empty() => {
+                (0..catalog.len()).collect()
+            }
             Apps::Ready(catalog) => catalog.search(self.query.text(), MAX_RESULTS),
             Apps::Unloaded | Apps::Loading | Apps::Unavailable => Vec::new(),
         }

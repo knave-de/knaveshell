@@ -79,9 +79,12 @@ impl Overview {
         root = root.without_surface();
         root.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
         let pad = (width * 0.045).clamp(12.0, 64.0);
-        let search_width = (width - pad * 2.0).clamp(1.0, 760.0);
+        let button_width = 154.0f32.min((width - pad * 2.0).max(1.0) * 0.44);
+        let gap = 10.0;
+        let search_width = (width - pad * 2.0 - button_width - gap).clamp(1.0, 760.0);
+        let group_width = search_width + gap + button_width;
         let search_rect = Rect::new(
-            (width - search_width) / 2.0,
+            (width - group_width) / 2.0,
             STATUS_BAR_HEIGHT + 28.0f32.min(height * 0.04),
             search_width,
             54.0f32.min(height * 0.15),
@@ -116,7 +119,21 @@ impl Overview {
             child.layout.offset[1] -= 10.0;
         }
         root.children.push(search);
+        let mut all_apps = control(
+            4,
+            "All applications",
+            Rect::new(
+                search_rect.x + search_rect.width + gap,
+                search_rect.y,
+                button_width,
+                search_rect.height,
+            ),
+        );
+        all_apps.enabled = !self.pending;
+        self.targets.insert(ElementId(4), Target::AllApps);
+        root.children.push(all_apps);
         if self.query.text().is_empty()
+            && !self.all_apps
             && let (Some(snapshot), Some(ws)) = (&self.snapshot, self.workspace)
         {
             let index = snapshot
@@ -187,7 +204,7 @@ impl Overview {
                     root.children.push(b);
                 }
             }
-        } else if self.query.text().is_empty() {
+        } else if self.query.text().is_empty() && !self.all_apps {
             let message = if self.snapshot.is_some() {
                 "No workspaces available"
             } else {
@@ -203,8 +220,14 @@ impl Overview {
             e.style.text.align = TextAlign::Center;
             root.children.push(e);
         }
-        if !self.query.text().is_empty() {
-            root.children.push(self.search_results(search_rect));
+        if !self.query.text().is_empty() || self.all_apps {
+            let results_rect = Rect::new(
+                search_rect.x,
+                search_rect.y,
+                group_width,
+                search_rect.height,
+            );
+            root.children.push(self.search_results(results_rect));
         }
         let footer = if self.pending {
             Some("Opening…".to_owned())
@@ -423,7 +446,7 @@ impl Overview {
             .min(matches.len().saturating_sub(1) / page_size);
         let start = self.result_page * page_size;
         let shown = matches.len().saturating_sub(start).min(page_size);
-        let visible: Vec<(usize, String, String)> = match &self.apps {
+        let visible: Vec<(usize, String, String, String)> = match &self.apps {
             Apps::Ready(catalog) => matches
                 .iter()
                 .skip(start)
@@ -431,17 +454,17 @@ impl Overview {
                 .filter_map(|&index| {
                     let app = catalog.get(index)?;
                     let icon = app.icon.clone().unwrap_or_else(|| icons::FALLBACK.into());
-                    let label = if app.description.is_empty() {
-                        short(&app.name, 70)
-                    } else {
-                        format!("{}\n{}", short(&app.name, 70), short(&app.description, 90))
-                    };
-                    Some((index, label, icon))
+                    Some((
+                        index,
+                        short(&app.name, 70),
+                        short(&app.description, 96),
+                        icon,
+                    ))
                 })
                 .collect(),
             Apps::Unloaded | Apps::Loading | Apps::Unavailable => Vec::new(),
         };
-        for (_, _, icon) in &visible {
+        for (_, _, _, icon) in &visible {
             // Failed submits retry on the next frame, which the worker's results trigger.
             if self.icons.needs_request(icon)
                 && self.loader().submit(loader::Job::Icon(icon.clone()))
@@ -449,9 +472,11 @@ impl Overview {
                 self.icons.requested(icon);
             }
         }
-        let rows: Vec<(usize, String, Option<UiImage>)> = visible
+        let rows: Vec<(usize, String, String, Option<UiImage>)> = visible
             .into_iter()
-            .map(|(index, label, icon)| (index, label, self.icons.get(&icon).cloned()))
+            .map(|(index, name, description, icon)| {
+                (index, name, description, self.icons.get(&icon).cloned())
+            })
             .collect();
         let mut panel = panel(
             40,
@@ -475,28 +500,28 @@ impl Overview {
                 "overview-muted",
             ));
         }
-        for (n, (index, label, image)) in rows.into_iter().enumerate() {
+        for (n, (index, name, description, image)) in rows.into_iter().enumerate() {
             let id = app_element(index);
-            let mut result = control(
-                id.0,
-                label,
-                Rect::new(
-                    12.0,
-                    38.0 + n as f32 * 60.0,
-                    (search.width - 24.0).max(0.0),
-                    54.0,
-                ),
+            let row = Rect::new(
+                12.0,
+                38.0 + n as f32 * 60.0,
+                (search.width - 24.0).max(0.0),
+                54.0,
             );
-            // Text keeps a fixed column whether or not the icon resolved.
+            let mut result = control(id.0, String::new(), row);
             let pad = Insets {
                 top: 6.0,
-                right: 12.0,
+                right: 14.0,
                 bottom: 6.0,
-                left: 58.0,
+                left: 62.0,
             };
             result.layout = result.layout.with_padding(pad);
+            result.layout.clip = ClipMode::Bounds;
+            result.semantics.name = Some(name.clone());
+            if !description.is_empty() {
+                result.semantics.description = Some(description.clone());
+            }
             if let Some(image) = image {
-                // Child offsets are relative to the padded content area.
                 let icon = placed(
                     Element::new(
                         0x400_0000_0000 + index as u64,
@@ -510,9 +535,29 @@ impl Overview {
                     ),
                     Rect::new(14.0 - pad.left, 11.0 - pad.top, 32.0, 32.0),
                 );
-                // Without this the row clips children to its padded content area.
-                result.layout.clip = ClipMode::Bounds;
                 result.children.push(icon);
+            }
+            let name_id = 0x600_0000_0000 + index as u64 * 2;
+            let description_id = name_id + 1;
+            let mut name_text = placed(
+                Element::new(name_id, Widget::Text(name)),
+                Rect::new(0.0, 0.0, (row.width - pad.left - pad.right).max(0.0), 21.0),
+            );
+            name_text.style.text.font_size = 15.0;
+            name_text.style.text.line_height = 20.0;
+            name_text.style.text.align = TextAlign::Start;
+            name_text.style.text.weight = 600;
+            result.children.push(name_text);
+            if !description.is_empty() {
+                let mut description_text = text(
+                    description_id,
+                    description,
+                    Rect::new(0.0, 21.0, (row.width - pad.left - pad.right).max(0.0), 18.0),
+                    12.0,
+                    "overview-muted",
+                );
+                description_text.style.text.align = TextAlign::Start;
+                result.children.push(description_text);
             }
             result.enabled = !self.pending;
             self.targets.insert(id, Target::App(index));
