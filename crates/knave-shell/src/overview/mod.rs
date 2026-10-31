@@ -28,6 +28,8 @@ enum Target {
     App(usize),
     AllApps,
     Page(bool),
+    DockWindow(WindowId),
+    DockPage(bool),
 }
 
 /// The catalog loads on a worker after the first query or when a snapshot
@@ -67,10 +69,12 @@ pub struct Overview {
     /// Consumed when the worker starts.
     lookup: Option<IconLookup>,
     catalog_env: Option<Environment>,
+    pinned_apps: Vec<String>,
     waker: Option<knave_wayland::Waker>,
     /// Enter arrived while the catalog was still loading.
     launch_when_ready: bool,
     page: usize,
+    dock_page: usize,
     result_page: usize,
     all_apps: bool,
     connected: bool,
@@ -138,9 +142,11 @@ impl Overview {
             loader: None,
             lookup: None,
             catalog_env: None,
+            pinned_apps: Vec::new(),
             waker: None,
             launch_when_ready: false,
             page: 0,
+            dock_page: 0,
             result_page: 0,
             all_apps: false,
             connected: false,
@@ -167,6 +173,11 @@ impl Overview {
     /// Scan these directories instead of the process's XDG environment.
     pub fn with_catalog_environment(mut self, env: Environment) -> Self {
         self.catalog_env = Some(env);
+        self
+    }
+    /// Desktop-file IDs shown before apps running in the active workspace.
+    pub fn with_pinned_apps(mut self, pinned_apps: Vec<String>) -> Self {
+        self.pinned_apps = pinned_apps;
         self
     }
     /// True while the worker still owes the UI a catalog or icons.
@@ -291,6 +302,15 @@ impl Overview {
                 }
                 self.dirty = true;
             }
+            Some(Target::DockWindow(id)) => {
+                if let Some(window) = self.window(id) {
+                    self.dispatch(if window.minimized {
+                        DesktopCommand::RestoreWindow { window: id }
+                    } else {
+                        DesktopCommand::FocusWindow { window: id }
+                    });
+                }
+            }
             Some(Target::Page(next)) => {
                 let page = if self.query.text().is_empty() && !self.all_apps {
                     &mut self.page
@@ -301,6 +321,14 @@ impl Overview {
                     page.saturating_add(1)
                 } else {
                     page.saturating_sub(1)
+                };
+                self.dirty = true;
+            }
+            Some(Target::DockPage(next)) => {
+                self.dock_page = if next {
+                    self.dock_page.saturating_add(1)
+                } else {
+                    self.dock_page.saturating_sub(1)
                 };
                 self.dirty = true;
             }
@@ -346,6 +374,7 @@ impl Overview {
         self.panes.clear();
         self.workspace = None;
         self.page = 0;
+        self.dock_page = 0;
         self.result_page = 0;
         self.all_apps = false;
         self.launch_when_ready = false;
@@ -360,6 +389,9 @@ impl Overview {
             - STATUS_BAR_HEIGHT
             - 28.0f32.min(self.size[1] * 0.04)
             - 54.0f32.min(self.size[1] * 0.15)
+            // Keep the result panel's gap and header above the bottom dock.
+            - 12.0
+            - 66.0
             - 80.0)
             / 60.0)
             .floor() as usize)
@@ -560,6 +592,7 @@ impl Application for Overview {
             .map(|w| w.workspace);
         if self.workspace != previous {
             self.page = 0;
+            self.dock_page = 0;
             let _ = self.scene.set_focus(None);
         }
         self.window_ids
@@ -574,10 +607,7 @@ impl Application for Overview {
         // Minimized icons resolve through the catalog; warm it up before any
         // query when the desktop already reports minimized windows. This is
         // event-driven here, never on the frame path.
-        if matches!(self.apps, Apps::Unloaded)
-            && snapshot.overview_visible
-            && snapshot.windows.iter().any(|w| w.minimized)
-        {
+        if matches!(self.apps, Apps::Unloaded) && snapshot.overview_visible {
             self.ensure_catalog();
         }
         self.dirty = true;

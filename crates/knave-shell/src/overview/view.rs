@@ -45,6 +45,19 @@ fn short(value: &str, limit: usize) -> String {
 const BAR_ELEMENT_ID_BASE: u64 = 0x800_0000_0000;
 /// Derived per-tray-icon element id for a window's allocated control id.
 const TRAY_ICON_ELEMENT_BASE: u64 = 0x500_0000_0000;
+pub(super) const DOCK_ELEMENT_ID_BASE: u64 = 0x600_0000_0000;
+const SEARCH_TEXT_ELEMENT_ID_BASE: u64 = 0x700_0000_0000;
+
+struct DockItem {
+    name: String,
+    icon: String,
+    catalog_index: Option<usize>,
+    windows: Vec<WindowSummary>,
+}
+
+fn desktop_id_key(id: &str) -> String {
+    id.strip_suffix(".desktop").unwrap_or(id).to_lowercase()
+}
 
 /// Icon theme name for a window's `app_id`, resolved from the loaded catalog.
 /// Wayland app ids may be the desktop file id with or without its suffix, or
@@ -65,6 +78,22 @@ fn catalog_icon(catalog: &Catalog, app_id: &str) -> Option<String> {
     }
     named
 }
+
+fn catalog_index(catalog: &Catalog, app_id: &str) -> Option<usize> {
+    let key = desktop_id_key(app_id);
+    let mut named = None;
+    for index in 0..catalog.len() {
+        let app = catalog.get(index)?;
+        if desktop_id_key(&app.id) == key {
+            return Some(index);
+        }
+        if named.is_none() && app.name.eq_ignore_ascii_case(app_id) {
+            named = Some(index);
+        }
+    }
+    named
+}
+
 impl Overview {
     pub(super) fn compose(&mut self) -> Element {
         self.targets.clear();
@@ -142,7 +171,7 @@ impl Overview {
                 .position(|w| w.workspace == ws)
                 .unwrap_or(0);
             let top = search_rect.y + search_rect.height + 28.0f32.min(height * 0.04);
-            let bottom_room = 64.0f32.min(height * 0.12);
+            let bottom_room = 104.0f32.min(height * 0.2);
             let available_h = (height - top - bottom_room).max(40.0);
             let preview_width = ((width * 0.82).min(available_h * 16.0 / 9.0)).max(1.0);
             let preview_height = (preview_width * 9.0 / 16.0).min(available_h);
@@ -229,6 +258,7 @@ impl Overview {
             );
             root.children.push(self.search_results(results_rect));
         }
+        root.children.push(self.dock(width, height));
         let footer = if self.pending {
             Some("Opening…".to_owned())
         } else {
@@ -257,6 +287,212 @@ impl Overview {
         // Drawn last so the status bar strip stays on top of overview content.
         root.children.push(self.status_bar(width));
         knave_shell_ui::styles::root(root.class("shell-overlay"), self.theme)
+    }
+
+    fn dock(&mut self, width: f32, height: f32) -> Element {
+        let Some(workspace) = self.workspace else {
+            return panel(DOCK_ELEMENT_ID_BASE, Rect::new(0.0, height, 0.0, 0.0));
+        };
+        let mut items = Vec::<DockItem>::new();
+        let mut indexes = HashMap::<String, usize>::new();
+        if let Apps::Ready(catalog) = &self.apps {
+            for pinned in &self.pinned_apps {
+                let Some(index) = catalog_index(catalog, pinned) else {
+                    continue;
+                };
+                let app = catalog
+                    .get(index)
+                    .expect("catalog index came from this catalog");
+                let key = desktop_id_key(&app.id);
+                if indexes.contains_key(&key) {
+                    continue;
+                }
+                indexes.insert(key.clone(), items.len());
+                items.push(DockItem {
+                    name: app.name.clone(),
+                    icon: app.icon.clone().unwrap_or_else(|| icons::FALLBACK.into()),
+                    catalog_index: Some(index),
+                    windows: Vec::new(),
+                });
+            }
+        }
+        if let Some(snapshot) = &self.snapshot {
+            for window in snapshot.windows.iter().filter(|w| w.workspace == workspace) {
+                let matched = match &self.apps {
+                    Apps::Ready(catalog) => catalog_index(catalog, &window.app_id),
+                    Apps::Unloaded | Apps::Loading | Apps::Unavailable => None,
+                };
+                let key = matched
+                    .and_then(|index| match &self.apps {
+                        Apps::Ready(catalog) => {
+                            catalog.get(index).map(|app| desktop_id_key(&app.id))
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| desktop_id_key(&window.app_id));
+                let item_index = if let Some(&item_index) = indexes.get(&key) {
+                    item_index
+                } else {
+                    let (name, icon) = match (&self.apps, matched) {
+                        (Apps::Ready(catalog), Some(index)) => catalog
+                            .get(index)
+                            .map(|app| {
+                                (
+                                    app.name.clone(),
+                                    app.icon.clone().unwrap_or_else(|| icons::FALLBACK.into()),
+                                )
+                            })
+                            .unwrap_or_else(|| (window.app_id.clone(), icons::FALLBACK.into())),
+                        _ => (window.app_id.clone(), icons::FALLBACK.into()),
+                    };
+                    let item_index = items.len();
+                    indexes.insert(key.clone(), item_index);
+                    items.push(DockItem {
+                        name,
+                        icon,
+                        catalog_index: matched,
+                        windows: Vec::new(),
+                    });
+                    item_index
+                };
+                items[item_index].windows.push(window.clone());
+            }
+        }
+
+        if items.is_empty() {
+            return panel(DOCK_ELEMENT_ID_BASE, Rect::new(0.0, height, 0.0, 0.0));
+        }
+        let icon_size = 42.0f32.min((height - STATUS_BAR_HEIGHT - 24.0).max(20.0));
+        let item_width = 58.0;
+        let gap = 4.0;
+        let max_width = (width - 24.0).max(item_width);
+        let plain_capacity =
+            (((max_width - 20.0 + gap) / (item_width + gap)).floor() as usize).max(1);
+        let paged = items.len() > plain_capacity;
+        let side_controls = if paged { 58.0 } else { 0.0 };
+        let capacity = (((max_width - 20.0 - side_controls + gap) / (item_width + gap)).floor()
+            as usize)
+            .max(1)
+            .min(items.len());
+        let pages = items.len().saturating_sub(1) / capacity + 1;
+        self.dock_page = self.dock_page.min(pages.saturating_sub(1));
+        let first = self.dock_page * capacity;
+        let shown = items.len().saturating_sub(first).min(capacity);
+        let dock_width = (20.0
+            + side_controls
+            + shown as f32 * item_width
+            + shown.saturating_sub(1) as f32 * gap)
+            .min(width.max(1.0));
+        let dock_height = 68.0;
+        let x = ((width - dock_width) / 2.0).max(0.0);
+        let y = (height - dock_height - 12.0).max(STATUS_BAR_HEIGHT);
+        let mut dock = panel(
+            DOCK_ELEMENT_ID_BASE,
+            Rect::new(x, y, dock_width, dock_height),
+        );
+        dock.classes.push("overview-dock".into());
+        dock.layout.clip = ClipMode::Bounds;
+        let item_offset = if paged { 39.0 } else { 10.0 };
+        if paged {
+            for (slot, next) in [(0, false), (1, true)] {
+                let id = ElementId(DOCK_ELEMENT_ID_BASE + 0x4000 + slot as u64);
+                let mut button = control(
+                    id.0,
+                    if next { "›" } else { "‹" },
+                    Rect::new(if next { dock_width - 31.0 } else { 3.0 }, 20.0, 28.0, 28.0),
+                );
+                button.enabled = if next {
+                    first + capacity < items.len()
+                } else {
+                    self.dock_page > 0
+                };
+                self.targets.insert(id, Target::DockPage(next));
+                dock.children.push(button);
+            }
+        }
+        for (slot, item) in items.iter().skip(first).take(shown).enumerate() {
+            if self.icons.needs_request(&item.icon)
+                && self.loader().submit(loader::Job::Icon(item.icon.clone()))
+            {
+                self.icons.requested(&item.icon);
+            }
+            let id = ElementId(DOCK_ELEMENT_ID_BASE + 1 + slot as u64);
+            let target = item
+                .windows
+                .iter()
+                .find(|window| window.focused && !window.minimized)
+                .or_else(|| item.windows.iter().find(|window| !window.minimized))
+                .or_else(|| item.windows.first())
+                .map(|window| Target::DockWindow(window.id))
+                .or_else(|| item.catalog_index.map(Target::App));
+            let mut button = placed(
+                Element::new(id.0, Widget::Button(String::new())),
+                Rect::new(
+                    item_offset + slot as f32 * (item_width + gap),
+                    4.0,
+                    item_width,
+                    58.0,
+                ),
+            );
+            button.classes.push("overview-dock-app".into());
+            button.enabled = target.is_some() && !self.pending;
+            button.tooltip = Some(if item.windows.len() > 1 {
+                format!(
+                    "{} · {} windows",
+                    short(&item.name, 100),
+                    item.windows.len()
+                )
+            } else {
+                short(&item.name, 120)
+            });
+            if let Some(target) = target {
+                self.targets.insert(id, target);
+            }
+            if let Some(image) = self.icons.get(&item.icon).cloned() {
+                button.children.push(placed(
+                    Element::new(
+                        DOCK_ELEMENT_ID_BASE + 0x1000 + slot as u64,
+                        Widget::Image(
+                            image,
+                            ImageStyle {
+                                fit: ImageFit::Contain,
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                    Rect::new((item_width - icon_size) / 2.0, 2.0, icon_size, icon_size),
+                ));
+            } else {
+                let mut fallback = text(
+                    DOCK_ELEMENT_ID_BASE + 0x1000 + slot as u64,
+                    "▣",
+                    Rect::new(0.0, 2.0, item_width, icon_size),
+                    icon_size * 0.7,
+                    "overview-muted",
+                );
+                fallback.style.text.align = TextAlign::Center;
+                button.children.push(fallback);
+            }
+            if !item.windows.is_empty() {
+                let mut indicator = panel(
+                    DOCK_ELEMENT_ID_BASE + 0x2000 + slot as u64,
+                    Rect::new((item_width - 14.0) / 2.0, 54.0, 14.0, 3.0),
+                );
+                indicator.classes.push("overview-dock-running".into());
+                button.children.push(indicator);
+            }
+            if item.windows.len() > 1 {
+                button.children.push(text(
+                    DOCK_ELEMENT_ID_BASE + 0x3000 + slot as u64,
+                    item.windows.len().to_string(),
+                    Rect::new(item_width - 17.0, 1.0, 14.0, 14.0),
+                    9.0,
+                    "overview-dock-count",
+                ));
+            }
+            dock.children.push(button);
+        }
+        dock
     }
     // Retained controls route the shared component's hit targets; all pixels
     // come directly from its display list in frame().
@@ -537,7 +773,7 @@ impl Overview {
                 );
                 result.children.push(icon);
             }
-            let name_id = 0x600_0000_0000 + index as u64 * 2;
+            let name_id = SEARCH_TEXT_ELEMENT_ID_BASE + index as u64 * 2;
             let description_id = name_id + 1;
             let mut name_text = placed(
                 Element::new(name_id, Widget::Text(name)),
