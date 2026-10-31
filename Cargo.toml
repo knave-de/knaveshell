@@ -23,11 +23,12 @@ knave-ui = { git = "https://github.com/knave-de/knave-ui.git", rev = "e6db89f959
 base64 = "0.22"
 png = "0.18"
 wgpu = "30.0.1"
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "45f0a735a9ba1d3afb09650c7a5b13cf75f8b252" }
+knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "36c321360b9891b9d0dfafac8fdbb580bc220c8c" }
 # Consumes the typed wallpaper and notification projections. Bump together
 # with the knave-desktop-api revision.
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "45f0a735a9ba1d3afb09650c7a5b13cf75f8b252" }
+knave-config = { git = "https://github.com/knave-de/knave.git", rev = "36c321360b9891b9d0dfafac8fdbb580bc220c8c" }
 pollster = "1.0.1"
 thiserror = "2.0.21"
 smithay-client-toolkit = { version = "0.21.1", default-features = false, features = ["calloop", "xkbcommon"] }
+xkbcommon = "0.8"
 wayland-client = { version = "0.31.15", features = ["system"] }

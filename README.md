@@ -128,6 +128,10 @@ for coordinated library/consumer changes.
 
 ### Native portal controls
 
+`knave-shell shortcut-assignment` is launched by the global-shortcuts portal
+when an application requests `ConfigureShortcuts`. It captures a modified XKB key
+and returns the selected action and XDG trigger to the portal backend.
+
 `knave-shell portal-picker` uses the existing retained UI toolkit and wgpu renderer
 for source previews, explicit consent, cancellation and Stop sharing. The backend
 launches it with the bounded JSON contract in `knave-portal-api`; it is

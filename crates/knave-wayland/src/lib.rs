@@ -2074,6 +2074,13 @@ impl Runtime {
             repeat,
             modifiers: self.modifiers,
         });
+        if let Some(app) = &mut self.app
+            && app.wants_raw_keys()
+        {
+            let keysym =
+                xkbcommon::xkb::keysym_get_name(xkbcommon::xkb::Keysym::new(event.keysym.raw()));
+            app.raw_key(&keysym, pressed, repeat, self.modifiers);
+        }
         if pressed
             && !self.modifiers.control
             && !self.modifiers.alt
