@@ -2,6 +2,7 @@
 pub mod overview;
 
 pub mod portal;
+pub mod shortcut_assignment;
 
 pub mod wallpaper;
 

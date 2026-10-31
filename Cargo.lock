@@ -904,7 +904,7 @@ dependencies = [
 [[package]]
 name = "knave-config"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=7d1a145242ec94c0ad7cb01548698a7651d99a04#7d1a145242ec94c0ad7cb01548698a7651d99a04"
+source = "git+https://github.com/knave-de/knave.git?rev=c98a74381f0c9a02467170fe510aacdf523ecf89#c98a74381f0c9a02467170fe510aacdf523ecf89"
 dependencies = [
  "regex",
  "serde",
@@ -916,7 +916,7 @@ dependencies = [
 [[package]]
 name = "knave-desktop-api"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=45f0a735a9ba1d3afb09650c7a5b13cf75f8b252#45f0a735a9ba1d3afb09650c7a5b13cf75f8b252"
+source = "git+https://github.com/knave-de/knave.git?rev=c98a74381f0c9a02467170fe510aacdf523ecf89#c98a74381f0c9a02467170fe510aacdf523ecf89"
 dependencies = [
  "base64",
  "serde",
@@ -936,7 +936,7 @@ dependencies = [
 [[package]]
 name = "knave-portal-api"
 version = "0.1.0"
-source = "git+https://github.com/knave-de/knave.git?rev=a60c16b7e7270dce4740ff700820114b963e31e5#a60c16b7e7270dce4740ff700820114b963e31e5"
+source = "git+https://github.com/knave-de/knave.git?rev=c98a74381f0c9a02467170fe510aacdf523ecf89#c98a74381f0c9a02467170fe510aacdf523ecf89"
 dependencies = [
  "serde",
  "serde_json",
@@ -1026,6 +1026,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wgpu",
+ "xkbcommon",
  "zbus",
 ]
 

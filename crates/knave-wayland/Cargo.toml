@@ -17,6 +17,7 @@ base64.workspace = true
 png.workspace = true
 pollster.workspace = true
 smithay-client-toolkit.workspace = true
+xkbcommon.workspace = true
 thiserror.workspace = true
 wayland-client.workspace = true
 wgpu.workspace = true

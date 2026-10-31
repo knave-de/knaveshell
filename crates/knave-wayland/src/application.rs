@@ -179,6 +179,21 @@ pub trait Application {
     }
     fn host_error(&mut self, _message: &str) {}
 
+    /// Opt into full XKB symbols for key capture.
+    fn wants_raw_keys(&self) -> bool {
+        false
+    }
+
+    /// Receive the full XKB symbol for shortcut capture surfaces.
+    fn raw_key(
+        &mut self,
+        _keysym: &str,
+        _pressed: bool,
+        _repeat: bool,
+        _modifiers: knave_ui::toolkit::KeyModifiers,
+    ) {
+    }
+
     fn input(&mut self, event: Input);
     fn needs_frame(&self) -> bool;
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList;
