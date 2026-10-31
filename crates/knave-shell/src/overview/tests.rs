@@ -1,3 +1,4 @@
+use super::view::DOCK_ELEMENT_ID_BASE;
 use super::*;
 use knave_desktop_api::{WindowSummary, WorkspaceSummary};
 use knave_shell_ui::UiNode;
@@ -147,6 +148,39 @@ fn app() -> Overview {
         .with_catalog(catalog())
         .with_icon_lookup(icon_lookup(true));
     app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    app
+}
+fn dock_app() -> Overview {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(true))
+        .with_pinned_apps(vec!["tool01.desktop".into(), "editor.desktop".into()]);
+    let mut desktop = snapshot();
+    desktop.windows.retain(|window| window.id.0 != 14);
+    desktop.windows.push(WindowSummary {
+        id: WindowId(14),
+        title: "Other workspace".into(),
+        app_id: "Other Workspace App".into(),
+        workspace: WorkspaceId(3),
+        focused: false,
+        minimized: false,
+        floating: false,
+        fullscreen: false,
+        maximized: false,
+    });
+    desktop.windows.push(WindowSummary {
+        id: WindowId(15),
+        title: "Minimized tool".into(),
+        app_id: "Tool 03".into(),
+        workspace: WorkspaceId(2),
+        focused: false,
+        minimized: true,
+        floating: false,
+        fullscreen: false,
+        maximized: false,
+    });
+    app.desktop_snapshot(&desktop);
     app.frame([1200.0, 800.0], &mut Metrics);
     app
 }
@@ -721,6 +755,64 @@ fn clicking_a_result_launches_it_and_failure_keeps_overview_open() {
     assert!(!app.should_close());
     assert_eq!(app.error.as_deref(), Some("No such file"));
 }
+
+#[test]
+fn dock_keeps_pins_in_order_and_adds_only_unpinned_apps_from_the_active_workspace() {
+    let app = dock_app();
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 1))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 2))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 3))
+            .is_some()
+    );
+    assert!(
+        app.scene
+            .bounds(ElementId(DOCK_ELEMENT_ID_BASE + 4))
+            .is_none()
+    );
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 1)),
+        Some(Target::App(index))
+            if matches!(&app.apps, Apps::Ready(catalog) if catalog.get(*index).is_some_and(|app| app.id == "tool01.desktop"))
+    ));
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 2)),
+        Some(Target::DockWindow(WindowId(1)))
+    ));
+    assert!(matches!(
+        app.targets.get(&ElementId(DOCK_ELEMENT_ID_BASE + 3)),
+        Some(Target::DockWindow(WindowId(15)))
+    ));
+}
+
+#[test]
+fn dock_launches_idle_pins() {
+    let mut app = dock_app();
+    click(&mut app, ElementId(DOCK_ELEMENT_ID_BASE + 1));
+    assert_eq!(spawned(&mut app), Some(vec!["tool01".into()]));
+}
+
+#[test]
+fn dock_restores_running_minimized_apps() {
+    let mut app = dock_app();
+    click(&mut app, ElementId(DOCK_ELEMENT_ID_BASE + 3));
+    assert!(matches!(
+        app.take_request(),
+        Some(HostRequest::Desktop(DesktopCommand::RestoreWindow {
+            window: WindowId(15)
+        }))
+    ));
+}
+
 #[test]
 fn results_are_applications_only_and_paginate() {
     {
@@ -755,6 +847,25 @@ fn results_are_applications_only_and_paginate() {
             .is_some()
     );
 }
+
+#[test]
+fn search_results_leave_room_for_the_overview_dock() {
+    let mut compact = app();
+    type_query(&mut compact, "tool");
+    compact.frame([1200.0, 700.0], &mut Metrics);
+
+    let result_panel = compact.scene.bounds(ElementId(40)).unwrap();
+    let dock = compact
+        .scene
+        .bounds(ElementId(DOCK_ELEMENT_ID_BASE))
+        .unwrap();
+    assert!(
+        result_panel.y + result_panel.height <= dock.y,
+        "search results end at {}, overlapping dock starting at {}",
+        result_panel.y + result_panel.height,
+        dock.y
+    );
+}
 #[test]
 fn disconnected_overview_clears_search_without_launching() {
     let mut app = app();
@@ -786,6 +897,22 @@ fn queries_without_matches_render_and_a_missing_catalog_is_reported() {
     type_query(&mut broken, "edit");
     assert!(broken.search().is_empty());
     assert!(broken.error.is_none());
+}
+
+#[test]
+fn enabling_all_apps_clears_an_existing_query() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(false));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    type_query(&mut app, "edit");
+    assert_eq!(app.search().len(), 1);
+
+    click(&mut app, ElementId(4));
+    assert!(app.all_apps);
+    assert!(app.query.text().is_empty());
+    assert_eq!(app.search().len(), 13);
 }
 #[test]
 fn enter_right_after_typing_launches_without_waiting_for_a_frame() {
