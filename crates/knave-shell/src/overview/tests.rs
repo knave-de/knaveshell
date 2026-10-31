@@ -787,6 +787,22 @@ fn queries_without_matches_render_and_a_missing_catalog_is_reported() {
     assert!(broken.search().is_empty());
     assert!(broken.error.is_none());
 }
+
+#[test]
+fn enabling_all_apps_clears_an_existing_query() {
+    let mut app = Overview::new()
+        .with_catalog(catalog())
+        .with_icon_lookup(icon_lookup(false));
+    app.desktop_snapshot(&snapshot());
+    app.frame([1200.0, 800.0], &mut Metrics);
+    type_query(&mut app, "edit");
+    assert_eq!(app.search().len(), 1);
+
+    click(&mut app, ElementId(4));
+    assert!(app.all_apps);
+    assert!(app.query.text().is_empty());
+    assert_eq!(app.search().len(), 13);
+}
 #[test]
 fn enter_right_after_typing_launches_without_waiting_for_a_frame() {
     let mut app = app();
