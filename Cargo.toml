@@ -27,9 +27,6 @@ knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "c98a
 # Consumes the typed wallpaper and notification projections. Bump together
 # with the knave-desktop-api revision.
 knave-config = { git = "https://github.com/knave-de/knave.git", rev = "c98a74381f0c9a02467170fe510aacdf523ecf89" }
-knave-desktop-api = { git = "https://github.com/knave-de/knave.git", rev = "45f0a735a9ba1d3afb09650c7a5b13cf75f8b252" }
-# Config schema required by this shell version, including `shell.pinned_apps`.
-knave-config = { git = "https://github.com/knave-de/knave.git", rev = "7d1a145242ec94c0ad7cb01548698a7651d99a04" }
 pollster = "1.0.1"
 thiserror = "2.0.21"
 smithay-client-toolkit = { version = "0.21.1", default-features = false, features = ["calloop", "xkbcommon"] }
