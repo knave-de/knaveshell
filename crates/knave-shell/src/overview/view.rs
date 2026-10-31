@@ -46,6 +46,7 @@ const BAR_ELEMENT_ID_BASE: u64 = 0x800_0000_0000;
 /// Derived per-tray-icon element id for a window's allocated control id.
 const TRAY_ICON_ELEMENT_BASE: u64 = 0x500_0000_0000;
 pub(super) const DOCK_ELEMENT_ID_BASE: u64 = 0x600_0000_0000;
+const SEARCH_TEXT_ELEMENT_ID_BASE: u64 = 0x700_0000_0000;
 
 struct DockItem {
     name: String,
@@ -772,7 +773,7 @@ impl Overview {
                 );
                 result.children.push(icon);
             }
-            let name_id = 0x600_0000_0000 + index as u64 * 2;
+            let name_id = SEARCH_TEXT_ELEMENT_ID_BASE + index as u64 * 2;
             let description_id = name_id + 1;
             let mut name_text = placed(
                 Element::new(name_id, Widget::Text(name)),
