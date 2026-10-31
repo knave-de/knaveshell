@@ -389,6 +389,9 @@ impl Overview {
             - STATUS_BAR_HEIGHT
             - 28.0f32.min(self.size[1] * 0.04)
             - 54.0f32.min(self.size[1] * 0.15)
+            // Keep the result panel's gap and header above the bottom dock.
+            - 12.0
+            - 66.0
             - 80.0)
             / 60.0)
             .floor() as usize)

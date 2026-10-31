@@ -847,6 +847,25 @@ fn results_are_applications_only_and_paginate() {
             .is_some()
     );
 }
+
+#[test]
+fn search_results_leave_room_for_the_overview_dock() {
+    let mut compact = app();
+    type_query(&mut compact, "tool");
+    compact.frame([1200.0, 700.0], &mut Metrics);
+
+    let result_panel = compact.scene.bounds(ElementId(40)).unwrap();
+    let dock = compact
+        .scene
+        .bounds(ElementId(DOCK_ELEMENT_ID_BASE))
+        .unwrap();
+    assert!(
+        result_panel.y + result_panel.height <= dock.y,
+        "search results end at {}, overlapping dock starting at {}",
+        result_panel.y + result_panel.height,
+        dock.y
+    );
+}
 #[test]
 fn disconnected_overview_clears_search_without_launching() {
     let mut app = app();
