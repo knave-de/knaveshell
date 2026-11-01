@@ -1,6 +1,6 @@
 //! User consent UI for applications requesting background activity.
 use knave_portal_api::{BackgroundChoice, BackgroundReply, BackgroundRequest, MAX_REQUEST};
-use knave_ui::{DisplayList, toolkit::*};
+use knave_ui::{DisplayList, TextWrap, toolkit::*};
 use knave_wayland::{Application, KeyboardMode, SurfaceLayer, SurfaceOptions, SurfacePosition};
 use std::io::{self, Read};
 
@@ -10,6 +10,7 @@ const ALLOW_ONCE: ElementId = ElementId(22);
 
 struct Prompt {
     request: BackgroundRequest,
+    theme: Theme,
     scene: Scene,
     reply: Option<BackgroundReply>,
     dirty: bool,
@@ -17,12 +18,17 @@ struct Prompt {
 }
 
 impl Prompt {
-    fn new(request: BackgroundRequest) -> Result<Self, String> {
+    fn new(request: BackgroundRequest, theme: Theme) -> Result<Self, String> {
         request.validate()?;
-        let mut scene = Scene::new(Self::compose(&request)).map_err(|error| error.to_string())?;
+        let mut scene = Scene::new(knave_shell_ui::styles::root(Self::compose(&request), theme))
+            .map_err(|error| error.to_string())?;
+        scene
+            .set_theme_stylesheets(theme, knave_shell_ui::styles::STYLESHEET, "")
+            .map_err(|error| error.to_string())?;
         let _ = scene.set_focus(Some(DENY));
         Ok(Self {
             request,
+            theme,
             scene,
             reply: None,
             dirty: true,
@@ -43,22 +49,26 @@ impl Prompt {
             }),
         );
         root.children.push(
-            Element::new(
-                2,
-                Widget::Text(format!("{} ({})", request.name, request.app_id)),
-            )
-            .layout(Layout {
-                height: Length::Px(30.0),
+            Element::new(2, Widget::Text(request.app_id.clone())).layout(Layout {
+                height: Length::Px(24.0),
+                ..Default::default()
+            }),
+        );
+        root.children.push(
+            Element::new(5, Widget::Text(request.name.clone())).layout(Layout {
+                height: Length::Px(24.0),
                 ..Default::default()
             }),
         );
         if !request.reason.is_empty() {
-            root.children.push(
-                Element::new(3, Widget::Text(request.reason.clone())).layout(Layout {
-                    height: Length::Fill,
-                    ..Default::default()
-                }),
-            );
+            let mut reason = Element::new(3, Widget::Scroll).layout(Layout {
+                height: Length::Fill,
+                ..Default::default()
+            });
+            let mut text = Element::new(31, Widget::Text(request.reason.clone()));
+            text.style.text.wrap = TextWrap::WordOrGlyph;
+            reason.children.push(text);
+            root.children.push(reason);
         }
         let mut actions = Element::new(4, Widget::Panel)
             .class("shell-structure")
@@ -127,7 +137,16 @@ impl Application for Prompt {
 
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
-            if let Ok(mut scene) = Scene::new(Self::compose(&self.request)) {
+            if let Ok(mut scene) = Scene::new(knave_shell_ui::styles::root(
+                Self::compose(&self.request),
+                self.theme,
+            )) {
+                if scene
+                    .set_theme_stylesheets(self.theme, knave_shell_ui::styles::STYLESHEET, "")
+                    .is_err()
+                {
+                    return self.scene.display_list(size, text);
+                }
                 scene.layout(size, text);
                 let _ = scene.set_focus(Some(DENY));
                 self.scene = scene;
@@ -163,7 +182,7 @@ pub fn run_with_theme(theme: Theme) -> Result<(), String> {
             layer: SurfaceLayer::Overlay,
             namespace: "knave-background-permission".into(),
         },
-        Prompt::new(request)?,
+        Prompt::new(request, theme)?,
         theme,
     )
     .map_err(|error| error.to_string())
