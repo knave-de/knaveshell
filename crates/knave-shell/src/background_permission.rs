@@ -18,6 +18,7 @@ struct Prompt {
 }
 
 impl Prompt {
+    /// Validate a background request and prepare its themed prompt scene.
     fn new(request: BackgroundRequest, theme: Theme) -> Result<Self, String> {
         request.validate()?;
         let mut scene = Scene::new(knave_shell_ui::styles::root(Self::compose(&request), theme))
@@ -36,6 +37,7 @@ impl Prompt {
         })
     }
 
+    /// Lay out the identity, reason, and fixed action controls for the request.
     fn compose(request: &BackgroundRequest) -> Element {
         let mut root = Element::new(0, Widget::Panel).layout(Layout {
             padding: 24.0,
@@ -92,6 +94,7 @@ impl Prompt {
         root
     }
 
+    /// Emit one reply for the active request and close the prompt.
     fn finish(&mut self, choice: BackgroundChoice) {
         if self.reply.is_some() {
             return;
@@ -135,6 +138,7 @@ impl Application for Prompt {
         self.dirty || self.scene.needs_frame()
     }
 
+    /// Render the prompt at its current size, rebuilding the themed scene as needed.
     fn frame(&mut self, size: [f32; 2], text: &mut dyn TextMeasurer) -> &DisplayList {
         if self.dirty || self.size != size {
             if let Ok(mut scene) = Scene::new(knave_shell_ui::styles::root(
@@ -162,6 +166,7 @@ impl Application for Prompt {
     }
 }
 
+/// Read one bounded background request and show its themed consent prompt.
 pub fn run_with_theme(theme: Theme) -> Result<(), String> {
     let mut bytes = Vec::new();
     io::stdin()
