@@ -312,6 +312,8 @@ impl Notifications {
             footer.children.push(next);
             panel.children.push(footer);
         } else {
+            panel = panel.without_surface().class("notifications-structure");
+            panel.style.background = Some(ShapePaint::fill(Color::rgba(0, 0, 0, 0)));
             panel.layout.padding = 0.0;
             panel.layout.height = Length::Px((height - top - gap).max(0.0));
             let notifications: Vec<_> = self
