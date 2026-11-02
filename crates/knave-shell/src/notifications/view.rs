@@ -484,7 +484,13 @@ impl Notifications {
             );
         }
         if n.live {
-            for (index, action) in n.actions.iter().take(MAX_ACTIONS).enumerate() {
+            for (index, action) in n
+                .actions
+                .iter()
+                .filter(|action| action.key != "default")
+                .take(MAX_ACTIONS)
+                .enumerate()
+            {
                 let mut button = p.button(id + 12 + index as u64, &short(&action.label, 100));
                 button.tooltip = Some(action.label.clone());
                 self.targets
